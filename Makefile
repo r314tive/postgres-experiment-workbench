@@ -8,6 +8,7 @@ PROFILE_SECONDS ?= 30
 WORKLOAD_SQL ?= 10_run.sql
 WORKLOAD ?= wait-xacts
 WORKLOAD_SPEC ?= workloads/sql/smoke-run.env
+SCAN_PATHS ?= logs generated
 METRICS_INTERVAL ?= 1
 METRICS_DURATION ?= 30
 METRICS_SAMPLES ?=
@@ -29,6 +30,7 @@ help:
 	@printf '  %-24s %s\n' 'make profile-reset' 'Run setup and run SQL for PROFILE'
 	@printf '  %-24s %s\n' 'make monitor' 'Show basic PostgreSQL activity/statistics'
 	@printf '  %-24s %s\n' 'make metrics-sample' 'Sample generic PostgreSQL metrics to CSV'
+	@printf '  %-24s %s\n' 'make scan-artifacts' 'Scan logs/artifacts for PG failure evidence'
 	@printf '  %-24s %s\n' 'make workload-list' 'List workload specs'
 	@printf '  %-24s %s\n' 'make workload-show' 'Show WORKLOAD_SPEC'
 	@printf '  %-24s %s\n' 'make workload-run' 'Run WORKLOAD_SPEC'
@@ -92,15 +94,19 @@ workload-show:
 	./scripts/run_workload.sh show "$(WORKLOAD_SPEC)"
 
 .PHONY: workload-run
-workload-run: docker-up
+workload-run:
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" ./scripts/run_workload.sh run "$(WORKLOAD_SPEC)"
+
+.PHONY: scan-artifacts
+scan-artifacts:
+	./scripts/scan_pg_failures.sh $(SCAN_PATHS)
 
 .PHONY: workload-start
 workload-start: docker-up
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" ./scripts/workload_bg.sh start-profile "$(PROFILE)" "$(WORKLOAD_SQL)"
 
 .PHONY: workload-start-spec
-workload-start-spec: docker-up
+workload-start-spec:
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" ./scripts/workload_bg.sh start-spec "$(WORKLOAD_SPEC)"
 
 .PHONY: workload-start-sql
@@ -150,3 +156,4 @@ test: docker-up
 	./tests/smoke.sh
 	./tests/profiles.sh
 	./tests/workloads.sh
+	./tests/scan_failures.sh

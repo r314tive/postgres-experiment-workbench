@@ -8,6 +8,7 @@ This project should stay a generic PostgreSQL experiment platform.
 - Expand profile-specific diagnostic SQL where it helps interpretation.
 - Add optional profile metadata if conventions need machine-readable fields.
 - Add comparison helpers for before/after metrics CSVs.
+- Add CI presets for source-tree checks without making them default.
 
 ## Candidate Profiles
 
@@ -16,6 +17,7 @@ This project should stay a generic PostgreSQL experiment platform.
 - `connection-pressure`: session churn, idle sessions, pooler-shaped behavior.
 - `constraints`: constraint validation, foreign keys, deferrable checks.
 - `jsonb`: indexing and query shape for JSONB fields.
+- `pg-source-check`: maintained patchsets for testing PostgreSQL source builds.
 
 ## Boundary
 

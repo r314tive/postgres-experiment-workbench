@@ -16,6 +16,8 @@ files. Supported WORKLOAD_KIND values:
   profile-sql  Run profiles/<PROFILE>/sql/<WORKLOAD_SQL>
   sql          Run SQL=<path> through psql
   pgbench      Run pgbench inside the postgres container
+  pg-source-check
+               Clone/build/test a PostgreSQL source tree
   noisia       Run scripts/run_noisia.sh
   shell        Run WORKLOAD_CMD on the host
   compose-run  Run WORKLOAD_COMMAND inside WORKLOAD_IMAGE via docker compose
@@ -66,6 +68,22 @@ capture_env_overrides() {
     PGBENCH_SCRIPT
     PGBENCH_MODE
     PGBENCH_EXTRA_ARGS
+    PG_REPO_URL
+    PG_REF
+    PG_SOURCE_ACTION
+    PG_SOURCE_RUN_ID
+    PG_SOURCE_RUN_DIR
+    PG_SOURCE_DIR
+    PG_INSTALL_DIR
+    PG_ARTIFACT_DIR
+    PG_PATCH_DIR
+    PG_CHECK_TARGET
+    PG_MAKE_JOBS
+    PG_CLONE_DEPTH
+    PG_CONFIGURE_ARGS
+    PG_BUILD_CFLAGS
+    PG_TEST_INITDB_EXTRA_OPTS
+    PG_SOURCE_KEEP_GOING
     NOISIA_IMAGE
     NOISIA_PLATFORM
     NOISIA_DURATION
@@ -101,7 +119,7 @@ restore_spec_overrides() {
   for ((i = 0; i < ${#PRESERVED_ENV_NAMES[@]}; i++)); do
     name="${PRESERVED_ENV_NAMES[$i]}"
     case "$name" in
-      PROFILE_SIZE|PROFILE_SECONDS|SQL|WORKLOAD_IMAGE|WORKLOAD_COMMAND|WORKLOAD_CMD|WORKLOAD_RUN_LOG|WORKLOAD_LOG_DIR|WORKLOAD_LOG_FILE|PGBENCH_*|NOISIA_DURATION|NOISIA_JOBS|NOISIA_EXTRA_ARGS|NOISIA_WAIT_LOCKTIME_MIN|NOISIA_WAIT_LOCKTIME_MAX|NOISIA_TEMP_FILES_RATE|NOISIA_TEMP_FILES_SCALE_FACTOR)
+      PROFILE_SIZE|PROFILE_SECONDS|SQL|WORKLOAD_IMAGE|WORKLOAD_COMMAND|WORKLOAD_CMD|WORKLOAD_RUN_LOG|WORKLOAD_LOG_DIR|WORKLOAD_LOG_FILE|PGBENCH_*|PG_*|NOISIA_DURATION|NOISIA_JOBS|NOISIA_EXTRA_ARGS|NOISIA_WAIT_LOCKTIME_MIN|NOISIA_WAIT_LOCKTIME_MAX|NOISIA_TEMP_FILES_RATE|NOISIA_TEMP_FILES_SCALE_FACTOR)
         export "$name=${PRESERVED_ENV_VALUES[$i]}"
         ;;
     esac
@@ -355,6 +373,10 @@ run_noisia() {
   "$REPO_DIR/scripts/run_noisia.sh" "$workload" "${noisia_extra_args[@]}" "$@"
 }
 
+run_pg_source_check() {
+  "$REPO_DIR/scripts/run_pg_source_check.sh" "${PG_SOURCE_ACTION:-run}"
+}
+
 run_shell() {
   if [[ -z "${WORKLOAD_CMD:-}" ]]; then
     echo "WORKLOAD_CMD is required for WORKLOAD_KIND=shell" >&2
@@ -395,6 +417,9 @@ run_loaded_workload() {
     pgbench)
       run_pgbench "$@"
       ;;
+    pg-source-check)
+      run_pg_source_check "$@"
+      ;;
     noisia)
       run_noisia "$@"
       ;;
@@ -407,6 +432,17 @@ run_loaded_workload() {
     *)
       echo "Unsupported WORKLOAD_KIND: $WORKLOAD_KIND" >&2
       exit 2
+      ;;
+  esac
+}
+
+workload_requires_postgres() {
+  case "$WORKLOAD_KIND" in
+    pg-source-check)
+      return 1
+      ;;
+    *)
+      return 0
       ;;
   esac
 }
@@ -461,14 +497,18 @@ case "$ACTION" in
     compose_command
     load_spec "${1:?workload spec is required}"
     shift
-    ensure_postgres
+    if workload_requires_postgres; then
+      ensure_postgres
+    fi
     run_with_log "$@"
     ;;
   *)
     load_repo_env
     compose_command
     load_spec "$ACTION"
-    ensure_postgres
+    if workload_requires_postgres; then
+      ensure_postgres
+    fi
     run_with_log "$@"
     ;;
 esac

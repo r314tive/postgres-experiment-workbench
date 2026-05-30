@@ -82,13 +82,14 @@ Profile authoring guidance lives in [docs/profile-authoring.md](docs/profile-aut
 ## Workloads
 
 The generic workload runner can execute SQL, profile SQL, `pgbench`, noisia,
-host shell commands, or arbitrary Docker images:
+PostgreSQL source checks, host shell commands, or arbitrary Docker images:
 
 ```bash
 make workload-list
 make workload-show WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=compose/pg-isready
+PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
 ```
 
 Workload platform details live in [docs/workload-platform.md](docs/workload-platform.md).
@@ -136,6 +137,15 @@ Metrics are written under:
 
 ```text
 logs/metrics/
+```
+
+## Failure Scanning
+
+Scan logs and generated artifacts for PostgreSQL crash/error evidence:
+
+```bash
+make scan-artifacts
+./scripts/scan_pg_failures.sh logs generated
 ```
 
 ## Logs

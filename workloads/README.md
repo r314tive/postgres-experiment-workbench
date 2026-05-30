@@ -24,6 +24,7 @@ loaded by `scripts/run_workload.sh`.
 | `profile-sql` | Run SQL from `profiles/<profile>/sql/`. |
 | `sql` | Run any repo-local SQL file through psql. |
 | `pgbench` | Run `pgbench` inside the postgres container. |
+| `pg-source-check` | Clone/build/test a PostgreSQL source tree and scan artifacts. |
 | `noisia` | Run noisia through the existing Docker Compose wrapper. |
 | `shell` | Run any host command with PG env vars and `DATABASE_URL`. |
 | `compose-run` | Run any Docker image as a one-shot workload container. |
@@ -62,3 +63,28 @@ The runner is intentionally permissive. Use it for disposable local
 experiments, external utility tests, data checks, PostgreSQL behavior tests, and
 failure injection. Keep destructive or heavyweight workflows explicit in the
 spec README or comments.
+
+## PostgreSQL Source Checks
+
+The `pg-source-check` adapter is for testing PostgreSQL itself. It does not use
+the Docker database; it clones PostgreSQL source under `generated/`, optionally
+applies a local patchset, runs a make target, collects artifacts, and scans for
+crash/error evidence.
+
+Preview without building:
+
+```bash
+PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
+```
+
+Run a short upstream source check:
+
+```bash
+make workload-run WORKLOAD_SPEC=pg-source/check
+```
+
+Run with a local patchset:
+
+```bash
+PG_PATCH_DIR=patchsets/chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
+```

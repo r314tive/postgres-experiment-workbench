@@ -22,6 +22,8 @@ The platform has five layers:
 - `sql`: any repo-local SQL file.
 - `pgbench`: standard PostgreSQL benchmark client inside the postgres
   container.
+- `pg-source-check`: clone, patch, build, test, and scan a PostgreSQL source
+  tree.
 - `noisia`: harmful PostgreSQL workload generator through the existing wrapper.
 - `shell`: any host command with PG environment variables.
 - `compose-run`: any Docker image with PG environment variables.
@@ -59,6 +61,32 @@ For failure-injection pressure:
 ```bash
 NOISIA_DURATION=120 NOISIA_JOBS=4 make workload-run WORKLOAD_SPEC=noisia/wait-xacts
 ```
+
+For testing PostgreSQL source itself:
+
+```bash
+PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
+make workload-run WORKLOAD_SPEC=pg-source/check
+PG_PATCH_DIR=patchsets/chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
+```
+
+The source-check adapter follows the same discipline as other workloads: a spec
+declares the work, logs and artifacts are stored under ignored local folders,
+and `scripts/scan_pg_failures.sh` provides the generic verdict layer.
+
+## Failure Scanning
+
+Scan local logs, PostgreSQL regression artifacts, copied test output, or source
+check output:
+
+```bash
+make scan-artifacts
+make scan-artifacts SCAN_PATHS='logs generated'
+./scripts/scan_pg_failures.sh /path/to/pg/test/output
+```
+
+The scanner looks for core files, assertion/crash patterns, regression diff
+errors, sanitizer output, and Valgrind error summaries.
 
 ## Background Workloads
 
