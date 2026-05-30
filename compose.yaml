@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${POSTGRES_CONTAINER:-postgres-experiment-workbench}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pg_experiment_workbench}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-55433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  noisia:
+    image: ${NOISIA_IMAGE:-lesovsky/noisia:latest}
+    platform: ${NOISIA_PLATFORM:-linux/amd64}
+    profiles:
+      - workload
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - noisia
+    command:
+      - --help
+
+  workload:
+    image: ${WORKLOAD_IMAGE:-postgres:16-alpine}
+    profiles:
+      - workload
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-pg_experiment_workbench}
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pg_experiment_workbench}?sslmode=disable
+    entrypoint:
+      - /bin/sh
+      - -lc
+    command:
+      - ${WORKLOAD_COMMAND:-true}
+
+volumes:
+  postgres-data:
