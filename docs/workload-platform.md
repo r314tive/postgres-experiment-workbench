@@ -78,6 +78,8 @@ For replica-aware utility checks:
 make topology-up TOPOLOGY=primary-replica
 make workload-run WORKLOAD_SPEC=topology/replica-readonly
 make workload-run WORKLOAD_SPEC=topology/replication-status
+make topology-up TOPOLOGY=logical-replication
+make workload-run WORKLOAD_SPEC=topology/logical-status
 ```
 
 For testing PostgreSQL source itself:
@@ -106,6 +108,7 @@ experiment layer:
 make experiment-run EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=locks-under-contention
 make experiment-run EXPERIMENT_SPEC=replica-readonly
+make experiment-run EXPERIMENT_SPEC=logical-replication
 make experiment-compare BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 make matrix-plan MATRIX_SPEC=smoke

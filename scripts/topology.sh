@@ -20,8 +20,9 @@ Usage:
   scripts/topology.sh wait [topology]
 
 Implemented topologies:
-  single           One PostgreSQL container.
-  primary-replica  Primary plus one physical streaming replica.
+  single               One PostgreSQL container.
+  primary-replica      Primary plus one physical streaming replica.
+  logical-replication  Publisher plus one logical subscriber.
 USAGE
 }
 
@@ -32,7 +33,7 @@ capture_env_overrides() {
   local name
   while IFS= read -r name; do
     case "$name" in
-      ENV_FILE|COMPOSE|POSTGRES_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|WORKLOAD_PG*)
+      ENV_FILE|COMPOSE|POSTGRES_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|WORKLOAD_PG*|LOGICAL_REPLICATION_*)
         PRESERVED_ENV_NAMES+=("$name")
         PRESERVED_ENV_VALUES+=("${!name}")
         ;;
@@ -103,7 +104,7 @@ resolve_topology_spec() {
 require_topology() {
   local topology="$1"
   case "$topology" in
-    single|primary-replica)
+    single|primary-replica|logical-replication)
       ;;
     *)
       echo "Unsupported topology: $topology" >&2
@@ -121,14 +122,14 @@ require_slot_name() {
 }
 
 compose_down() {
-  local include_replica="$1"
+  local _profile="$1"
   shift || true
 
-  if [[ "$include_replica" = "1" ]]; then
-    "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" --profile replica down "$@"
-  else
-    "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" down "$@"
-  fi
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" \
+    --profile replica \
+    --profile logical \
+    --profile workload \
+    down "$@"
 }
 
 up_primary() {
@@ -146,6 +147,10 @@ primary_exec() {
 
 replica_exec() {
   "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" exec -T replica "$@"
+}
+
+logical_exec() {
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" exec -T logical-subscriber "$@"
 }
 
 configure_primary_for_replica() {
@@ -192,6 +197,27 @@ wait_replica() {
   exit 1
 }
 
+up_logical_subscriber() {
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" --profile logical up -d logical-subscriber
+  wait_logical_subscriber
+}
+
+wait_logical_subscriber() {
+  for _ in {1..90}; do
+    if logical_exec pg_isready \
+      -h 127.0.0.1 \
+      -p 5432 \
+      -U "${POSTGRES_USER:-postgres}" \
+      -d "${POSTGRES_DB:-pg_experiment_workbench}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Logical subscriber is not ready" >&2
+  exit 1
+}
+
 up_topology() {
   local topology="$1"
   require_topology "$topology"
@@ -205,6 +231,10 @@ up_topology() {
       configure_primary_for_replica
       up_replica
       ;;
+    logical-replication)
+      up_primary
+      up_logical_subscriber
+      ;;
   esac
 }
 
@@ -214,12 +244,16 @@ reset_topology() {
 
   case "$topology" in
     single)
-      compose_down 0 -v
+      compose_down "" -v
       up_primary
       ;;
     primary-replica)
-      compose_down 1 -v
+      compose_down replica -v
       up_topology primary-replica
+      ;;
+    logical-replication)
+      compose_down logical -v
+      up_topology logical-replication
       ;;
   esac
 }
@@ -230,10 +264,13 @@ down_topology() {
 
   case "$topology" in
     single)
-      compose_down 0
+      compose_down ""
       ;;
     primary-replica)
-      compose_down 1
+      compose_down replica
+      ;;
+    logical-replication)
+      compose_down logical
       ;;
   esac
 }
@@ -260,6 +297,20 @@ status_topology() {
           -c "SELECT pg_is_in_recovery() AS in_recovery, pg_last_wal_receive_lsn() AS receive_lsn, pg_last_wal_replay_lsn() AS replay_lsn;"
       fi
       ;;
+    logical-replication)
+      "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" --profile logical ps postgres logical-subscriber
+      if "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" ps --status running logical-subscriber >/dev/null 2>&1; then
+        printf '\nLogical subscription status:\n'
+        logical_exec psql \
+          -h 127.0.0.1 \
+          -p 5432 \
+          -U "${POSTGRES_USER:-postgres}" \
+          -d "${POSTGRES_DB:-pg_experiment_workbench}" \
+          -x \
+          -v ON_ERROR_STOP=1 \
+          -c "SELECT subname, pid, received_lsn, latest_end_lsn, latest_end_time FROM pg_stat_subscription ORDER BY subname;"
+      fi
+      ;;
   esac
 }
 
@@ -274,6 +325,10 @@ wait_topology() {
     primary-replica)
       wait_primary
       wait_replica
+      ;;
+    logical-replication)
+      wait_primary
+      wait_logical_subscriber
       ;;
   esac
 }

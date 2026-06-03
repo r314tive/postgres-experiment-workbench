@@ -8,7 +8,7 @@ This project should stay a generic PostgreSQL experiment platform.
 - Expand profile-specific diagnostic SQL where it helps interpretation.
 - Add optional profile metadata if conventions need machine-readable fields.
 - Add CI presets for source-tree checks without making them default.
-- Add logical replication and pgbouncer topology implementations.
+- Add pgbouncer and multi-version upgrade topology implementations.
 - Add trend/history comparison across multiple local series directories.
 
 ## Candidate Profiles
@@ -18,6 +18,7 @@ This project should stay a generic PostgreSQL experiment platform.
 - `constraints`: constraint validation, foreign keys, deferrable checks.
 - `jsonb`: indexing and query shape for JSONB fields.
 - `pg-source-check`: maintained patchsets for testing PostgreSQL source builds.
+- `logical-ddl`: DDL compatibility checks around logical replication.
 
 ## Boundary
 

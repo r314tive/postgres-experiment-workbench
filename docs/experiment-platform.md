@@ -116,10 +116,13 @@ execution details in workload specs.
 
 `EXPERIMENT_TOPOLOGY=primary-replica` asks the runtime layer to start the
 primary plus physical replica before profile setup and workload execution.
+`EXPERIMENT_TOPOLOGY=logical-replication` starts a publisher plus independent
+logical subscriber.
 
 Examples:
 
 ```bash
 make experiment-run EXPERIMENT_SPEC=replica-readonly
 make experiment-run EXPERIMENT_SPEC=replication-slots
+make experiment-run EXPERIMENT_SPEC=logical-replication
 ```
