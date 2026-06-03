@@ -50,6 +50,15 @@ WORKLOAD_COMMAND='pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATAB
 make workload-run WORKLOAD_SPEC=compose/pg-isready
 ```
 
+For a third-party workload or fuzzing tool, use an opt-in template and provide
+the image and command that match your local packaging:
+
+```bash
+SQLSMITH_IMAGE=your/sqlsmith:tag \
+SQLSMITH_COMMAND='sqlsmith --target "$DATABASE_URL"' \
+make workload-run WORKLOAD_SPEC=external/sqlsmith
+```
+
 For load generation with built-in PostgreSQL tooling:
 
 ```bash
@@ -73,6 +82,26 @@ PG_PATCH_DIR=patchsets/chaos/master make workload-run WORKLOAD_SPEC=pg-source/ch
 The source-check adapter follows the same discipline as other workloads: a spec
 declares the work, logs and artifacts are stored under ignored local folders,
 and `scripts/scan_pg_failures.sh` provides the generic verdict layer.
+
+External templates live under `workloads/external/`. They do not vendor or pin
+third-party projects; they provide the execution contract, PostgreSQL connection
+environment, logging, metrics, snapshots, and experiment verdict handling around
+those projects.
+
+## Experiments
+
+Workloads can be run directly, but repeatable test scenarios should use the
+experiment layer:
+
+```bash
+make experiment-run EXPERIMENT_SPEC=smoke
+make experiment-run EXPERIMENT_SPEC=locks-under-contention
+make experiment-compare BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b
+make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
+make matrix-plan MATRIX_SPEC=smoke
+```
+
+See [experiment-platform.md](experiment-platform.md).
 
 ## Failure Scanning
 

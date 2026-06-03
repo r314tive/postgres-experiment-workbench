@@ -7,8 +7,9 @@ This project should stay a generic PostgreSQL experiment platform.
 - Keep `smoke` as the tiny platform verification profile.
 - Expand profile-specific diagnostic SQL where it helps interpretation.
 - Add optional profile metadata if conventions need machine-readable fields.
-- Add comparison helpers for before/after metrics CSVs.
 - Add CI presets for source-tree checks without making them default.
+- Expand topology implementations beyond `single`.
+- Add richer statistical reports for repeated experiment runs.
 
 ## Candidate Profiles
 

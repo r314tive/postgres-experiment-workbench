@@ -12,6 +12,8 @@ fi
 
 export PGPASSWORD="${POSTGRES_PASSWORD:-postgres}"
 
+"$REPO_DIR/scripts/guard_local_pg.sh"
+
 for _ in {1..60}; do
   if pg_isready \
     -h "${POSTGRES_HOST:-127.0.0.1}" \

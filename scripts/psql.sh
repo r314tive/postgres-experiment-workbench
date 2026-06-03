@@ -12,6 +12,8 @@ fi
 
 export PGPASSWORD="${POSTGRES_PASSWORD:-postgres}"
 
+"$REPO_DIR/scripts/guard_local_pg.sh"
+
 exec psql \
   -h "${POSTGRES_HOST:-127.0.0.1}" \
   -p "${POSTGRES_PORT:-55433}" \

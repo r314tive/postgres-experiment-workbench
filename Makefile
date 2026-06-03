@@ -5,9 +5,21 @@ ENV_FILE ?= $(if $(wildcard .env),.env,.env.example)
 PROFILE ?= smoke
 PROFILE_SIZE ?= small
 PROFILE_SECONDS ?= 30
+PG_CONFIG ?= default
 WORKLOAD_SQL ?= 10_run.sql
 WORKLOAD ?= wait-xacts
 WORKLOAD_SPEC ?= workloads/sql/smoke-run.env
+EXPERIMENT_SPEC ?= smoke
+EXPERIMENT_REPEAT_COUNT ?= 3
+EXPERIMENT_REPEAT_ID ?=
+MATRIX_SPEC ?= smoke
+DATASET_SPEC ?= synthetic/items
+DATASET_SIZE ?= small
+DATASET_SEED ?= 1
+DATASET_SCHEMA ?= dataset_synthetic
+BASELINE_RUN ?=
+CANDIDATE_RUN ?=
+RUN_DIR ?=
 SCAN_PATHS ?= logs generated
 METRICS_INTERVAL ?= 1
 METRICS_DURATION ?= 30
@@ -25,12 +37,27 @@ help:
 	@printf '  %-24s %s\n' 'make docker-down' 'Stop PostgreSQL workbench, keep volume'
 	@printf '  %-24s %s\n' 'make docker-reset' 'Recreate PostgreSQL volume'
 	@printf '  %-24s %s\n' 'make psql' 'Open psql'
+	@printf '  %-24s %s\n' 'make pg-config-apply' 'Apply PG_CONFIG to disposable PostgreSQL'
+	@printf '  %-24s %s\n' 'make snapshot' 'Capture PostgreSQL snapshot artifacts'
 	@printf '  %-24s %s\n' 'make profile-setup' 'Run profiles/$(PROFILE)/sql/00_setup.sql'
 	@printf '  %-24s %s\n' 'make profile-run' 'Run profiles/$(PROFILE)/sql/$(WORKLOAD_SQL)'
 	@printf '  %-24s %s\n' 'make profile-reset' 'Run setup and run SQL for PROFILE'
 	@printf '  %-24s %s\n' 'make monitor' 'Show basic PostgreSQL activity/statistics'
 	@printf '  %-24s %s\n' 'make metrics-sample' 'Sample generic PostgreSQL metrics to CSV'
 	@printf '  %-24s %s\n' 'make scan-artifacts' 'Scan logs/artifacts for PG failure evidence'
+	@printf '  %-24s %s\n' 'make dataset-list' 'List dataset specs'
+	@printf '  %-24s %s\n' 'make dataset-show' 'Show DATASET_SPEC'
+	@printf '  %-24s %s\n' 'make dataset-load' 'Load DATASET_SPEC'
+	@printf '  %-24s %s\n' 'make experiment-list' 'List experiment specs'
+	@printf '  %-24s %s\n' 'make experiment-show' 'Show EXPERIMENT_SPEC'
+	@printf '  %-24s %s\n' 'make experiment-run' 'Run EXPERIMENT_SPEC into runs/<run-id>'
+	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report for RUN_DIR'
+	@printf '  %-24s %s\n' 'make experiment-repeat' 'Run EXPERIMENT_SPEC repeatedly'
+	@printf '  %-24s %s\n' 'make experiment-compare' 'Compare BASELINE_RUN and CANDIDATE_RUN'
+	@printf '  %-24s %s\n' 'make matrix-list' 'List experiment matrix specs'
+	@printf '  %-24s %s\n' 'make matrix-show' 'Show MATRIX_SPEC'
+	@printf '  %-24s %s\n' 'make matrix-plan' 'Preview MATRIX_SPEC combinations'
+	@printf '  %-24s %s\n' 'make matrix-run' 'Run MATRIX_SPEC combinations'
 	@printf '  %-24s %s\n' 'make workload-list' 'List workload specs'
 	@printf '  %-24s %s\n' 'make workload-show' 'Show WORKLOAD_SPEC'
 	@printf '  %-24s %s\n' 'make workload-run' 'Run WORKLOAD_SPEC'
@@ -61,10 +88,19 @@ docker-reset:
 	$(COMPOSE) --env-file $(ENV_FILE) down -v
 	$(COMPOSE) --env-file $(ENV_FILE) up -d postgres
 	./scripts/wait_for_pg.sh
+	@if [[ "$(PG_CONFIG)" != "default" ]]; then ./scripts/apply_pg_config.sh "$(PG_CONFIG)"; fi
 
 .PHONY: psql
 psql: docker-up
 	./scripts/psql.sh
+
+.PHONY: pg-config-apply
+pg-config-apply: docker-up
+	./scripts/apply_pg_config.sh "$(PG_CONFIG)"
+
+.PHONY: snapshot
+snapshot: docker-up
+	./scripts/snapshot_pg.sh
 
 .PHONY: profile-setup
 profile-setup: docker-up
@@ -88,6 +124,61 @@ metrics-sample: docker-up
 .PHONY: workload-list
 workload-list:
 	./scripts/run_workload.sh list
+
+.PHONY: dataset-list
+dataset-list:
+	./scripts/load_dataset.sh list
+
+.PHONY: dataset-show
+dataset-show:
+	./scripts/load_dataset.sh show "$(DATASET_SPEC)"
+
+.PHONY: dataset-load
+dataset-load: docker-up
+	DATASET_SIZE="$(DATASET_SIZE)" DATASET_SEED="$(DATASET_SEED)" DATASET_SCHEMA="$(DATASET_SCHEMA)" ./scripts/load_dataset.sh load "$(DATASET_SPEC)"
+
+.PHONY: experiment-list
+experiment-list:
+	./scripts/run_experiment.sh list
+
+.PHONY: experiment-show
+experiment-show:
+	./scripts/run_experiment.sh show "$(EXPERIMENT_SPEC)"
+
+.PHONY: experiment-run
+experiment-run:
+	./scripts/run_experiment.sh run "$(EXPERIMENT_SPEC)"
+
+.PHONY: experiment-report
+experiment-report:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-report RUN_DIR=runs/<run-id>' >&2; exit 2; }
+	./scripts/report_run.sh "$(RUN_DIR)"
+
+.PHONY: experiment-repeat
+experiment-repeat:
+	EXPERIMENT_REPEAT_COUNT="$(EXPERIMENT_REPEAT_COUNT)" EXPERIMENT_REPEAT_ID="$(EXPERIMENT_REPEAT_ID)" ./scripts/run_experiment_repeated.sh "$(EXPERIMENT_SPEC)"
+
+.PHONY: experiment-compare
+experiment-compare:
+	@test -n "$(BASELINE_RUN)" || { echo 'Usage: make experiment-compare BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
+	@test -n "$(CANDIDATE_RUN)" || { echo 'Usage: make experiment-compare BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
+	./scripts/compare_runs.sh "$(BASELINE_RUN)" "$(CANDIDATE_RUN)"
+
+.PHONY: matrix-list
+matrix-list:
+	./scripts/run_experiment_matrix.sh list
+
+.PHONY: matrix-show
+matrix-show:
+	./scripts/run_experiment_matrix.sh show "$(MATRIX_SPEC)"
+
+.PHONY: matrix-plan
+matrix-plan:
+	./scripts/run_experiment_matrix.sh plan "$(MATRIX_SPEC)"
+
+.PHONY: matrix-run
+matrix-run:
+	./scripts/run_experiment_matrix.sh run "$(MATRIX_SPEC)"
 
 .PHONY: workload-show
 workload-show:
@@ -155,5 +246,10 @@ noisia-temp:
 test: docker-up
 	./tests/smoke.sh
 	./tests/profiles.sh
+	./tests/datasets.sh
 	./tests/workloads.sh
 	./tests/scan_failures.sh
+	./tests/experiments.sh
+	./tests/report_runs.sh
+	./tests/compare_runs.sh
+	./tests/matrices.sh

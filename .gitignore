@@ -2,6 +2,7 @@
 notes/
 .tmp/
 logs/
+runs/
 generated/
 postgres-data/
 *.log

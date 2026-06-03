@@ -94,6 +94,38 @@ PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
 
 Workload platform details live in [docs/workload-platform.md](docs/workload-platform.md).
 
+## Experiments
+
+Experiments orchestrate datasets, profiles, workloads, background pressure,
+metrics, snapshots, assertions, scans, and verdicts into `runs/<run-id>/`:
+
+```bash
+make experiment-list
+make experiment-run EXPERIMENT_SPEC=smoke
+make experiment-run EXPERIMENT_SPEC=locks-under-contention
+make experiment-report RUN_DIR=runs/<run-id>
+make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
+```
+
+Experiment platform details live in [docs/experiment-platform.md](docs/experiment-platform.md).
+
+For batches:
+
+```bash
+make matrix-list
+make matrix-plan MATRIX_SPEC=smoke
+make matrix-run MATRIX_SPEC=smoke
+```
+
+## Datasets
+
+Reusable data-loading specs live under `datasets/`:
+
+```bash
+make dataset-list
+make dataset-load DATASET_SPEC=synthetic/items DATASET_SIZE=small
+```
+
 Noisia can be used as optional PostgreSQL pressure:
 
 ```bash
@@ -177,5 +209,6 @@ small generic scenario is useful here.
 ## Status
 
 Generic scaffold with first real profiles, workload adapters, background
-helpers, and CSV metric sampling. Keep specialized explanations in focused
-profile docs and workload specs.
+helpers, CSV metric sampling, experiment reports, repeat runs, and matrix
+execution. Keep specialized explanations in focused profile docs and workload
+specs.
