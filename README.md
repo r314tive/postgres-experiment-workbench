@@ -94,6 +94,21 @@ PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
 
 Workload platform details live in [docs/workload-platform.md](docs/workload-platform.md).
 
+## Topologies
+
+Runtime topologies describe the PostgreSQL shape an experiment needs:
+
+```bash
+make topology-list
+make topology-up TOPOLOGY=primary-replica
+make topology-status TOPOLOGY=primary-replica
+```
+
+Implemented topologies:
+
+- `single`: one disposable PostgreSQL container.
+- `primary-replica`: physical streaming replica with a local replication slot.
+
 ## Experiments
 
 Experiments orchestrate datasets, profiles, workloads, background pressure,
@@ -103,6 +118,7 @@ metrics, snapshots, assertions, scans, and verdicts into `runs/<run-id>/`:
 make experiment-list
 make experiment-run EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=locks-under-contention
+make experiment-run EXPERIMENT_SPEC=replica-readonly
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 make experiment-summary SUMMARY_INPUT=runs/repeats/<repeat-id>
@@ -203,6 +219,7 @@ logs/
 - `indexes`: index creation, query plans, write overhead.
 - `wal-pressure`: WAL-heavy writes and checkpoint pressure.
 - `partitioning`: partition attach/detach/drop experiments.
+- `replication-slots`: physical slot retention and streaming state.
 
 Massive-DML-specific work belongs in the separate focused repository unless a
 small generic scenario is useful here.

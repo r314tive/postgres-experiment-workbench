@@ -12,6 +12,9 @@ grep -q 'WORKLOAD_KIND="pgbench"' <<< "$PGBENCH_SPEC"
 PG_SOURCE_SPEC="$("$REPO_DIR/scripts/run_workload.sh" show pg-source/check)"
 grep -q 'WORKLOAD_KIND="pg-source-check"' <<< "$PG_SOURCE_SPEC"
 
+TOPOLOGY_SPEC="$("$REPO_DIR/scripts/run_workload.sh" show topology/replica-readonly)"
+grep -q 'WORKLOAD_KIND="shell"' <<< "$TOPOLOGY_SPEC"
+
 PROFILE_SIZE=small "$REPO_DIR/scripts/run_profile_sql.sh" smoke 00_setup.sql >/dev/null
 PROFILE_SIZE=small "$REPO_DIR/scripts/run_workload.sh" run workloads/sql/smoke-run.env >/dev/null
 WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run workloads/compose/pg-isready.env >/dev/null

@@ -42,7 +42,7 @@ capture_env_overrides() {
   local name
   while IFS= read -r name; do
     case "$name" in
-      ENV_FILE|COMPOSE|POSTGRES_*|ALLOW_*|PG_CONFIG|PROFILE_*|DATASET_*|METRICS_*|WORKLOAD_*|EXPERIMENT_*)
+      ENV_FILE|COMPOSE|POSTGRES_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|PG_CONFIG|PROFILE_*|DATASET_*|METRICS_*|WORKLOAD_*|EXPERIMENT_*)
         PRESERVED_ENV_NAMES+=("$name")
         PRESERVED_ENV_VALUES+=("${!name}")
         ;;
@@ -328,10 +328,12 @@ run_experiment() {
   echo "run_dir=$RUN_DIR"
   echo "started_at=$STARTED_AT"
 
+  local topology="${EXPERIMENT_TOPOLOGY:-${TOPOLOGY:-single}}"
+
   if [[ "${EXPERIMENT_DOCKER_RESET:-0}" = "1" ]]; then
-    make -C "$REPO_DIR" docker-reset PG_CONFIG="${EXPERIMENT_PG_CONFIG:-${PG_CONFIG:-default}}"
+    make -C "$REPO_DIR" docker-reset TOPOLOGY="$topology" PG_CONFIG="${EXPERIMENT_PG_CONFIG:-${PG_CONFIG:-default}}"
   else
-    make -C "$REPO_DIR" docker-up
+    make -C "$REPO_DIR" docker-up TOPOLOGY="$topology"
     if [[ -n "${EXPERIMENT_PG_CONFIG:-}" && "${EXPERIMENT_PG_CONFIG:-default}" != "default" ]]; then
       "$REPO_DIR/scripts/apply_pg_config.sh" "$EXPERIMENT_PG_CONFIG"
     fi

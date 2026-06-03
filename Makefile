@@ -6,6 +6,7 @@ PROFILE ?= smoke
 PROFILE_SIZE ?= small
 PROFILE_SECONDS ?= 30
 PG_CONFIG ?= default
+TOPOLOGY ?= single
 WORKLOAD_SQL ?= 10_run.sql
 WORKLOAD ?= wait-xacts
 WORKLOAD_SPEC ?= workloads/sql/smoke-run.env
@@ -38,6 +39,12 @@ help:
 	@printf '  %-24s %s\n' 'make docker-up' 'Start PostgreSQL workbench'
 	@printf '  %-24s %s\n' 'make docker-down' 'Stop PostgreSQL workbench, keep volume'
 	@printf '  %-24s %s\n' 'make docker-reset' 'Recreate PostgreSQL volume'
+	@printf '  %-24s %s\n' 'make topology-list' 'List topology specs'
+	@printf '  %-24s %s\n' 'make topology-show' 'Show TOPOLOGY'
+	@printf '  %-24s %s\n' 'make topology-up' 'Start TOPOLOGY'
+	@printf '  %-24s %s\n' 'make topology-reset' 'Recreate TOPOLOGY volumes'
+	@printf '  %-24s %s\n' 'make topology-status' 'Show TOPOLOGY runtime status'
+	@printf '  %-24s %s\n' 'make topology-down' 'Stop TOPOLOGY'
 	@printf '  %-24s %s\n' 'make psql' 'Open psql'
 	@printf '  %-24s %s\n' 'make pg-config-apply' 'Apply PG_CONFIG to disposable PostgreSQL'
 	@printf '  %-24s %s\n' 'make snapshot' 'Capture PostgreSQL snapshot artifacts'
@@ -79,19 +86,40 @@ help:
 
 .PHONY: docker-up
 docker-up:
-	$(COMPOSE) --env-file $(ENV_FILE) up -d postgres
-	./scripts/wait_for_pg.sh
+	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh up "$(TOPOLOGY)"
 
 .PHONY: docker-down
 docker-down:
-	$(COMPOSE) --env-file $(ENV_FILE) down
+	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh down "$(TOPOLOGY)"
 
 .PHONY: docker-reset
 docker-reset:
-	$(COMPOSE) --env-file $(ENV_FILE) down -v
-	$(COMPOSE) --env-file $(ENV_FILE) up -d postgres
-	./scripts/wait_for_pg.sh
+	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh reset "$(TOPOLOGY)"
 	@if [[ "$(PG_CONFIG)" != "default" ]]; then ./scripts/apply_pg_config.sh "$(PG_CONFIG)"; fi
+
+.PHONY: topology-list
+topology-list:
+	./scripts/topology.sh list
+
+.PHONY: topology-show
+topology-show:
+	./scripts/topology.sh show "$(TOPOLOGY)"
+
+.PHONY: topology-up
+topology-up:
+	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh up "$(TOPOLOGY)"
+
+.PHONY: topology-reset
+topology-reset:
+	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh reset "$(TOPOLOGY)"
+
+.PHONY: topology-status
+topology-status:
+	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh status "$(TOPOLOGY)"
+
+.PHONY: topology-down
+topology-down:
+	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh down "$(TOPOLOGY)"
 
 .PHONY: psql
 psql: docker-up
@@ -261,6 +289,7 @@ test: docker-up
 	./tests/datasets.sh
 	./tests/workloads.sh
 	./tests/scan_failures.sh
+	./tests/topologies.sh
 	./tests/experiments.sh
 	./tests/report_runs.sh
 	./tests/summarize_runs.sh

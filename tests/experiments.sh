@@ -6,6 +6,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPERIMENT_LIST="$("$REPO_DIR/scripts/run_experiment.sh" list)"
 grep -q '^smoke$' <<< "$EXPERIMENT_LIST"
 grep -q '^locks-under-contention$' <<< "$EXPERIMENT_LIST"
+grep -q '^replica-readonly$' <<< "$EXPERIMENT_LIST"
 
 "$REPO_DIR/scripts/run_experiment.sh" show smoke | grep -q 'EXPERIMENT_NAME="smoke experiment"'
 
@@ -24,6 +25,16 @@ fi
 grep -q '"status": "passed"' "$RUN_DIR/verdict.json"
 test -s "$RUN_DIR/manifest.env"
 test -s "$RUN_DIR/metrics.csv"
+
+REPLICA_RUN_ID="test-replica-readonly-$(date -u +%Y%m%d_%H%M%S)"
+EXPERIMENT_RUN_ID="$REPLICA_RUN_ID" \
+EXPERIMENT_SNAPSHOT=0 \
+EXPERIMENT_METRICS_SAMPLES=1 \
+  "$REPO_DIR/scripts/run_experiment.sh" run replica-readonly >/dev/null
+
+REPLICA_RUN_DIR="$REPO_DIR/runs/$REPLICA_RUN_ID"
+grep -q '"status": "passed"' "$REPLICA_RUN_DIR/verdict.json"
+grep -q 'experiment_topology=primary-replica' "$REPLICA_RUN_DIR/manifest.env"
 
 REPEAT_ID="test-repeat-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_REPEAT_ID="$REPEAT_ID" \

@@ -6,12 +6,13 @@ single-purpose lab.
 The platform has five layers:
 
 1. PostgreSQL runtime: Docker Compose starts a disposable PostgreSQL instance.
-2. Profiles: SQL creates repeatable database states.
-3. Workload specs: adapters run SQL, `pgbench`, noisia, shell commands, or
+2. Topologies: runtime shape such as `single` or `primary-replica`.
+3. Profiles: SQL creates repeatable database states.
+4. Workload specs: adapters run SQL, `pgbench`, noisia, shell commands, or
    arbitrary Docker images against the database.
-4. Observation: monitor SQL, CSV metrics, logs, and profile diagnostics capture
+5. Observation: monitor SQL, CSV metrics, logs, and profile diagnostics capture
    behavior.
-5. Utility tests: external tools can run as shell or container workloads while
+6. Utility tests: external tools can run as shell or container workloads while
    the database state and metrics are controlled by profiles.
 
 ## Supported Workload Shapes
@@ -71,6 +72,14 @@ For failure-injection pressure:
 NOISIA_DURATION=120 NOISIA_JOBS=4 make workload-run WORKLOAD_SPEC=noisia/wait-xacts
 ```
 
+For replica-aware utility checks:
+
+```bash
+make topology-up TOPOLOGY=primary-replica
+make workload-run WORKLOAD_SPEC=topology/replica-readonly
+make workload-run WORKLOAD_SPEC=topology/replication-status
+```
+
 For testing PostgreSQL source itself:
 
 ```bash
@@ -96,6 +105,7 @@ experiment layer:
 ```bash
 make experiment-run EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=locks-under-contention
+make experiment-run EXPERIMENT_SPEC=replica-readonly
 make experiment-compare BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 make matrix-plan MATRIX_SPEC=smoke

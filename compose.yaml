@@ -10,6 +10,16 @@ services:
       - "${POSTGRES_PORT:-55433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - hot_standby=on
     healthcheck:
       test:
         - CMD-SHELL
@@ -17,6 +27,56 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  replica:
+    image: postgres:16-alpine
+    container_name: ${POSTGRES_REPLICA_CONTAINER:-postgres-experiment-workbench-replica}
+    profiles:
+      - replica
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pg_experiment_workbench}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_REPLICA_SLOT: ${POSTGRES_REPLICA_SLOT:-workbench_replica_slot}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_REPLICA_PORT:-55434}:5432"
+    volumes:
+      - replica-data:/var/lib/postgresql/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -lc
+    command:
+      - |
+        set -eu
+        if [ -z "$$(ls -A "$$PGDATA" 2>/dev/null)" ]; then
+          until pg_isready -h postgres -p 5432 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"; do
+            sleep 1
+          done
+          rm -rf "$$PGDATA"/*
+          pg_basebackup \
+            -h postgres \
+            -p 5432 \
+            -D "$$PGDATA" \
+            -U "$$POSTGRES_USER" \
+            -Fp \
+            -Xs \
+            -P \
+            -R \
+            -S "$$POSTGRES_REPLICA_SLOT"
+          chown -R postgres:postgres "$$PGDATA"
+        fi
+        exec docker-entrypoint.sh postgres
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 2s
+      timeout: 3s
+      retries: 60
 
   noisia:
     image: ${NOISIA_IMAGE:-lesovsky/noisia:latest}
@@ -39,12 +99,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      PGHOST: postgres
-      PGPORT: "5432"
+      PGHOST: ${WORKLOAD_PGHOST:-postgres}
+      PGPORT: ${WORKLOAD_PGPORT:-5432}
       PGDATABASE: ${POSTGRES_DB:-pg_experiment_workbench}
       PGUSER: ${POSTGRES_USER:-postgres}
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-pg_experiment_workbench}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${WORKLOAD_PGHOST:-postgres}:${WORKLOAD_PGPORT:-5432}/${POSTGRES_DB:-pg_experiment_workbench}?sslmode=disable
     entrypoint:
       - /bin/sh
       - -lc
@@ -53,3 +113,4 @@ services:
 
 volumes:
   postgres-data:
+  replica-data:

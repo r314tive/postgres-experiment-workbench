@@ -111,3 +111,15 @@ Use experiment specs for orchestration:
 
 Keep scenario-specific interpretation in profile docs and tool-specific
 execution details in workload specs.
+
+## Topology Examples
+
+`EXPERIMENT_TOPOLOGY=primary-replica` asks the runtime layer to start the
+primary plus physical replica before profile setup and workload execution.
+
+Examples:
+
+```bash
+make experiment-run EXPERIMENT_SPEC=replica-readonly
+make experiment-run EXPERIMENT_SPEC=replication-slots
+```
