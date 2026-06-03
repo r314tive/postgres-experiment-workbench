@@ -47,6 +47,18 @@ make experiment-report RUN_DIR=runs/<run-id>
 Reports are Markdown summaries built from `manifest.env`, `verdict.env`,
 `metrics.csv`, snapshots, background logs, and scan artifacts.
 
+## Statistical Summary
+
+```bash
+make experiment-summary SUMMARY_INPUT=runs/repeats/<repeat-id>
+make experiment-summary SUMMARY_INPUT=runs/matrices/<matrix-run-id>
+./scripts/summarize_runs.sh runs/a runs/b
+```
+
+Run-series summaries count verdict statuses and aggregate selected metrics
+across runs. Cumulative counters are summarized as per-run deltas
+(`last - first`). Gauge-like metrics are summarized as per-run maximums.
+
 ## Repeat
 
 ```bash
@@ -64,6 +76,8 @@ runs/repeats/<repeat-id>/
   driver-logs/
 ```
 
+Each repeat directory also receives `statistics.md`.
+
 The repeat runner keeps going after failures by default, so flaky experiments
 produce evidence for every attempted iteration. Set
 `EXPERIMENT_REPEAT_STOP_ON_FAIL=1` to stop at the first failed run.
@@ -78,7 +92,7 @@ make matrix-run MATRIX_SPEC=smoke
 
 Matrix specs live under `matrices/**/*.env`. They vary experiment specs,
 PostgreSQL config profiles, profile sizes, and repeat counts. Matrix artifacts
-are written under `runs/matrices/<matrix-run-id>/`.
+are written under `runs/matrices/<matrix-run-id>/`, including `statistics.md`.
 
 ## Spec Responsibilities
 

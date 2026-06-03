@@ -21,6 +21,8 @@ EXPERIMENT_METRICS_SAMPLES=1 \
 
 MATRIX_DIR="$REPO_DIR/runs/matrices/$MATRIX_RUN_ID"
 test -s "$MATRIX_DIR/summary.md"
+test -s "$MATRIX_DIR/statistics.md"
 grep -q 'passed' "$MATRIX_DIR/runs.tsv"
+grep -q '# Run Series Summary' "$MATRIX_DIR/statistics.md"
 
 echo "PASS: experiment matrices"

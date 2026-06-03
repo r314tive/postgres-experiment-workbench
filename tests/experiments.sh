@@ -33,6 +33,8 @@ EXPERIMENT_METRICS_SAMPLES=1 \
 
 REPEAT_DIR="$REPO_DIR/runs/repeats/$REPEAT_ID"
 test -s "$REPEAT_DIR/summary.md"
+test -s "$REPEAT_DIR/statistics.md"
 grep -q 'passed' "$REPEAT_DIR/runs.tsv"
+grep -q '# Run Series Summary' "$REPEAT_DIR/statistics.md"
 
 echo "PASS: experiments"

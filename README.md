@@ -105,6 +105,7 @@ make experiment-run EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=locks-under-contention
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
+make experiment-summary SUMMARY_INPUT=runs/repeats/<repeat-id>
 ```
 
 Experiment platform details live in [docs/experiment-platform.md](docs/experiment-platform.md).
@@ -209,6 +210,6 @@ small generic scenario is useful here.
 ## Status
 
 Generic scaffold with first real profiles, workload adapters, background
-helpers, CSV metric sampling, experiment reports, repeat runs, and matrix
-execution. Keep specialized explanations in focused profile docs and workload
-specs.
+helpers, CSV metric sampling, experiment reports, repeat runs, matrix execution,
+and statistical run-series summaries. Keep specialized explanations in focused
+profile docs and workload specs.

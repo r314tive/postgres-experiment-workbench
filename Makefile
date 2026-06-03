@@ -20,6 +20,8 @@ DATASET_SCHEMA ?= dataset_synthetic
 BASELINE_RUN ?=
 CANDIDATE_RUN ?=
 RUN_DIR ?=
+SUMMARY_INPUT ?=
+SUMMARY_OUT ?=
 SCAN_PATHS ?= logs generated
 METRICS_INTERVAL ?= 1
 METRICS_DURATION ?= 30
@@ -52,6 +54,7 @@ help:
 	@printf '  %-24s %s\n' 'make experiment-show' 'Show EXPERIMENT_SPEC'
 	@printf '  %-24s %s\n' 'make experiment-run' 'Run EXPERIMENT_SPEC into runs/<run-id>'
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report for RUN_DIR'
+	@printf '  %-24s %s\n' 'make experiment-summary' 'Summarize a repeat/matrix/run series'
 	@printf '  %-24s %s\n' 'make experiment-repeat' 'Run EXPERIMENT_SPEC repeatedly'
 	@printf '  %-24s %s\n' 'make experiment-compare' 'Compare BASELINE_RUN and CANDIDATE_RUN'
 	@printf '  %-24s %s\n' 'make matrix-list' 'List experiment matrix specs'
@@ -154,6 +157,15 @@ experiment-report:
 	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-report RUN_DIR=runs/<run-id>' >&2; exit 2; }
 	./scripts/report_run.sh "$(RUN_DIR)"
 
+.PHONY: experiment-summary
+experiment-summary:
+	@test -n "$(SUMMARY_INPUT)" || { echo 'Usage: make experiment-summary SUMMARY_INPUT=runs/repeats/<id>' >&2; exit 2; }
+	@if [[ -n "$(SUMMARY_OUT)" ]]; then \
+		./scripts/summarize_runs.sh --output "$(SUMMARY_OUT)" "$(SUMMARY_INPUT)"; \
+	else \
+		./scripts/summarize_runs.sh "$(SUMMARY_INPUT)"; \
+	fi
+
 .PHONY: experiment-repeat
 experiment-repeat:
 	EXPERIMENT_REPEAT_COUNT="$(EXPERIMENT_REPEAT_COUNT)" EXPERIMENT_REPEAT_ID="$(EXPERIMENT_REPEAT_ID)" ./scripts/run_experiment_repeated.sh "$(EXPERIMENT_SPEC)"
@@ -251,5 +263,6 @@ test: docker-up
 	./tests/scan_failures.sh
 	./tests/experiments.sh
 	./tests/report_runs.sh
+	./tests/summarize_runs.sh
 	./tests/compare_runs.sh
 	./tests/matrices.sh

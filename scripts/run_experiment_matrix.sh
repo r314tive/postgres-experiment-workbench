@@ -219,6 +219,7 @@ run_matrix() {
             any_failure=1
             if [[ "$MATRIX_STOP_ON_FAIL" = "1" ]]; then
               write_summary
+              "$REPO_DIR/scripts/summarize_runs.sh" "$MATRIX_RUN_DIR" > "$MATRIX_RUN_DIR/statistics.md"
               exit "$any_failure"
             fi
           fi
@@ -228,8 +229,10 @@ run_matrix() {
   done
 
   write_summary
+  "$REPO_DIR/scripts/summarize_runs.sh" "$MATRIX_RUN_DIR" > "$MATRIX_RUN_DIR/statistics.md"
   echo "matrix_dir=$MATRIX_RUN_DIR"
   echo "summary=$MATRIX_RUN_DIR/summary.md"
+  echo "statistics=$MATRIX_RUN_DIR/statistics.md"
   exit "$any_failure"
 }
 

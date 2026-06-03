@@ -144,7 +144,9 @@ for ((i = 1; i <= COUNT; i++)); do
 done
 
 write_summary
+"$REPO_DIR/scripts/summarize_runs.sh" "$SERIES_DIR" > "$SERIES_DIR/statistics.md"
 echo "repeat_dir=$SERIES_DIR"
 echo "summary=$SERIES_DIR/summary.md"
+echo "statistics=$SERIES_DIR/statistics.md"
 
 exit "$ANY_FAILURE"

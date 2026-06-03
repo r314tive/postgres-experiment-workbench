@@ -5,6 +5,8 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASE="$REPO_DIR/.tmp/compare/base"
 CAND="$REPO_DIR/.tmp/compare/candidate"
 
+"$REPO_DIR/scripts/compare_runs.sh" --help >/dev/null
+
 rm -rf "$REPO_DIR/.tmp/compare"
 mkdir -p "$BASE" "$CAND"
 

@@ -9,7 +9,7 @@ This project should stay a generic PostgreSQL experiment platform.
 - Add optional profile metadata if conventions need machine-readable fields.
 - Add CI presets for source-tree checks without making them default.
 - Expand topology implementations beyond `single`.
-- Add richer statistical reports for repeated experiment runs.
+- Add trend/history comparison across multiple local series directories.
 
 ## Candidate Profiles
 

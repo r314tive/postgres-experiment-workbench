@@ -10,9 +10,14 @@ Compares run verdicts and selected metrics deltas. Output is Markdown.
 USAGE
 }
 
-if [[ "${1:-}" = "-h" || "${1:-}" = "--help" || $# -ne 2 ]]; then
+if [[ "${1:-}" = "-h" || "${1:-}" = "--help" ]]; then
   usage
-  [[ $# -eq 2 ]] || exit 2
+  exit 0
+fi
+
+if [[ $# -ne 2 ]]; then
+  usage
+  exit 2
 fi
 
 BASE="$1"
