@@ -66,9 +66,11 @@ Reports are Markdown summaries built from `manifest.env`, `verdict.env`,
 
 ## Run State
 
-The runner writes machine-readable state files for every experiment. Shell
-scripts remain the default compatibility path, and the Go CLI can write the same
-public artifacts for future runner migration:
+The runner writes machine-readable state files for every experiment. In the
+default `EXPERIMENT_STATE_WRITER=auto` mode, it uses the Go writer when
+`pgworkbench` or `go run` is available and falls back to the shell writer
+otherwise. Use `EXPERIMENT_STATE_WRITER=go` to require the Go writer or
+`EXPERIMENT_STATE_WRITER=shell` to force the compatibility path.
 
 ```bash
 go run ./cmd/pgworkbench run write-manifest --run-dir runs/<run-id>

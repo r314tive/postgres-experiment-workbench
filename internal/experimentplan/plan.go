@@ -50,6 +50,7 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 		"metrics_samples":   shellDefault(values["EXPERIMENT_METRICS_SAMPLES"]),
 		"snapshot":          defaultValue(values["EXPERIMENT_SNAPSHOT"], "1"),
 		"docker_reset":      defaultValue(values["EXPERIMENT_DOCKER_RESET"], "0"),
+		"state_writer":      defaultValue(values["EXPERIMENT_STATE_WRITER"], "auto"),
 		"scan_paths":        shellDefault(values["EXPERIMENT_SCAN_PATHS"]),
 		"run_id":            shellDefault(values["EXPERIMENT_RUN_ID"]),
 	}
@@ -69,7 +70,7 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 		{Name: "snapshot after", Enabled: fields["snapshot"] == "1", Details: "capture PostgreSQL snapshot after workload"},
 		{Name: "assertions", Enabled: hasAny(values, "EXPERIMENT_ASSERT_SQL_FILES", "EXPERIMENT_ASSERT_SQL", "EXPERIMENT_ASSERT_SHELL"), Details: hookDetails(values, "EXPERIMENT_ASSERT_SQL_FILES", "EXPERIMENT_ASSERT_SQL", "EXPERIMENT_ASSERT_SHELL")},
 		{Name: "failure scan", Enabled: true, Details: scanDetails(fields)},
-		{Name: "verdict", Enabled: true, Details: "write `verdict.env` and `verdict.json` from workload/assertion/scan exits"},
+		{Name: "verdict", Enabled: true, Details: fmt.Sprintf("write `verdict.env` and `verdict.json` using state writer `%s`", fields["state_writer"])},
 	}
 
 	return Plan{Spec: spec, Fields: fields, Phases: phases}, nil
@@ -91,6 +92,7 @@ func Render(w io.Writer, plan Plan) error {
 	writeRow(w, "Background workloads", plan.Fields["backgrounds"])
 	writeRow(w, "Metrics", plan.Fields["metrics"])
 	writeRow(w, "Snapshots", plan.Fields["snapshot"])
+	writeRow(w, "State writer", plan.Fields["state_writer"])
 	writeRow(w, "Run id override", plan.Fields["run_id"])
 
 	fmt.Fprintln(w)

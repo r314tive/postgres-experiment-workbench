@@ -64,6 +64,18 @@ func TestCatalogValidateDatasetProfile(t *testing.T) {
 	}
 }
 
+func TestCatalogValidateExperimentStateWriter(t *testing.T) {
+	root := t.TempDir()
+	writeSpec(t, root, "configs/default/postgresql.conf", "# default\n")
+	writeSpec(t, root, "topologies/single.env", "TOPOLOGY_NAME=single\nTOPOLOGY_DESCRIPTION=One PostgreSQL container.\n")
+	writeSpec(t, root, "experiments/broken.env", "EXPERIMENT_NAME=broken\nEXPERIMENT_STATE_WRITER=python\n")
+
+	errs := New(root).Validate("experiment", nil)
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "unsupported EXPERIMENT_STATE_WRITER") {
+		t.Fatalf("unexpected validation errors: %#v", errs)
+	}
+}
+
 func TestRenderReference(t *testing.T) {
 	var out bytes.Buffer
 	if err := RenderReference(&out, "all"); err != nil {

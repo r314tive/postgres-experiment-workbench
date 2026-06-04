@@ -44,12 +44,13 @@ Already started:
 - `pgworkbench scan failures`.
 - `pgworkbench report run|compare|summary|history`.
 - `pgworkbench run verify|write-manifest|write-verdict`.
+- experiment runner state writer auto-mode with Go writer and shell fallback.
 - `pgworkbench spec list|show|reference|schema|validate`.
 - `make release-snapshot`.
 
 Good Go candidates:
 
-- runner compatibility switch from shell state writers to Go state writers.
+- hard-switch runner state writers to Go after compatibility soak.
 
 Keep in shell for now:
 

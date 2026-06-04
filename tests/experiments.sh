@@ -16,6 +16,7 @@ grep -q '^temp-spill$' <<< "$EXPERIMENT_LIST"
 
 RUN_ID="test-smoke-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$RUN_ID" \
+EXPERIMENT_STATE_WRITER=go \
 EXPERIMENT_SNAPSHOT=0 \
 EXPERIMENT_METRICS_SAMPLES=1 \
   "$REPO_DIR/scripts/run_experiment.sh" run smoke >/dev/null

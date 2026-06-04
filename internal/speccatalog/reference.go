@@ -154,6 +154,7 @@ func experimentReference() KindReference {
 			{"EXPERIMENT_METRICS_SAMPLES", "optional", "", "", "Fixed sample count; overrides duration loop."},
 			{"EXPERIMENT_SNAPSHOT", "optional", "1", "0, 1", "Capture before/after PostgreSQL snapshots."},
 			{"EXPERIMENT_DOCKER_RESET", "optional", "0", "0, 1", "Reset runtime before the run."},
+			{"EXPERIMENT_STATE_WRITER", "optional", "auto", "auto, go, shell", "State-file writer mode for manifest and verdict artifacts."},
 			{"EXPERIMENT_SCAN_PATHS", "optional", "run directory", "", "Paths scanned for failure evidence."},
 			{"EXPERIMENT_RUN_ID", "optional", "generated", "", "Explicit run id."},
 		},

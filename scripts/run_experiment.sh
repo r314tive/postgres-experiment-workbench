@@ -35,6 +35,25 @@ json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
+run_pgworkbench() {
+  if [[ -x "$REPO_DIR/generated/bin/pgworkbench" ]]; then
+    "$REPO_DIR/generated/bin/pgworkbench" "$@"
+    return
+  fi
+
+  if command -v go >/dev/null 2>&1; then
+    (
+      cd "$REPO_DIR"
+      GOCACHE="${GOCACHE:-$REPO_DIR/.tmp/go-cache}" \
+      GOMODCACHE="${GOMODCACHE:-$REPO_DIR/.tmp/go-mod-cache}" \
+        go run ./cmd/pgworkbench "$@"
+    )
+    return
+  fi
+
+  return 127
+}
+
 capture_env_overrides() {
   PRESERVED_ENV_NAMES=()
   PRESERVED_ENV_VALUES=()
@@ -42,7 +61,7 @@ capture_env_overrides() {
   local name
   while IFS= read -r name; do
     case "$name" in
-      ENV_FILE|COMPOSE|POSTGRES_*|PGBOUNCER_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|LOGICAL_REPLICATION_*|PG_CONFIG|PROFILE_*|DATASET_*|METRICS_*|WORKLOAD_*|EXPERIMENT_*)
+      ENV_FILE|COMPOSE|GOCACHE|GOMODCACHE|POSTGRES_*|PGBOUNCER_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|LOGICAL_REPLICATION_*|PG_CONFIG|PROFILE_*|DATASET_*|METRICS_*|WORKLOAD_*|EXPERIMENT_*)
         PRESERVED_ENV_NAMES+=("$name")
         PRESERVED_ENV_VALUES+=("${!name}")
         ;;
@@ -151,7 +170,7 @@ load_spec() {
   restore_env_overrides
 }
 
-write_manifest() {
+write_manifest_shell() {
   {
     printf 'run_id=%s\n' "$RUN_ID"
     printf 'started_at=%s\n' "$STARTED_AT"
@@ -167,6 +186,43 @@ write_manifest() {
     printf 'background_specs=%s\n' "${EXPERIMENT_BACKGROUND_SPECS:-}"
     printf 'run_dir=%s\n' "$RUN_DIR"
   } > "$RUN_DIR/manifest.env"
+}
+
+write_manifest_go() {
+  RUN_ID="$RUN_ID" \
+  STARTED_AT="$STARTED_AT" \
+  EXPERIMENT_SPEC_FILE="$EXPERIMENT_SPEC_FILE" \
+  EXPERIMENT_SPEC_ID="$EXPERIMENT_SPEC_ID" \
+  EXPERIMENT_NAME="${EXPERIMENT_NAME:-}" \
+  EXPERIMENT_TOPOLOGY="${EXPERIMENT_TOPOLOGY:-}" \
+  EXPERIMENT_PG_CONFIG="${EXPERIMENT_PG_CONFIG:-}" \
+  PG_CONFIG="${PG_CONFIG:-}" \
+  EXPERIMENT_PROFILE="${EXPERIMENT_PROFILE:-}" \
+  EXPERIMENT_DATASET_SPEC="${EXPERIMENT_DATASET_SPEC:-}" \
+  EXPERIMENT_PROFILE_SIZE="${EXPERIMENT_PROFILE_SIZE:-}" \
+  PROFILE_SIZE="${PROFILE_SIZE:-}" \
+  EXPERIMENT_WORKLOAD_SPEC="${EXPERIMENT_WORKLOAD_SPEC:-}" \
+  EXPERIMENT_BACKGROUND_SPECS="${EXPERIMENT_BACKGROUND_SPECS:-}" \
+  RUN_DIR="$RUN_DIR" \
+    run_pgworkbench run write-manifest --run-dir "$RUN_DIR"
+}
+
+write_manifest() {
+  case "${EXPERIMENT_STATE_WRITER:-auto}" in
+    go)
+      write_manifest_go
+      ;;
+    shell)
+      write_manifest_shell
+      ;;
+    auto)
+      write_manifest_go >/dev/null 2>&1 || write_manifest_shell
+      ;;
+    *)
+      echo "Unsupported EXPERIMENT_STATE_WRITER: ${EXPERIMENT_STATE_WRITER:-}" >&2
+      exit 2
+      ;;
+  esac
 }
 
 run_psql_file_list() {
@@ -271,7 +327,7 @@ stop_background_specs() {
   done
 }
 
-write_verdict() {
+write_verdict_shell() {
   local status="$1"
   local message="$2"
   local finished_at
@@ -300,6 +356,44 @@ write_verdict() {
   "scan_exit": ${SCAN_EXIT:-0}
 }
 JSON
+}
+
+write_verdict_go() {
+  local status="$1"
+  local message="$2"
+  local finished_at
+  finished_at="$(iso_now)"
+
+  RUN_ID="$RUN_ID" \
+  STARTED_AT="$STARTED_AT" \
+  EXPERIMENT_SPEC_ID="$EXPERIMENT_SPEC_ID" \
+  RUN_DIR="$RUN_DIR" \
+  WORKLOAD_EXIT="${WORKLOAD_EXIT:-0}" \
+  ASSERT_EXIT="${ASSERT_EXIT:-0}" \
+  SCAN_EXIT="${SCAN_EXIT:-0}" \
+    run_pgworkbench run write-verdict \
+      --run-dir "$RUN_DIR" \
+      --status "$status" \
+      --message "$message" \
+      --finished-at "$finished_at"
+}
+
+write_verdict() {
+  case "${EXPERIMENT_STATE_WRITER:-auto}" in
+    go)
+      write_verdict_go "$@"
+      ;;
+    shell)
+      write_verdict_shell "$@"
+      ;;
+    auto)
+      write_verdict_go "$@" >/dev/null 2>&1 || write_verdict_shell "$@"
+      ;;
+    *)
+      echo "Unsupported EXPERIMENT_STATE_WRITER: ${EXPERIMENT_STATE_WRITER:-}" >&2
+      exit 2
+      ;;
+  esac
 }
 
 cleanup() {
