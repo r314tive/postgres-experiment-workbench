@@ -77,6 +77,7 @@ help:
 	@printf '  %-24s %s\n' 'make experiment-list' 'List experiment specs'
 	@printf '  %-24s %s\n' 'make experiment-show' 'Show EXPERIMENT_SPEC'
 	@printf '  %-24s %s\n' 'make experiment-run' 'Run EXPERIMENT_SPEC into runs/<run-id>'
+	@printf '  %-24s %s\n' 'make experiment-verify' 'Verify RUN_DIR artifact integrity'
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report for RUN_DIR'
 	@printf '  %-24s %s\n' 'make experiment-report-go' 'Render Markdown report with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-summary' 'Summarize a repeat/matrix/run series'
@@ -225,6 +226,11 @@ experiment-run:
 experiment-report:
 	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-report RUN_DIR=runs/<run-id>' >&2; exit 2; }
 	./scripts/report_run.sh "$(RUN_DIR)"
+
+.PHONY: experiment-verify
+experiment-verify:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-verify RUN_DIR=runs/<run-id>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run verify "$(RUN_DIR)"
 
 .PHONY: experiment-report-go
 experiment-report-go:
@@ -418,6 +424,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS) >/dev/null
 	./tests/profile_catalog.sh
 	./tests/scan_failures.sh
+	./tests/run_verify.sh
 	./tests/report_runs.sh
 	./tests/summarize_runs.sh
 	./tests/compare_runs.sh

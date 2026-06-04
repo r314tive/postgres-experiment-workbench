@@ -42,7 +42,7 @@ Already started:
 - `pgworkbench profile list|show|validate`.
 - `pgworkbench scan failures`.
 - `pgworkbench report run|compare|summary|history`.
-- `pgworkbench run write-manifest|write-verdict`.
+- `pgworkbench run verify|write-manifest|write-verdict`.
 - `pgworkbench spec list|show|validate`.
 - `make release-snapshot`.
 
@@ -50,7 +50,7 @@ Good Go candidates:
 
 - env spec schema/reference export;
 - experiment plan rendering;
-- run directory integrity checker.
+- runner compatibility switch from shell state writers to Go state writers.
 
 Keep in shell for now:
 

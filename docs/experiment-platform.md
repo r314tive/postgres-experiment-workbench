@@ -28,6 +28,16 @@ make experiment-show EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=smoke
 ```
 
+## Verify
+
+```bash
+make experiment-verify RUN_DIR=runs/<run-id>
+go run ./cmd/pgworkbench run verify runs/<run-id>
+```
+
+Run verification checks required state files, env/JSON/CSV parseability, verdict
+consistency, exit-code fields, and metrics sample presence.
+
 ## Compare
 
 ```bash

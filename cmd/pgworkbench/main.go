@@ -12,6 +12,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runreport"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runstate"
+	"github.com/r314tive/postgres-experiment-workbench/internal/runverify"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 )
 
@@ -51,7 +52,7 @@ func run(args []string) error {
 	case "report":
 		return runReport(root, args[1:])
 	case "run":
-		return runState(args[1:])
+		return runState(root, args[1:])
 	case "spec":
 		return runSpec(speccatalog.New(root), args[1:])
 	default:
@@ -70,6 +71,7 @@ func usage() {
   pgworkbench report compare <baseline-run-dir> <candidate-run-dir>
   pgworkbench report summary [--output output.md] <series-dir|run-dir> [run-dir...]
   pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]
+  pgworkbench run verify <run-dir-or-id>
   pgworkbench run write-manifest --run-dir <run-dir>
   pgworkbench run write-verdict --run-dir <run-dir> --status <status> --message <message> [--finished-at <time>]
   pgworkbench spec list <workload|experiment|matrix|topology|dataset>
@@ -117,12 +119,27 @@ func runProfile(catalog profilecatalog.Catalog, args []string) error {
 	}
 }
 
-func runState(args []string) error {
+func runState(root string, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("run action is required")
 	}
 
 	switch args[0] {
+	case "verify":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench run verify <run-dir-or-id>")
+		}
+		result, err := runverify.Verify(root, args[1])
+		if err != nil {
+			return err
+		}
+		if err := runverify.Render(os.Stdout, result); err != nil {
+			return err
+		}
+		if !result.Valid() {
+			return fmt.Errorf("run verification failed")
+		}
+		return nil
 	case "write-manifest":
 		options, err := parseFlagArgs(args[1:])
 		if err != nil {

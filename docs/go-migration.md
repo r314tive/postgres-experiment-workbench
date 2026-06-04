@@ -21,6 +21,7 @@ go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b
 go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>
 go run ./cmd/pgworkbench report history runs/repeats/a runs/repeats/b
+go run ./cmd/pgworkbench run verify runs/<run-id>
 go run ./cmd/pgworkbench run write-manifest --run-dir runs/<run-id>
 go run ./cmd/pgworkbench run write-verdict --run-dir runs/<run-id> --status passed --message 'experiment passed'
 go run ./cmd/pgworkbench spec validate
@@ -37,3 +38,4 @@ tests, Make targets can move to the Go implementation.
 Run manifest and verdict writing now have Go commands too; keep them parallel
 until the shell experiment runner compatibility is proven by the Docker-backed
 suite.
+Run directory integrity checks are covered by `pgworkbench run verify`.
