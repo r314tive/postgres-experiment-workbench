@@ -47,6 +47,7 @@ starter.
 | `indexes` | Plan changes, index size, write-path probe. |
 | `wal-pressure` | WAL deltas across bounded write phases. |
 | `partitioning` | Range partition pruning, attach, detach, drop. |
+| `temp-spill` | Sort/hash spills and temporary file counters. |
 | `replication-slots` | Physical slot retention and streaming replication state. |
 | `logical-replication` | Publication/subscription convergence and DDL boundary checks. |
 | `connection-pressure` | Session churn, backend reuse, and pooler-shaped behavior. |

@@ -31,6 +31,8 @@ grep -q 'WORKLOAD_REQUIRES_POSTGRES=0' <<< "$NATIVE_UPGRADE_SPEC"
 NATIVE_UPGRADE_PLAN="$(PG_UPGRADE_ACTION=plan WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/native-pg-upgrade)"
 grep -q 'PG_UPGRADE_ACTION=plan' <<< "$NATIVE_UPGRADE_PLAN"
 grep -q 'Required for check/run' <<< "$NATIVE_UPGRADE_PLAN"
+TEMP_SPILL_SPEC="$("$REPO_DIR/scripts/run_workload.sh" show profile/temp-spill-run)"
+grep -q 'WORKLOAD_NAME="temp-spill profile direct run"' <<< "$TEMP_SPILL_SPEC"
 
 PROFILE_SIZE=small "$REPO_DIR/scripts/run_profile_sql.sh" smoke 00_setup.sql >/dev/null
 PROFILE_SIZE=small "$REPO_DIR/scripts/run_workload.sh" run workloads/sql/smoke-run.env >/dev/null

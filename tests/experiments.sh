@@ -10,6 +10,7 @@ grep -q '^replica-readonly$' <<< "$EXPERIMENT_LIST"
 grep -q '^logical-replication$' <<< "$EXPERIMENT_LIST"
 grep -q '^pgbouncer-smoke$' <<< "$EXPERIMENT_LIST"
 grep -q '^multi-version-upgrade-smoke$' <<< "$EXPERIMENT_LIST"
+grep -q '^temp-spill$' <<< "$EXPERIMENT_LIST"
 
 "$REPO_DIR/scripts/run_experiment.sh" show smoke | grep -q 'EXPERIMENT_NAME="smoke experiment"'
 

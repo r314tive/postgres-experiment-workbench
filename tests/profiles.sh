@@ -9,6 +9,7 @@ PROFILES=(
   indexes
   wal-pressure
   partitioning
+  temp-spill
   connection-pressure
 )
 

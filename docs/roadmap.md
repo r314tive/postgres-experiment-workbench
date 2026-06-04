@@ -9,7 +9,6 @@ This project should stay a generic PostgreSQL experiment platform.
 
 ## Candidate Profiles
 
-- `temp-spill`: sort/hash spills and temporary file counters.
 - `constraints`: constraint validation, foreign keys, deferrable checks.
 - `jsonb`: indexing and query shape for JSONB fields.
 - `pg-source-check`: maintained patchsets for testing PostgreSQL source builds.

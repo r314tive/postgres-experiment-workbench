@@ -33,6 +33,7 @@ make profile-reset PROFILE=vacuum-bloat PROFILE_SIZE=small
 make profile-reset PROFILE=indexes PROFILE_SIZE=small
 make profile-reset PROFILE=wal-pressure PROFILE_SIZE=small
 make profile-reset PROFILE=partitioning PROFILE_SIZE=small
+make profile-reset PROFILE=temp-spill PROFILE_SIZE=small
 ```
 
 Open psql:
@@ -128,6 +129,7 @@ make experiment-run EXPERIMENT_SPEC=replica-readonly
 make experiment-run EXPERIMENT_SPEC=logical-replication
 make experiment-run EXPERIMENT_SPEC=pgbouncer-smoke
 make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
+make experiment-run EXPERIMENT_SPEC=temp-spill
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 make experiment-summary SUMMARY_INPUT=runs/repeats/<repeat-id>
@@ -235,6 +237,7 @@ logs/
 - `indexes`: index creation, query plans, write overhead.
 - `wal-pressure`: WAL-heavy writes and checkpoint pressure.
 - `partitioning`: partition attach/detach/drop experiments.
+- `temp-spill`: sort/hash spills and temporary file counters.
 - `replication-slots`: physical slot retention and streaming state.
 - `logical-replication`: publication/subscription convergence and DDL boundary checks.
 - `connection-pressure`: session churn and pooler-shaped behavior.

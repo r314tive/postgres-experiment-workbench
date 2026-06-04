@@ -7,6 +7,7 @@ PROFILE_LIST="$("$REPO_DIR/scripts/profile_catalog.sh" list)"
 grep -q '^smoke$' <<< "$PROFILE_LIST"
 grep -q '^locks$' <<< "$PROFILE_LIST"
 grep -q '^connection-pressure$' <<< "$PROFILE_LIST"
+grep -q '^temp-spill$' <<< "$PROFILE_LIST"
 
 SMOKE_METADATA="$("$REPO_DIR/scripts/profile_catalog.sh" show smoke)"
 grep -q 'PROFILE_NAME="smoke"' <<< "$SMOKE_METADATA"
@@ -15,6 +16,9 @@ grep -q 'PROFILE_REQUIRES_TOPOLOGY="single"' <<< "$SMOKE_METADATA"
 
 REPLICATION_METADATA="$("$REPO_DIR/scripts/profile_catalog.sh" show replication-slots)"
 grep -q 'PROFILE_REQUIRES_TOPOLOGY="primary-replica"' <<< "$REPLICATION_METADATA"
+
+TEMP_SPILL_METADATA="$("$REPO_DIR/scripts/profile_catalog.sh" show temp-spill)"
+grep -q 'PROFILE_TAGS="temp-files work-mem sort hash"' <<< "$TEMP_SPILL_METADATA"
 
 "$REPO_DIR/scripts/profile_catalog.sh" validate >/dev/null
 
