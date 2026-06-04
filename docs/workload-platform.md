@@ -38,6 +38,7 @@ Preview a workload without running its adapter:
 
 ```bash
 make workload-plan-go WORKLOAD_SPEC=pgbench/tiny
+make workload-plan-json WORKLOAD_SPEC=pgbench/tiny
 ```
 
 ## External Utility Testing

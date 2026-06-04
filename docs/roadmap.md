@@ -57,13 +57,13 @@ Already started:
 - `pgworkbench patchset list|show|validate`.
 - `pgworkbench source plan|classify`.
 - `pgworkbench profile plan`.
-- `pgworkbench workload plan`.
-- `pgworkbench dataset plan`.
+- `pgworkbench workload plan`, including JSON output.
+- `pgworkbench dataset plan`, including JSON output.
 - `make release-snapshot`.
 
 Good Go candidates:
 
-- JSON output for workload and dataset plans.
+- JSON output for profile SQL plans.
 
 Keep in shell for now:
 

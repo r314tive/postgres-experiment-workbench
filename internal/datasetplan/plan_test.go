@@ -2,6 +2,7 @@ package datasetplan
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,6 +89,17 @@ func TestRenderPgbenchPlan(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("rendered plan missing %q:\n%s", want, out.String())
 		}
+	}
+	out.Reset()
+	if err := RenderJSON(&out, plan); err != nil {
+		t.Fatal(err)
+	}
+	var payload Plan
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ID != "pgbench/tiny" || len(payload.Steps) != 1 {
+		t.Fatalf("unexpected JSON payload: %#v", payload)
 	}
 }
 

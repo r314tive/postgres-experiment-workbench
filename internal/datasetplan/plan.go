@@ -1,6 +1,7 @@
 package datasetplan
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,18 +12,18 @@ import (
 )
 
 type Plan struct {
-	ID               string
-	Path             string
-	Name             string
-	Kind             string
-	RequiresPostgres bool
-	Steps            []Step
+	ID               string `json:"id"`
+	Path             string `json:"path"`
+	Name             string `json:"name"`
+	Kind             string `json:"kind"`
+	RequiresPostgres bool   `json:"requires_postgres"`
+	Steps            []Step `json:"steps"`
 }
 
 type Step struct {
-	Name    string
-	Command []string
-	Notes   []string
+	Name    string   `json:"name"`
+	Command []string `json:"command"`
+	Notes   []string `json:"notes,omitempty"`
 }
 
 func Build(root string, catalog speccatalog.Catalog, id string) (Plan, error) {
@@ -154,6 +155,12 @@ func Render(w io.Writer, plan Plan) error {
 		}
 	}
 	return nil
+}
+
+func RenderJSON(w io.Writer, plan Plan) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(plan)
 }
 
 func displayPath(root string, path string) string {

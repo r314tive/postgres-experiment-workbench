@@ -105,6 +105,7 @@ make workload-list-go
 make workload-show WORKLOAD_SPEC=pgbench/tiny
 make workload-show-go WORKLOAD_SPEC=pgbench/tiny
 make workload-plan-go WORKLOAD_SPEC=pgbench/tiny
+make workload-plan-json WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=compose/pg-isready
 make source-plan SOURCE_WORKLOAD_SPEC=pg-source/check
@@ -204,6 +205,7 @@ make dataset-list
 make dataset-list-go
 make dataset-show-go DATASET_SPEC=synthetic/items
 make dataset-plan-go DATASET_SPEC=synthetic/items
+make dataset-plan-json DATASET_SPEC=synthetic/items
 make dataset-load DATASET_SPEC=synthetic/items DATASET_SIZE=small
 ```
 

@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-No changes yet.
+Added platform capabilities:
+
+- JSON output for Go workload and dataset plans.
 
 ## v0.1.6 - 2026-06-04
 

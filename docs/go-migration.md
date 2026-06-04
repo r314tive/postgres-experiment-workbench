@@ -21,10 +21,12 @@ go run ./cmd/pgworkbench workload list
 go run ./cmd/pgworkbench workload show pgbench/tiny
 go run ./cmd/pgworkbench workload validate
 go run ./cmd/pgworkbench workload plan pgbench/tiny
+go run ./cmd/pgworkbench workload plan --json pgbench/tiny
 go run ./cmd/pgworkbench dataset list
 go run ./cmd/pgworkbench dataset show synthetic/items
 go run ./cmd/pgworkbench dataset validate
 go run ./cmd/pgworkbench dataset plan synthetic/items
+go run ./cmd/pgworkbench dataset plan --json synthetic/items
 go run ./cmd/pgworkbench patchset list
 go run ./cmd/pgworkbench patchset show chaos/master
 go run ./cmd/pgworkbench patchset validate
@@ -78,6 +80,7 @@ Workload specs can be preflighted as execution plans with
 `pgworkbench workload plan`.
 Dataset specs can be preflighted as load plans with
 `pgworkbench dataset plan`.
+Use `--json` with workload and dataset plans for machine-readable previews.
 Topology specs can be inspected with `pgworkbench topology inspect` without
 starting Docker. Live Compose state can be parsed with `pgworkbench topology ps`
 after a topology has been started.

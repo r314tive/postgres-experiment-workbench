@@ -94,7 +94,7 @@ func usage() {
   pgworkbench dataset list
   pgworkbench dataset show <dataset>
   pgworkbench dataset validate [dataset...]
-  pgworkbench dataset plan <dataset>
+  pgworkbench dataset plan [--json] <dataset>
   pgworkbench patchset list
   pgworkbench patchset show <patchset>
   pgworkbench patchset validate [patchset...]
@@ -105,7 +105,7 @@ func usage() {
   pgworkbench workload list
   pgworkbench workload show <workload>
   pgworkbench workload validate [workload...]
-  pgworkbench workload plan <workload>
+  pgworkbench workload plan [--json] <workload>
   pgworkbench experiment plan [--json] [--expanded] <experiment-spec>
   pgworkbench matrix plan [--json] <matrix-spec>
   pgworkbench topology inspect <topology>
@@ -195,12 +195,26 @@ func runWorkload(root string, catalog speccatalog.Catalog, args []string) error 
 
 	switch args[0] {
 	case "plan":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: pgworkbench workload plan <workload>")
+		jsonOutput := false
+		inputs := args[1:]
+		for len(inputs) > 0 && strings.HasPrefix(inputs[0], "-") {
+			switch inputs[0] {
+			case "--json":
+				jsonOutput = true
+			default:
+				return fmt.Errorf("unknown option: %s", inputs[0])
+			}
+			inputs = inputs[1:]
 		}
-		plan, err := workloadplan.Build(root, catalog, args[1])
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench workload plan [--json] <workload>")
+		}
+		plan, err := workloadplan.Build(root, catalog, inputs[0])
 		if err != nil {
 			return err
+		}
+		if jsonOutput {
+			return workloadplan.RenderJSON(os.Stdout, plan)
 		}
 		return workloadplan.Render(os.Stdout, plan)
 	default:
@@ -215,12 +229,26 @@ func runDataset(root string, catalog speccatalog.Catalog, args []string) error {
 
 	switch args[0] {
 	case "plan":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: pgworkbench dataset plan <dataset>")
+		jsonOutput := false
+		inputs := args[1:]
+		for len(inputs) > 0 && strings.HasPrefix(inputs[0], "-") {
+			switch inputs[0] {
+			case "--json":
+				jsonOutput = true
+			default:
+				return fmt.Errorf("unknown option: %s", inputs[0])
+			}
+			inputs = inputs[1:]
 		}
-		plan, err := datasetplan.Build(root, catalog, args[1])
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench dataset plan [--json] <dataset>")
+		}
+		plan, err := datasetplan.Build(root, catalog, inputs[0])
 		if err != nil {
 			return err
+		}
+		if jsonOutput {
+			return datasetplan.RenderJSON(os.Stdout, plan)
 		}
 		return datasetplan.Render(os.Stdout, plan)
 	default:
