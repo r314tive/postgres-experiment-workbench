@@ -14,6 +14,7 @@ Added platform capabilities:
 - Go workload and dataset catalog list/show/validate commands.
 - Go profile SQL plan renderer for no-Docker profile reset/run preflight.
 - Dynamic CI runtime port assignment for Docker-backed topology tests.
+- Runtime env override preservation for dataset and topology psql helpers.
 
 ## v0.1.1 - 2026-06-04
 

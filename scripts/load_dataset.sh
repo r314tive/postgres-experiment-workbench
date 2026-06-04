@@ -2,6 +2,8 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PRESERVED_ENV_NAMES=()
+PRESERVED_ENV_VALUES=()
 
 usage() {
   cat <<'USAGE'
@@ -58,9 +60,6 @@ resolve_spec() {
 
 load_repo_env() {
   local env_file="${ENV_FILE:-}"
-  local preserve_dataset_size="${DATASET_SIZE:-}"
-  local preserve_dataset_seed="${DATASET_SEED:-}"
-  local preserve_dataset_schema="${DATASET_SCHEMA:-}"
   if [[ -z "$env_file" ]]; then
     if [[ -f "$REPO_DIR/.env" ]]; then
       env_file="$REPO_DIR/.env"
@@ -73,16 +72,37 @@ load_repo_env() {
 
   ENV_PATH="$env_file"
   if [[ -f "$ENV_PATH" ]]; then
+    capture_env_overrides
     set -a
     # shellcheck disable=SC1090
     source "$ENV_PATH"
     set +a
+    restore_env_overrides
   fi
-
-  [[ -n "$preserve_dataset_size" ]] && export DATASET_SIZE="$preserve_dataset_size"
-  [[ -n "$preserve_dataset_seed" ]] && export DATASET_SEED="$preserve_dataset_seed"
-  [[ -n "$preserve_dataset_schema" ]] && export DATASET_SCHEMA="$preserve_dataset_schema"
   return 0
+}
+
+capture_env_overrides() {
+  PRESERVED_ENV_NAMES=()
+  PRESERVED_ENV_VALUES=()
+
+  local name
+  while IFS= read -r name; do
+    case "$name" in
+      ENV_FILE|COMPOSE|POSTGRES_*|PGBOUNCER_*|ALLOW_*|DATASET_*|PROFILE_*|PGBENCH_*|WORKLOAD_*)
+        PRESERVED_ENV_NAMES+=("$name")
+        PRESERVED_ENV_VALUES+=("${!name}")
+        ;;
+    esac
+  done < <(compgen -v)
+}
+
+restore_env_overrides() {
+  local i
+
+  for ((i = 0; i < ${#PRESERVED_ENV_NAMES[@]}; i++)); do
+    export "${PRESERVED_ENV_NAMES[$i]}=${PRESERVED_ENV_VALUES[$i]}"
+  done
 }
 
 load_dataset() {
