@@ -10,8 +10,8 @@ make scan-artifacts
 
 `make check` is a no-Docker static/synthetic test set, including Go unit tests,
 Go profile validation, Go env spec validation, Go run artifact verification,
-Go env spec reference/schema rendering, Go experiment plan rendering, and Go
-failure scanning.
+Go env spec reference/schema rendering, Go experiment plan rendering, Go
+patchset validation, Go source-check plan rendering, and Go failure scanning.
 `make test` is the full local runtime verification and uses Docker Compose.
 `make release-check` is the local pre-release gate: it runs doctor checks,
 static checks, quickstart, full runtime tests, artifact scans, privacy scan, and
@@ -21,6 +21,8 @@ PostgreSQL source-tree checks are intentionally opt-in. Use the
 `source-check` workflow manually, or run locally:
 
 ```bash
+make source-plan SOURCE_WORKLOAD_SPEC=pg-source/check
+PG_PATCHSET=chaos/master make source-plan SOURCE_WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=plan PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=run make workload-run WORKLOAD_SPEC=pg-source/check

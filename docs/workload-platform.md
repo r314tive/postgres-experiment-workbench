@@ -95,11 +95,17 @@ PostgreSQL binaries plus `PG_UPGRADE_OLD_BINDIR` and `PG_UPGRADE_NEW_BINDIR`.
 For testing PostgreSQL source itself:
 
 ```bash
+make source-plan SOURCE_WORKLOAD_SPEC=pg-source/check
+PG_PATCHSET=chaos/master make source-plan SOURCE_WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=plan PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/check
 make workload-run WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=run PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
 ```
+
+`make source-plan` uses the Go CLI and does not clone PostgreSQL or require a
+running workbench database. Use `make workload-run` for the shell runtime path
+that can clone, build, test, and scan source artifacts.
 
 The GitHub `source-check` workflow is manual and defaults to
 `PG_SOURCE_ACTION=plan`; heavy source builds are not part of default CI.

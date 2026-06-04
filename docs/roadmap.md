@@ -49,11 +49,13 @@ Already started:
 - experiment runner state writer defaulted to Go with explicit shell
   compatibility mode.
 - `pgworkbench spec list|show|reference|schema|validate`.
+- `pgworkbench patchset list|show|validate`.
+- `pgworkbench source plan`.
 - `make release-snapshot`.
 
 Good Go candidates:
 
-- source-check planning and patchset catalog validation in Go.
+- source-check result classification beyond the generic failure scanner.
 
 Keep in shell for now:
 

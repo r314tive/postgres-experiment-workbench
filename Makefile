@@ -15,6 +15,7 @@ EXPERIMENT_REPEAT_COUNT ?= 3
 EXPERIMENT_REPEAT_ID ?=
 MATRIX_SPEC ?= smoke
 PATCHSET ?= chaos/master
+SOURCE_WORKLOAD_SPEC ?= pg-source/check
 DATASET_SPEC ?= synthetic/items
 DATASET_SIZE ?= small
 DATASET_SEED ?= 1
@@ -73,6 +74,7 @@ help:
 	@printf '  %-24s %s\n' 'make patchset-list' 'List PostgreSQL source patchsets'
 	@printf '  %-24s %s\n' 'make patchset-show' 'Show PATCHSET metadata'
 	@printf '  %-24s %s\n' 'make patchset-validate' 'Validate patchset metadata and files'
+	@printf '  %-24s %s\n' 'make source-plan' 'Preview PostgreSQL source-check plan'
 	@printf '  %-24s %s\n' 'make profile-setup' 'Run profiles/$(PROFILE)/sql/00_setup.sql'
 	@printf '  %-24s %s\n' 'make profile-run' 'Run profiles/$(PROFILE)/sql/$(WORKLOAD_SQL)'
 	@printf '  %-24s %s\n' 'make profile-reset' 'Run setup and run SQL for PROFILE'
@@ -208,15 +210,19 @@ profile-validate:
 
 .PHONY: patchset-list
 patchset-list:
-	./scripts/patchset_catalog.sh list
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench patchset list
 
 .PHONY: patchset-show
 patchset-show:
-	./scripts/patchset_catalog.sh show "$(PATCHSET)"
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench patchset show "$(PATCHSET)"
 
 .PHONY: patchset-validate
 patchset-validate:
-	./scripts/patchset_catalog.sh validate
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench patchset validate
+
+.PHONY: source-plan
+source-plan:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source plan "$(SOURCE_WORKLOAD_SPEC)"
 
 .PHONY: profile-setup
 profile-setup: docker-up
@@ -507,6 +513,8 @@ check:
 	git diff --check
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test ./...
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench patchset validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source plan pg-source/check >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference all >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec schema all >/dev/null

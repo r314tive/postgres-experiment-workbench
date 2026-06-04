@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/r314tive/postgres-experiment-workbench/internal/doctor"
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
+	"github.com/r314tive/postgres-experiment-workbench/internal/patchsetcatalog"
+	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourceplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runreport"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runstate"
@@ -49,10 +52,14 @@ func run(args []string) error {
 		return nil
 	case "doctor":
 		return runDoctor(root, args[1:])
+	case "patchset":
+		return runPatchset(patchsetcatalog.New(root), args[1:])
 	case "profile":
 		return runProfile(profilecatalog.New(root), args[1:])
 	case "experiment":
 		return runExperiment(speccatalog.New(root), args[1:])
+	case "source":
+		return runSource(root, args[1:])
 	case "scan":
 		return runScan(root, args[1:])
 	case "report":
@@ -70,10 +77,14 @@ func usage() {
 	fmt.Println(`Usage:
   pgworkbench version
   pgworkbench doctor [--skip-docker-daemon]
+  pgworkbench patchset list
+  pgworkbench patchset show <patchset>
+  pgworkbench patchset validate [patchset...]
   pgworkbench profile list
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]
   pgworkbench experiment plan <experiment-spec>
+  pgworkbench source plan [workload-spec]
   pgworkbench scan failures [path...]
   pgworkbench report run <run-dir-or-id> [output.md]
   pgworkbench report compare <baseline-run-dir> <candidate-run-dir>
@@ -108,6 +119,46 @@ func runDoctor(root string, args []string) error {
 		return fmt.Errorf("doctor found failed checks")
 	}
 	return nil
+}
+
+func runPatchset(catalog patchsetcatalog.Catalog, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("patchset action is required")
+	}
+
+	switch args[0] {
+	case "list":
+		patchsets, err := catalog.List()
+		if err != nil {
+			return err
+		}
+		for _, patchset := range patchsets {
+			fmt.Println(patchset)
+		}
+		return nil
+	case "show":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench patchset show <patchset>")
+		}
+		metadata, err := catalog.Show(args[1])
+		if err != nil {
+			return err
+		}
+		printPatchsetMetadata(metadata)
+		return nil
+	case "validate":
+		errs := catalog.Validate(args[1:])
+		if len(errs) > 0 {
+			for _, err := range errs {
+				fmt.Fprintln(os.Stderr, err)
+			}
+			return fmt.Errorf("patchset catalog validation failed")
+		}
+		fmt.Println("PASS: patchset catalog")
+		return nil
+	default:
+		return fmt.Errorf("unsupported patchset action: %s", args[0])
+	}
 }
 
 func runProfile(catalog profilecatalog.Catalog, args []string) error {
@@ -167,6 +218,33 @@ func runExperiment(catalog speccatalog.Catalog, args []string) error {
 		return experimentplan.Render(os.Stdout, plan)
 	default:
 		return fmt.Errorf("unsupported experiment action: %s", args[0])
+	}
+}
+
+func runSource(root string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("source action is required")
+	}
+
+	switch args[0] {
+	case "plan":
+		if len(args) > 2 {
+			return fmt.Errorf("usage: pgworkbench source plan [workload-spec]")
+		}
+		workloadSpec := ""
+		if len(args) == 2 {
+			workloadSpec = args[1]
+		}
+		plan, err := pgsourceplan.Build(root, pgsourceplan.Options{
+			Action:       "plan",
+			WorkloadSpec: workloadSpec,
+		})
+		if err != nil {
+			return err
+		}
+		return pgsourceplan.Render(os.Stdout, plan)
+	default:
+		return fmt.Errorf("unsupported source action: %s", args[0])
 	}
 }
 
@@ -466,6 +544,19 @@ func printMetadata(metadata profilecatalog.Metadata) {
 	fmt.Printf("PROFILE_REQUIRES_TOPOLOGY=\"%s\"\n", metadata.RequiresTopology)
 	fmt.Printf("PROFILE_BACKGROUND_WORKLOADS=\"%s\"\n", metadata.BackgroundWorkloads)
 	fmt.Printf("PROFILE_DIAGNOSTIC_SQL=\"%s\"\n", metadata.DiagnosticSQL)
+}
+
+func printPatchsetMetadata(metadata patchsetcatalog.Metadata) {
+	fmt.Printf("PATCHSET_NAME=\"%s\"\n", metadata.Name)
+	fmt.Printf("PATCHSET_DESCRIPTION=\"%s\"\n", metadata.Description)
+	fmt.Printf("PATCHSET_PG_REF=\"%s\"\n", metadata.PgRef)
+	fmt.Printf("PATCHSET_FILES=\"%s\"\n", metadata.Files)
+	fmt.Printf("PATCHSET_ALLOW_EMPTY=\"%s\"\n", metadata.AllowEmpty)
+	fmt.Printf("PATCHSET_CONFIGURE_ARGS=\"%s\"\n", metadata.ConfigureArgs)
+	fmt.Printf("PATCHSET_BUILD_CFLAGS=\"%s\"\n", metadata.BuildCflags)
+	fmt.Printf("PATCHSET_TEST_INITDB_EXTRA_OPTS=\"%s\"\n", metadata.TestInitdbExtraOpts)
+	fmt.Printf("PATCHSET_DIR=\"%s\"\n", metadata.Dir)
+	fmt.Printf("PATCHSET_RESOLVED_FILES=\"%s\"\n", strings.Join(metadata.ResolvedFiles, " "))
 }
 
 func findRepoRoot() (string, error) {

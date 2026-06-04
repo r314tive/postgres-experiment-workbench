@@ -16,7 +16,11 @@ Current Go CLI:
 go run ./cmd/pgworkbench profile list
 go run ./cmd/pgworkbench profile show locks
 go run ./cmd/pgworkbench profile validate
+go run ./cmd/pgworkbench patchset list
+go run ./cmd/pgworkbench patchset show chaos/master
+go run ./cmd/pgworkbench patchset validate
 go run ./cmd/pgworkbench experiment plan smoke
+go run ./cmd/pgworkbench source plan pg-source/check
 go run ./cmd/pgworkbench scan failures logs generated
 go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b
@@ -46,3 +50,6 @@ Env spec contracts can be rendered with `pgworkbench spec reference` and
 `pgworkbench spec schema`.
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.
+Patchset metadata and PostgreSQL source-check planning can be inspected with
+`pgworkbench patchset` and `pgworkbench source plan`; the clone/build/test
+runtime stays in shell.

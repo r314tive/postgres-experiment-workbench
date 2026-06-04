@@ -22,9 +22,18 @@ make patchset-show PATCHSET=chaos/master
 make patchset-validate
 ```
 
+The Make targets use the Go CLI:
+
+```bash
+go run ./cmd/pgworkbench patchset list
+go run ./cmd/pgworkbench patchset show chaos/master
+go run ./cmd/pgworkbench patchset validate
+```
+
 Run a plan with a named patchset:
 
 ```bash
+PG_PATCHSET=chaos/master make source-plan SOURCE_WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=plan PG_PATCHSET=chaos/master \
 make workload-run WORKLOAD_SPEC=pg-source/check
 ```
