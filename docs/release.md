@@ -23,7 +23,8 @@ can be added once the MVP contract is stable.
 
 GitHub Actions also has a `release-snapshot` workflow. It runs on `v*` tags or
 manual dispatch, builds the same archives, and uploads them as workflow
-artifacts.
+artifacts. On tag pushes it also creates or updates the matching GitHub Release
+and attaches the archives.
 
 ## Versioning
 

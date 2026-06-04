@@ -53,3 +53,6 @@ The workflow runs `make check` before building archives with:
 ```bash
 make release-snapshot VERSION=<version>
 ```
+
+On tag pushes, the workflow also creates or updates the matching GitHub Release
+and attaches the generated archives.
