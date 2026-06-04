@@ -25,6 +25,13 @@ GO_DATASET_SPEC="$(
 )"
 grep -q 'DATASET_KIND="sql"' <<< "$GO_DATASET_SPEC"
 
+GO_DATASET_PLAN="$(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench dataset plan synthetic/items
+)"
+grep -q '# Dataset Plan' <<< "$GO_DATASET_PLAN"
+grep -q 'Run dataset SQL' <<< "$GO_DATASET_PLAN"
+
 (
   cd "$REPO_DIR"
   GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench dataset validate >/dev/null

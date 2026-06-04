@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/r314tive/postgres-experiment-workbench/internal/datasetplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/doctor"
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
@@ -58,7 +59,7 @@ func run(args []string) error {
 	case "doctor":
 		return runDoctor(root, args[1:])
 	case "dataset":
-		return runKindCatalog("dataset", speccatalog.New(root), args[1:])
+		return runDataset(root, speccatalog.New(root), args[1:])
 	case "patchset":
 		return runPatchset(patchsetcatalog.New(root), args[1:])
 	case "profile":
@@ -93,6 +94,7 @@ func usage() {
   pgworkbench dataset list
   pgworkbench dataset show <dataset>
   pgworkbench dataset validate [dataset...]
+  pgworkbench dataset plan <dataset>
   pgworkbench patchset list
   pgworkbench patchset show <patchset>
   pgworkbench patchset validate [patchset...]
@@ -203,6 +205,26 @@ func runWorkload(root string, catalog speccatalog.Catalog, args []string) error 
 		return workloadplan.Render(os.Stdout, plan)
 	default:
 		return runKindCatalog("workload", catalog, args)
+	}
+}
+
+func runDataset(root string, catalog speccatalog.Catalog, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("dataset action is required")
+	}
+
+	switch args[0] {
+	case "plan":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench dataset plan <dataset>")
+		}
+		plan, err := datasetplan.Build(root, catalog, args[1])
+		if err != nil {
+			return err
+		}
+		return datasetplan.Render(os.Stdout, plan)
+	default:
+		return runKindCatalog("dataset", catalog, args)
 	}
 }
 

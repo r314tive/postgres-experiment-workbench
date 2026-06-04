@@ -200,6 +200,7 @@ Reusable data-loading specs live under `datasets/`:
 make dataset-list
 make dataset-list-go
 make dataset-show-go DATASET_SPEC=synthetic/items
+make dataset-plan-go DATASET_SPEC=synthetic/items
 make dataset-load DATASET_SPEC=synthetic/items DATASET_SIZE=small
 ```
 

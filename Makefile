@@ -94,6 +94,7 @@ help:
 	@printf '  %-24s %s\n' 'make dataset-show' 'Show DATASET_SPEC'
 	@printf '  %-24s %s\n' 'make dataset-list-go' 'List dataset specs with Go CLI'
 	@printf '  %-24s %s\n' 'make dataset-show-go' 'Show DATASET_SPEC with Go CLI'
+	@printf '  %-24s %s\n' 'make dataset-plan-go' 'Preview DATASET_SPEC load plan'
 	@printf '  %-24s %s\n' 'make dataset-load' 'Load DATASET_SPEC'
 	@printf '  %-24s %s\n' 'make experiment-list' 'List experiment specs'
 	@printf '  %-24s %s\n' 'make experiment-show' 'Show EXPERIMENT_SPEC'
@@ -300,6 +301,10 @@ dataset-list-go:
 .PHONY: dataset-show-go
 dataset-show-go:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset show "$(DATASET_SPEC)"
+
+.PHONY: dataset-plan-go
+dataset-plan-go:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset plan "$(DATASET_SPEC)"
 
 .PHONY: dataset-show
 dataset-show:
@@ -591,6 +596,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset plan synthetic/items >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference all >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec schema all >/dev/null

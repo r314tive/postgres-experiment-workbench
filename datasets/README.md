@@ -11,6 +11,7 @@ make dataset-list
 make dataset-list-go
 make dataset-show DATASET_SPEC=synthetic/items
 make dataset-show-go DATASET_SPEC=synthetic/items
+make dataset-plan-go DATASET_SPEC=synthetic/items
 make dataset-load DATASET_SPEC=synthetic/items DATASET_SIZE=small
 ```
 
@@ -18,6 +19,7 @@ The Go catalog commands can validate dataset specs without loading data:
 
 ```bash
 go run ./cmd/pgworkbench dataset validate
+go run ./cmd/pgworkbench dataset plan synthetic/items
 ```
 
 Supported kinds:

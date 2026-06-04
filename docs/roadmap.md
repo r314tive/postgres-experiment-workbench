@@ -57,11 +57,13 @@ Already started:
 - `pgworkbench source plan|classify`.
 - `pgworkbench profile plan`.
 - `pgworkbench workload plan`.
+- `pgworkbench dataset plan`.
 - `make release-snapshot`.
 
 Good Go candidates:
 
-- Go dataset load planning without running loaders.
+- Go experiment dry-run expansion that embeds topology, dataset, workload, and
+  background workload previews.
 
 Keep in shell for now:
 
