@@ -15,6 +15,10 @@ Added platform capabilities:
 - Go profile SQL plan renderer for no-Docker profile reset/run preflight.
 - Dynamic CI runtime port assignment for Docker-backed topology tests.
 - Runtime env override preservation for dataset and topology psql helpers.
+- Topology readiness waits before topology-sensitive experiment assertions.
+- Host-port readiness waits for topology-sensitive experiment assertions.
+- Workload runner preservation for replica and logical subscriber port
+  overrides.
 
 ## v0.1.1 - 2026-06-04
 
