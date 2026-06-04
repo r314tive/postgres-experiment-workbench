@@ -93,6 +93,7 @@ help:
 	@printf '  %-24s %s\n' 'make matrix-run' 'Run MATRIX_SPEC combinations'
 	@printf '  %-24s %s\n' 'make spec-list' 'List SPEC_KIND specs with Go CLI'
 	@printf '  %-24s %s\n' 'make spec-show' 'Show SPEC_KIND/SPEC_ID with Go CLI'
+	@printf '  %-24s %s\n' 'make spec-reference' 'Render env spec reference with Go CLI'
 	@printf '  %-24s %s\n' 'make spec-validate' 'Validate env specs with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-list' 'List workload specs'
 	@printf '  %-24s %s\n' 'make workload-show' 'Show WORKLOAD_SPEC'
@@ -314,6 +315,10 @@ spec-show:
 	@test -n "$(SPEC_ID)" || { echo 'Usage: make spec-show SPEC_KIND=workload SPEC_ID=pgbench/tiny' >&2; exit 2; }
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec show "$(SPEC_KIND)" "$(SPEC_ID)"
 
+.PHONY: spec-reference
+spec-reference:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference "$(SPEC_KIND)"
+
 .PHONY: spec-validate
 spec-validate:
 	@if [[ -n "$(SPEC_ID)" ]]; then \
@@ -421,6 +426,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test ./...
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference all >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS) >/dev/null
 	./tests/profile_catalog.sh
 	./tests/scan_failures.sh

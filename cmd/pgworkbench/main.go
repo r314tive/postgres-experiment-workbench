@@ -76,6 +76,7 @@ func usage() {
   pgworkbench run write-verdict --run-dir <run-dir> --status <status> --message <message> [--finished-at <time>]
   pgworkbench spec list <workload|experiment|matrix|topology|dataset>
   pgworkbench spec show <kind> <spec>
+  pgworkbench spec reference [workload|experiment|matrix|topology|dataset|all]
   pgworkbench spec validate [kind] [spec...]`)
 }
 
@@ -222,6 +223,15 @@ func runSpec(catalog speccatalog.Catalog, args []string) error {
 			fmt.Printf("%s=\"%s\"\n", key, spec.Values[key])
 		}
 		return nil
+	case "reference":
+		kind := "all"
+		if len(args) > 2 {
+			return fmt.Errorf("usage: pgworkbench spec reference [workload|experiment|matrix|topology|dataset|all]")
+		}
+		if len(args) == 2 {
+			kind = args[1]
+		}
+		return speccatalog.RenderReference(os.Stdout, kind)
 	case "validate":
 		kind := "all"
 		ids := []string(nil)

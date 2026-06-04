@@ -154,6 +154,7 @@ Validate env specs before running larger suites:
 
 ```bash
 make spec-validate
+make spec-reference SPEC_KIND=all
 make spec-list SPEC_KIND=workload
 make spec-show SPEC_KIND=experiment SPEC_ID=smoke
 ```
@@ -253,6 +254,7 @@ go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b
 go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>
 go run ./cmd/pgworkbench report history runs/repeats/a runs/repeats/b
+go run ./cmd/pgworkbench spec reference all
 go run ./cmd/pgworkbench spec validate
 ```
 

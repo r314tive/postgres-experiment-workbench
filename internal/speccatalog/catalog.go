@@ -320,13 +320,19 @@ func (c Catalog) validateDataset(spec Spec) []error {
 	var errs []error
 	requireValue(&errs, spec, "DATASET_NAME")
 	kind := requireValue(&errs, spec, "DATASET_KIND")
-	if kind != "" && !oneOf(kind, "sql", "pgbench") {
+	if kind != "" && !oneOf(kind, "sql", "profile", "pgbench") {
 		errs = append(errs, specError(spec, "unsupported DATASET_KIND: %s", kind))
 	}
-	if kind == "sql" {
+	switch kind {
+	case "sql":
 		sqlPath := requireValue(&errs, spec, "DATASET_SQL")
 		if sqlPath != "" && !isDynamic(sqlPath) && !c.pathExists(sqlPath) {
 			errs = append(errs, specError(spec, "DATASET_SQL not found: %s", sqlPath))
+		}
+	case "profile":
+		profile := requireValue(&errs, spec, "DATASET_PROFILE")
+		if profile != "" && !isDynamic(profile) && !c.dirExists("profiles", profile) {
+			errs = append(errs, specError(spec, "DATASET_PROFILE not found: %s", profile))
 		}
 	}
 	return errs

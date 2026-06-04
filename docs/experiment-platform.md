@@ -148,6 +148,13 @@ Use experiment specs for orchestration:
 Keep scenario-specific interpretation in profile docs and tool-specific
 execution details in workload specs.
 
+Render the generated env spec contract with:
+
+```bash
+make spec-reference SPEC_KIND=all
+go run ./cmd/pgworkbench spec reference all
+```
+
 ## Topology Examples
 
 `EXPERIMENT_TOPOLOGY=primary-replica` asks the runtime layer to start the

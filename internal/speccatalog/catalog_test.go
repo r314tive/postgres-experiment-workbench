@@ -1,8 +1,10 @@
 package speccatalog
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +50,39 @@ func TestCatalogValidateBrokenReferences(t *testing.T) {
 	errs := New(root).Validate("all", nil)
 	if len(errs) < 2 {
 		t.Fatalf("expected validation errors, got %#v", errs)
+	}
+}
+
+func TestCatalogValidateDatasetProfile(t *testing.T) {
+	root := t.TempDir()
+	writeSpec(t, root, "profiles/smoke/profile.env", "PROFILE_NAME=smoke\nPROFILE_DESCRIPTION=Smoke\n")
+	writeSpec(t, root, "datasets/profile/smoke.env", "DATASET_NAME=smoke\nDATASET_KIND=profile\nDATASET_PROFILE=smoke\n")
+
+	if errs := New(root).Validate("dataset", nil); len(errs) != 0 {
+		t.Fatalf("unexpected validation errors: %#v", errs)
+	}
+}
+
+func TestRenderReference(t *testing.T) {
+	var out bytes.Buffer
+	if err := RenderReference(&out, "all"); err != nil {
+		t.Fatal(err)
+	}
+	content := out.String()
+	for _, want := range []string{
+		"# Env Spec Reference",
+		"## workload",
+		"`WORKLOAD_KIND`",
+		"profile-sql, sql, pgbench, pg-source-check, noisia, shell, compose-run",
+		"## experiment",
+		"`EXPERIMENT_NAME`",
+		"## dataset",
+		"`DATASET_KIND`",
+		"sql, profile, pgbench",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("reference missing %q:\n%s", want, content)
+		}
 	}
 }
 
