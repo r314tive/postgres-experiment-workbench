@@ -112,6 +112,9 @@ third-party projects; they provide the execution contract, PostgreSQL connection
 environment, logging, metrics, snapshots, and experiment verdict handling around
 those projects.
 
+Concrete dump/restore, PgBouncer, source-check, and upgrade examples live in
+[utility-workflows.md](utility-workflows.md).
+
 ## Experiments
 
 Workloads can be run directly, but repeatable test scenarios should use the

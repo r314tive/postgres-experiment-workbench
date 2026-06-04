@@ -97,6 +97,8 @@ make workload-run WORKLOAD_SPEC=topology/native-pg-upgrade
 ```
 
 Workload platform details live in [docs/workload-platform.md](docs/workload-platform.md).
+Utility workflow examples live in
+[docs/utility-workflows.md](docs/utility-workflows.md).
 
 ## Topologies
 
@@ -231,6 +233,7 @@ go run ./cmd/pgworkbench scan failures logs generated
 Default CI runs `make check`, `make test`, and `make scan-artifacts`.
 PostgreSQL source-tree checks are manual/opt-in. Details live in
 [docs/ci.md](docs/ci.md).
+Compatibility notes live in [docs/compatibility.md](docs/compatibility.md).
 
 ## Release Snapshot
 

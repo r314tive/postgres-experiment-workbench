@@ -24,13 +24,13 @@ and a small number of reliable binaries/scripts.
 - Add release notes and versioned tags once MVP checks are stable.
 - Keep packaged `pgworkbench` snapshot binaries buildable for common platforms.
 - Add a minimal quickstart video or terminal transcript in docs.
-- Add schema/reference docs for profile, workload, topology, experiment, and
-  matrix env specs.
-- Add compatibility notes for Docker, Compose, PostgreSQL image versions, and
-  host tools.
+- Keep schema/reference docs for profile, workload, topology, experiment, and
+  matrix env specs generated from code.
+- Keep compatibility notes current for Docker, Compose, PostgreSQL image
+  versions, and host tools.
 - Add more profile-specific diagnostic SQL where it helps interpretation.
-- Add at least one example utility-test workflow for dump/restore, PgBouncer,
-  source-check plan, and upgrade path.
+- Keep utility-test workflows documented for dump/restore, PgBouncer,
+  source-check plan, and upgrade paths.
 
 ## Go Migration
 
