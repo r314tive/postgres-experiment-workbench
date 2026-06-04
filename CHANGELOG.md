@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+No changes yet.
+
+## v0.1.4 - 2026-06-04
+
 Added platform capabilities:
 
 - Go dataset load plan renderer for no-Docker dataset preflight.
