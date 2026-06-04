@@ -1,0 +1,58 @@
+name: release-snapshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without a leading v.
+        required: true
+        default: 0.1.0
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" = "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+
+          if [[ -z "$version" ]]; then
+            echo "version is required" >&2
+            exit 2
+          fi
+
+          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Static checks
+        run: make check
+
+      - name: Build release snapshot
+        run: make release-snapshot VERSION="$VERSION"
+
+      - name: Upload release snapshot
+        uses: actions/upload-artifact@v6
+        with:
+          name: pgworkbench-${{ env.VERSION }}
+          path: generated/release/*.tar.gz
+          if-no-files-found: error

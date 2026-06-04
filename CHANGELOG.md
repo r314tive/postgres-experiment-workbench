@@ -19,6 +19,7 @@ Added platform capabilities:
   run artifact verification, run reports, state writing, failure scanning, and
   release snapshots;
 - patchset catalog support for PostgreSQL source-check workloads.
+- tag/manual release snapshot workflow for `pgworkbench` archives.
 
 Added first real profiles:
 

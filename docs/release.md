@@ -21,6 +21,10 @@ The snapshot target builds `pgworkbench` archives for common Linux and macOS
 platforms. Default CI keeps using source-based checks; tagged release publishing
 can be added once the MVP contract is stable.
 
+GitHub Actions also has a `release-snapshot` workflow. It runs on `v*` tags or
+manual dispatch, builds the same archives, and uploads them as workflow
+artifacts.
+
 ## Versioning
 
 Use `0.x` versions while the public contracts are still settling. For the first
@@ -29,6 +33,7 @@ public MVP tag, prefer `v0.1.0` after:
 - local `make release-check` is green;
 - GitHub `check` is green on the tag candidate commit;
 - `make release-snapshot VERSION=0.1.0` builds all configured archives;
+- GitHub `release-snapshot` is green for the candidate version;
 - tracked env spec docs/schema pass `make spec-docs-check`;
 - [../CHANGELOG.md](../CHANGELOG.md) describes user-visible changes.
 

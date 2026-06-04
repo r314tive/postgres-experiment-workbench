@@ -37,3 +37,19 @@ make workload-run WORKLOAD_SPEC=topology/native-pg-upgrade
 
 Set `PG_UPGRADE_ACTION=check` or `run` only with a `PG_UPGRADE_IMAGE` that
 contains the required old and new PostgreSQL binary directories.
+
+## Release Snapshot Workflow
+
+The `release-snapshot` workflow builds ignored local-style `pgworkbench`
+archives and uploads them as workflow artifacts. It runs on tags matching `v*`
+and can also be started manually:
+
+```bash
+gh workflow run release-snapshot.yml -f version=0.1.0
+```
+
+The workflow runs `make check` before building archives with:
+
+```bash
+make release-snapshot VERSION=<version>
+```
