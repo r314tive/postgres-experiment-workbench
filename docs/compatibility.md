@@ -43,6 +43,9 @@ postgres://postgres:postgres@127.0.0.1:55433/pg_experiment_workbench?sslmode=dis
 ## Runtime Notes
 
 Use `.env` for local overrides. If no `.env` exists, `.env.example` is used.
+If default host ports are occupied, export overrides directly or evaluate
+`./scripts/assign_test_ports.sh` before `make test`. The helper requires
+`python3`; direct env overrides do not.
 
 Keep experiments disposable. The default commands are intended for local Docker
 targets, not production PostgreSQL instances.

@@ -8,6 +8,11 @@ make test
 make scan-artifacts
 ```
 
+Before Docker-backed runtime tests, CI assigns dynamic localhost ports for the
+PostgreSQL, replica, logical subscriber, PgBouncer, and upgrade containers. This
+keeps the workflow independent from whatever fixed ports are already occupied on
+the runner.
+
 `make check` is a no-Docker static/synthetic test set, including Go unit tests,
 Go profile validation, Go env spec validation, Go run artifact verification,
 Go env spec reference/schema rendering, Go experiment plan rendering, Go

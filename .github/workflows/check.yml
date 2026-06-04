@@ -29,6 +29,9 @@ jobs:
       - name: Static checks
         run: make check
 
+      - name: Assign runtime ports
+        run: ./scripts/assign_test_ports.sh >> "$GITHUB_ENV"
+
       - name: Runtime tests
         run: make test
 
