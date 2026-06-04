@@ -43,6 +43,7 @@ starter.
 | --- | --- |
 | `smoke` | Minimal platform verification. |
 | `constraints` | Constraint validation, deferrable foreign keys, uniqueness, checks. |
+| `jsonb` | JSONB containment, expression indexes, partial indexes, update shape. |
 | `locks` | Table locks, advisory locks, row lock contention, blocking diagnostics. |
 | `vacuum-bloat` | Dead tuples, relation statistics, manual vacuum. |
 | `indexes` | Plan changes, index size, write-path probe. |

@@ -138,6 +138,7 @@ make experiment-list
 make experiment-plan EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=constraints-validation
+make experiment-run EXPERIMENT_SPEC=jsonb-indexing
 make experiment-run EXPERIMENT_SPEC=locks-under-contention
 make experiment-run EXPERIMENT_SPEC=replica-readonly
 make experiment-run EXPERIMENT_SPEC=logical-replication
@@ -297,6 +298,7 @@ logs/
 
 - `smoke`: minimal profile proving the platform works.
 - `constraints`: constraint validation, deferrable foreign keys, uniqueness, checks.
+- `jsonb`: JSONB containment, expression indexes, partial indexes, update shape.
 - `locks`: lock waits, blockers, blocked sessions.
 - `vacuum-bloat`: dead tuples, vacuum behavior, bloat.
 - `indexes`: index creation, query plans, write overhead.

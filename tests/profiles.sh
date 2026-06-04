@@ -5,6 +5,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 PROFILES=(
   constraints
+  jsonb
   locks
   vacuum-bloat
   indexes

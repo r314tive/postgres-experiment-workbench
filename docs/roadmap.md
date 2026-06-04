@@ -66,7 +66,6 @@ shell behavior, then switch Make targets only after compatibility is proven.
 
 ## Candidate Profiles
 
-- `jsonb`: indexing and query shape for JSONB fields.
 - `pg-source-check`: maintained patchsets for testing PostgreSQL source builds.
 - `logical-ddl`: DDL compatibility checks around logical replication.
 

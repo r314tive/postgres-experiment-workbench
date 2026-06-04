@@ -6,6 +6,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPERIMENT_LIST="$("$REPO_DIR/scripts/run_experiment.sh" list)"
 grep -q '^smoke$' <<< "$EXPERIMENT_LIST"
 grep -q '^constraints-validation$' <<< "$EXPERIMENT_LIST"
+grep -q '^jsonb-indexing$' <<< "$EXPERIMENT_LIST"
 grep -q '^locks-under-contention$' <<< "$EXPERIMENT_LIST"
 grep -q '^replica-readonly$' <<< "$EXPERIMENT_LIST"
 grep -q '^logical-replication$' <<< "$EXPERIMENT_LIST"
@@ -41,6 +42,16 @@ EXPERIMENT_METRICS_SAMPLES=1 \
 CONSTRAINTS_RUN_DIR="$REPO_DIR/runs/$CONSTRAINTS_RUN_ID"
 grep -q '"status": "passed"' "$CONSTRAINTS_RUN_DIR/verdict.json"
 grep -q 'profile=constraints' "$CONSTRAINTS_RUN_DIR/manifest.env"
+
+JSONB_RUN_ID="test-jsonb-indexing-$(date -u +%Y%m%d_%H%M%S)"
+EXPERIMENT_RUN_ID="$JSONB_RUN_ID" \
+EXPERIMENT_SNAPSHOT=0 \
+EXPERIMENT_METRICS_SAMPLES=1 \
+  "$REPO_DIR/scripts/run_experiment.sh" run jsonb-indexing >/dev/null
+
+JSONB_RUN_DIR="$REPO_DIR/runs/$JSONB_RUN_ID"
+grep -q '"status": "passed"' "$JSONB_RUN_DIR/verdict.json"
+grep -q 'profile=jsonb' "$JSONB_RUN_DIR/manifest.env"
 
 REPLICA_RUN_ID="test-replica-readonly-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$REPLICA_RUN_ID" \
