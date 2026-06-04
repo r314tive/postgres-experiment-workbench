@@ -8,6 +8,8 @@ config profiles, profile sizes, or repeat counts:
 ```bash
 make matrix-list
 make matrix-plan MATRIX_SPEC=smoke
+make matrix-plan-go MATRIX_SPEC=smoke
+make matrix-plan-json MATRIX_SPEC=smoke
 make matrix-run MATRIX_SPEC=smoke
 ```
 
@@ -27,3 +29,6 @@ MATRIX_STOP_ON_FAIL
 
 Runs are written under `runs/matrices/<matrix-run-id>/`, with per-run reports
 and a summary Markdown file.
+
+`make matrix-plan-json` renders a stable JSON plan for external tooling and CI
+orchestration. It does not start Docker or run experiments.

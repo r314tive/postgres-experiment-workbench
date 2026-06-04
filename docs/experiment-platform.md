@@ -127,12 +127,16 @@ produce evidence for every attempted iteration. Set
 ```bash
 make matrix-list
 make matrix-plan MATRIX_SPEC=smoke
+make matrix-plan-go MATRIX_SPEC=smoke
+make matrix-plan-json MATRIX_SPEC=smoke
 make matrix-run MATRIX_SPEC=smoke
 ```
 
 Matrix specs live under `matrices/**/*.env`. They vary experiment specs,
 PostgreSQL config profiles, profile sizes, and repeat counts. Matrix artifacts
 are written under `runs/matrices/<matrix-run-id>/`, including `statistics.md`.
+Use `matrix-plan-json` when another tool needs a stable machine-readable list
+of planned combinations without starting Docker.
 
 ## Spec Responsibilities
 

@@ -20,6 +20,7 @@ go run ./cmd/pgworkbench patchset list
 go run ./cmd/pgworkbench patchset show chaos/master
 go run ./cmd/pgworkbench patchset validate
 go run ./cmd/pgworkbench experiment plan smoke
+go run ./cmd/pgworkbench matrix plan --json smoke
 go run ./cmd/pgworkbench topology inspect primary-replica
 go run ./cmd/pgworkbench topology ps primary-replica
 go run ./cmd/pgworkbench source plan pg-source/check
@@ -53,6 +54,8 @@ Env spec contracts can be rendered with `pgworkbench spec reference` and
 `pgworkbench spec schema`.
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.
+Matrix specs can be preflighted as Markdown or JSON with
+`pgworkbench matrix plan`.
 Topology specs can be inspected with `pgworkbench topology inspect` without
 starting Docker. Live Compose state can be parsed with `pgworkbench topology ps`
 after a topology has been started.

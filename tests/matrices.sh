@@ -2,6 +2,9 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GO="${GO:-go}"
+GO_CACHE="${GO_CACHE:-$REPO_DIR/.tmp/go-cache}"
+GO_MOD_CACHE="${GO_MOD_CACHE:-$REPO_DIR/.tmp/go-mod-cache}"
 
 MATRIX_LIST="$("$REPO_DIR/scripts/run_experiment_matrix.sh" list)"
 grep -q '^smoke$' <<< "$MATRIX_LIST"
@@ -12,6 +15,22 @@ grep -q 'MATRIX_NAME="smoke matrix"' <<< "$MATRIX_SHOW"
 MATRIX_PLAN="$("$REPO_DIR/scripts/run_experiment_matrix.sh" plan smoke)"
 grep -q '# Experiment Matrix Plan' <<< "$MATRIX_PLAN"
 grep -q '| `smoke` | `default` | `small` | `1` |' <<< "$MATRIX_PLAN"
+
+GO_MATRIX_PLAN="$(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench matrix plan smoke
+)"
+grep -q '# Experiment Matrix Plan' <<< "$GO_MATRIX_PLAN"
+grep -q 'Total runs: `1`' <<< "$GO_MATRIX_PLAN"
+grep -q '| `smoke` | `default` | `small` | `1` |' <<< "$GO_MATRIX_PLAN"
+
+GO_MATRIX_JSON="$(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench matrix plan --json smoke
+)"
+grep -q '"spec": "smoke"' <<< "$GO_MATRIX_JSON"
+grep -q '"total_runs": 1' <<< "$GO_MATRIX_JSON"
+grep -q '"experiment": "smoke"' <<< "$GO_MATRIX_JSON"
 
 MATRIX_RUN_ID="test-matrix-$(date -u +%Y%m%d_%H%M%S)"
 MATRIX_RUN_ID="$MATRIX_RUN_ID" \

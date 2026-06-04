@@ -12,6 +12,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/doctor"
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
+	"github.com/r314tive/postgres-experiment-workbench/internal/matrixplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/patchsetcatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourcecheck"
 	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourceplan"
@@ -60,6 +61,8 @@ func run(args []string) error {
 		return runProfile(profilecatalog.New(root), args[1:])
 	case "experiment":
 		return runExperiment(speccatalog.New(root), args[1:])
+	case "matrix":
+		return runMatrix(speccatalog.New(root), args[1:])
 	case "source":
 		return runSource(root, args[1:])
 	case "topology":
@@ -88,6 +91,7 @@ func usage() {
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]
   pgworkbench experiment plan <experiment-spec>
+  pgworkbench matrix plan [--json] <matrix-spec>
   pgworkbench topology inspect <topology>
   pgworkbench topology ps <topology>
   pgworkbench source plan [workload-spec]
@@ -225,6 +229,35 @@ func runExperiment(catalog speccatalog.Catalog, args []string) error {
 		return experimentplan.Render(os.Stdout, plan)
 	default:
 		return fmt.Errorf("unsupported experiment action: %s", args[0])
+	}
+}
+
+func runMatrix(catalog speccatalog.Catalog, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("matrix action is required")
+	}
+
+	switch args[0] {
+	case "plan":
+		jsonOutput := false
+		inputs := args[1:]
+		if len(inputs) > 0 && inputs[0] == "--json" {
+			jsonOutput = true
+			inputs = inputs[1:]
+		}
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench matrix plan [--json] <matrix-spec>")
+		}
+		plan, err := matrixplan.Build(catalog, inputs[0])
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return matrixplan.RenderJSON(os.Stdout, plan)
+		}
+		return matrixplan.Render(os.Stdout, plan)
+	default:
+		return fmt.Errorf("unsupported matrix action: %s", args[0])
 	}
 }
 

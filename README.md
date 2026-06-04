@@ -168,6 +168,7 @@ For batches:
 ```bash
 make matrix-list
 make matrix-plan MATRIX_SPEC=smoke
+make matrix-plan-json MATRIX_SPEC=smoke
 make matrix-run MATRIX_SPEC=smoke
 ```
 

@@ -108,6 +108,8 @@ help:
 	@printf '  %-24s %s\n' 'make matrix-list' 'List experiment matrix specs'
 	@printf '  %-24s %s\n' 'make matrix-show' 'Show MATRIX_SPEC'
 	@printf '  %-24s %s\n' 'make matrix-plan' 'Preview MATRIX_SPEC combinations'
+	@printf '  %-24s %s\n' 'make matrix-plan-go' 'Preview MATRIX_SPEC combinations with Go CLI'
+	@printf '  %-24s %s\n' 'make matrix-plan-json' 'Render MATRIX_SPEC plan as JSON'
 	@printf '  %-24s %s\n' 'make matrix-run' 'Run MATRIX_SPEC combinations'
 	@printf '  %-24s %s\n' 'make spec-list' 'List SPEC_KIND specs with Go CLI'
 	@printf '  %-24s %s\n' 'make spec-show' 'Show SPEC_KIND/SPEC_ID with Go CLI'
@@ -371,6 +373,14 @@ matrix-show:
 matrix-plan:
 	./scripts/run_experiment_matrix.sh plan "$(MATRIX_SPEC)"
 
+.PHONY: matrix-plan-go
+matrix-plan-go:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix plan "$(MATRIX_SPEC)"
+
+.PHONY: matrix-plan-json
+matrix-plan-json:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix plan --json "$(MATRIX_SPEC)"
+
 .PHONY: matrix-run
 matrix-run:
 	./scripts/run_experiment_matrix.sh run "$(MATRIX_SPEC)"
@@ -545,6 +555,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench patchset validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source plan pg-source/check >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology inspect single >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix plan --json smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference all >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec schema all >/dev/null

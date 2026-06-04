@@ -48,6 +48,7 @@ Already started:
 - `pgworkbench run verify|write-manifest|write-verdict`.
 - experiment runner state writer defaulted to Go with explicit shell
   compatibility mode.
+- `pgworkbench matrix plan`.
 - `pgworkbench spec list|show|reference|schema|validate`.
 - `pgworkbench topology inspect|ps`.
 - `pgworkbench patchset list|show|validate`.
@@ -56,7 +57,7 @@ Already started:
 
 Good Go candidates:
 
-- machine-readable experiment matrix output.
+- Go catalog commands for datasets and workloads.
 
 Keep in shell for now:
 
