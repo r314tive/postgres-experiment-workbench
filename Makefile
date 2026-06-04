@@ -90,6 +90,8 @@ help:
 	@printf '  %-24s %s\n' 'make privacy-scan' 'Scan public files for sensitive-looking text'
 	@printf '  %-24s %s\n' 'make dataset-list' 'List dataset specs'
 	@printf '  %-24s %s\n' 'make dataset-show' 'Show DATASET_SPEC'
+	@printf '  %-24s %s\n' 'make dataset-list-go' 'List dataset specs with Go CLI'
+	@printf '  %-24s %s\n' 'make dataset-show-go' 'Show DATASET_SPEC with Go CLI'
 	@printf '  %-24s %s\n' 'make dataset-load' 'Load DATASET_SPEC'
 	@printf '  %-24s %s\n' 'make experiment-list' 'List experiment specs'
 	@printf '  %-24s %s\n' 'make experiment-show' 'Show EXPERIMENT_SPEC'
@@ -119,6 +121,8 @@ help:
 	@printf '  %-24s %s\n' 'make spec-validate' 'Validate env specs with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-list' 'List workload specs'
 	@printf '  %-24s %s\n' 'make workload-show' 'Show WORKLOAD_SPEC'
+	@printf '  %-24s %s\n' 'make workload-list-go' 'List workload specs with Go CLI'
+	@printf '  %-24s %s\n' 'make workload-show-go' 'Show WORKLOAD_SPEC with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-run' 'Run WORKLOAD_SPEC'
 	@printf '  %-24s %s\n' 'make workload-start' 'Run profile SQL in the background'
 	@printf '  %-24s %s\n' 'make workload-start-spec' 'Run WORKLOAD_SPEC in the background'
@@ -266,9 +270,25 @@ metrics-sample: docker-up
 workload-list:
 	./scripts/run_workload.sh list
 
+.PHONY: workload-list-go
+workload-list-go:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload list
+
+.PHONY: workload-show-go
+workload-show-go:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload show "$(WORKLOAD_SPEC)"
+
 .PHONY: dataset-list
 dataset-list:
 	./scripts/load_dataset.sh list
+
+.PHONY: dataset-list-go
+dataset-list-go:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset list
+
+.PHONY: dataset-show-go
+dataset-show-go:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset show "$(DATASET_SPEC)"
 
 .PHONY: dataset-show
 dataset-show:
@@ -556,6 +576,8 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source plan pg-source/check >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology inspect single >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix plan --json smoke >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference all >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec schema all >/dev/null

@@ -10,8 +10,17 @@ run against that state?"
 
 ```bash
 make workload-list
+make workload-list-go
 make workload-show WORKLOAD_SPEC=pgbench/tiny
+make workload-show-go WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=pgbench/tiny
+```
+
+The Go catalog commands can validate the workload spec set without running any
+workload:
+
+```bash
+go run ./cmd/pgworkbench workload validate
 ```
 
 Specs live under `workloads/**/*.env`. They are trusted local shell env files

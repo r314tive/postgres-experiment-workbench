@@ -48,6 +48,8 @@ Already started:
 - `pgworkbench run verify|write-manifest|write-verdict`.
 - experiment runner state writer defaulted to Go with explicit shell
   compatibility mode.
+- `pgworkbench workload list|show|validate`.
+- `pgworkbench dataset list|show|validate`.
 - `pgworkbench matrix plan`.
 - `pgworkbench spec list|show|reference|schema|validate`.
 - `pgworkbench topology inspect|ps`.
@@ -57,7 +59,7 @@ Already started:
 
 Good Go candidates:
 
-- Go catalog commands for datasets and workloads.
+- Go profile reset/SQL-run planning without executing `psql`.
 
 Keep in shell for now:
 

@@ -2,12 +2,32 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GO="${GO:-go}"
+GO_CACHE="${GO_CACHE:-$REPO_DIR/.tmp/go-cache}"
+GO_MOD_CACHE="${GO_MOD_CACHE:-$REPO_DIR/.tmp/go-mod-cache}"
 
 WORKLOAD_LIST="$("$REPO_DIR/scripts/run_workload.sh" list)"
 grep -q '^pgbench/tiny$' <<< "$WORKLOAD_LIST"
 
+GO_WORKLOAD_LIST="$(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload list
+)"
+grep -q '^pgbench/tiny$' <<< "$GO_WORKLOAD_LIST"
+
 PGBENCH_SPEC="$("$REPO_DIR/scripts/run_workload.sh" show pgbench/tiny)"
 grep -q 'WORKLOAD_KIND="pgbench"' <<< "$PGBENCH_SPEC"
+
+GO_PGBENCH_SPEC="$(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload show pgbench/tiny
+)"
+grep -q 'WORKLOAD_KIND="pgbench"' <<< "$GO_PGBENCH_SPEC"
+
+(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload validate >/dev/null
+)
 
 PG_SOURCE_SPEC="$("$REPO_DIR/scripts/run_workload.sh" show pg-source/check)"
 grep -q 'WORKLOAD_KIND="pg-source-check"' <<< "$PG_SOURCE_SPEC"

@@ -7,6 +7,7 @@ Added platform capabilities:
 - Go topology inspection command for no-Docker topology runtime preflight.
 - Go topology live Compose state parser for started topologies.
 - Go experiment matrix plan renderer with JSON output for external tooling.
+- Go workload and dataset catalog list/show/validate commands.
 
 ## v0.1.1 - 2026-06-04
 

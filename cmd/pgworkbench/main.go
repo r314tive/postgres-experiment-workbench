@@ -55,10 +55,14 @@ func run(args []string) error {
 		return nil
 	case "doctor":
 		return runDoctor(root, args[1:])
+	case "dataset":
+		return runKindCatalog("dataset", speccatalog.New(root), args[1:])
 	case "patchset":
 		return runPatchset(patchsetcatalog.New(root), args[1:])
 	case "profile":
 		return runProfile(profilecatalog.New(root), args[1:])
+	case "workload":
+		return runKindCatalog("workload", speccatalog.New(root), args[1:])
 	case "experiment":
 		return runExperiment(speccatalog.New(root), args[1:])
 	case "matrix":
@@ -84,12 +88,18 @@ func usage() {
 	fmt.Println(`Usage:
   pgworkbench version
   pgworkbench doctor [--skip-docker-daemon]
+  pgworkbench dataset list
+  pgworkbench dataset show <dataset>
+  pgworkbench dataset validate [dataset...]
   pgworkbench patchset list
   pgworkbench patchset show <patchset>
   pgworkbench patchset validate [patchset...]
   pgworkbench profile list
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]
+  pgworkbench workload list
+  pgworkbench workload show <workload>
+  pgworkbench workload validate [workload...]
   pgworkbench experiment plan <experiment-spec>
   pgworkbench matrix plan [--json] <matrix-spec>
   pgworkbench topology inspect <topology>
@@ -130,6 +140,46 @@ func runDoctor(root string, args []string) error {
 		return fmt.Errorf("doctor found failed checks")
 	}
 	return nil
+}
+
+func runKindCatalog(kind string, catalog speccatalog.Catalog, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("%s action is required", kind)
+	}
+
+	switch args[0] {
+	case "list":
+		specs, err := catalog.List(kind)
+		if err != nil {
+			return err
+		}
+		for _, spec := range specs {
+			fmt.Println(spec)
+		}
+		return nil
+	case "show":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench %s show <%s>", kind, kind)
+		}
+		spec, err := catalog.Show(kind, args[1])
+		if err != nil {
+			return err
+		}
+		printSpec(spec)
+		return nil
+	case "validate":
+		errs := catalog.Validate(kind, args[1:])
+		if len(errs) > 0 {
+			for _, err := range errs {
+				fmt.Fprintln(os.Stderr, err)
+			}
+			return fmt.Errorf("%s catalog validation failed", kind)
+		}
+		fmt.Printf("PASS: %s catalog\n", kind)
+		return nil
+	default:
+		return fmt.Errorf("unsupported %s action: %s", kind, args[0])
+	}
 }
 
 func runPatchset(catalog patchsetcatalog.Catalog, args []string) error {
@@ -427,17 +477,7 @@ func runSpec(catalog speccatalog.Catalog, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("SPEC_KIND=\"%s\"\n", spec.Kind)
-		fmt.Printf("SPEC_ID=\"%s\"\n", spec.ID)
-		fmt.Printf("SPEC_FILE=\"%s\"\n", spec.Path)
-		keys := make([]string, 0, len(spec.Values))
-		for key := range spec.Values {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			fmt.Printf("%s=\"%s\"\n", key, spec.Values[key])
-		}
+		printSpec(spec)
 		return nil
 	case "reference":
 		kind := "all"
@@ -619,6 +659,20 @@ func runScan(root string, args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unsupported scan action: %s", args[0])
+	}
+}
+
+func printSpec(spec speccatalog.Spec) {
+	fmt.Printf("SPEC_KIND=\"%s\"\n", spec.Kind)
+	fmt.Printf("SPEC_ID=\"%s\"\n", spec.ID)
+	fmt.Printf("SPEC_FILE=\"%s\"\n", spec.Path)
+	keys := make([]string, 0, len(spec.Values))
+	for key := range spec.Values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Printf("%s=\"%s\"\n", key, spec.Values[key])
 	}
 }
 
