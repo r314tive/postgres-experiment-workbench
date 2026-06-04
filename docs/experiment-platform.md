@@ -26,13 +26,16 @@ runs/<run-id>/
 make experiment-list
 make experiment-show EXPERIMENT_SPEC=smoke
 make experiment-plan EXPERIMENT_SPEC=smoke
+make experiment-plan-json EXPERIMENT_SPEC=smoke
 make experiment-plan-expanded EXPERIMENT_SPEC=smoke
+make experiment-plan-expanded-json EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=smoke
 ```
 
 `experiment-plan` renders the resolved execution phases without starting Docker.
 `experiment-plan-expanded` also embeds topology, dataset, foreground workload,
 and background workload previews without starting Docker.
+The JSON variants render the same dry-runs for external tools.
 
 ## Verify
 

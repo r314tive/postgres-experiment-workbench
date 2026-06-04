@@ -2,6 +2,7 @@ package experimentplan
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,6 +83,23 @@ EXPERIMENT_ASSERT_SQL="SELECT 1;"
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("expanded plan output missing %q:\n%s", want, out.String())
 		}
+	}
+
+	out.Reset()
+	if err := RenderJSON(&out, expanded); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Spec     string    `json:"spec"`
+		Name     string    `json:"name"`
+		Phases   []Phase   `json:"phases"`
+		Previews []Preview `json:"previews"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Spec != "smoke" || payload.Name != "smoke experiment" || len(payload.Phases) == 0 || len(payload.Previews) != 4 {
+		t.Fatalf("unexpected JSON payload: %#v", payload)
 	}
 }
 

@@ -106,7 +106,7 @@ func usage() {
   pgworkbench workload show <workload>
   pgworkbench workload validate [workload...]
   pgworkbench workload plan <workload>
-  pgworkbench experiment plan [--expanded] <experiment-spec>
+  pgworkbench experiment plan [--json] [--expanded] <experiment-spec>
   pgworkbench matrix plan [--json] <matrix-spec>
   pgworkbench topology inspect <topology>
   pgworkbench topology ps <topology>
@@ -364,13 +364,21 @@ func runExperiment(root string, catalog speccatalog.Catalog, args []string) erro
 	switch args[0] {
 	case "plan":
 		expanded := false
+		jsonOutput := false
 		inputs := args[1:]
-		if len(inputs) > 0 && inputs[0] == "--expanded" {
-			expanded = true
+		for len(inputs) > 0 && strings.HasPrefix(inputs[0], "-") {
+			switch inputs[0] {
+			case "--expanded":
+				expanded = true
+			case "--json":
+				jsonOutput = true
+			default:
+				return fmt.Errorf("unknown option: %s", inputs[0])
+			}
 			inputs = inputs[1:]
 		}
 		if len(inputs) != 1 {
-			return fmt.Errorf("usage: pgworkbench experiment plan [--expanded] <experiment-spec>")
+			return fmt.Errorf("usage: pgworkbench experiment plan [--json] [--expanded] <experiment-spec>")
 		}
 		var (
 			plan experimentplan.Plan
@@ -383,6 +391,9 @@ func runExperiment(root string, catalog speccatalog.Catalog, args []string) erro
 		}
 		if err != nil {
 			return err
+		}
+		if jsonOutput {
+			return experimentplan.RenderJSON(os.Stdout, plan)
 		}
 		return experimentplan.Render(os.Stdout, plan)
 	default:

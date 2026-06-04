@@ -42,7 +42,8 @@ Keep shell where it is only glue around Docker Compose, `psql`, or host tools.
 Already started:
 
 - `pgworkbench profile list|show|validate`.
-- `pgworkbench experiment plan`, including expanded dry-run previews.
+- `pgworkbench experiment plan`, including JSON output and expanded dry-run
+  previews.
 - `pgworkbench scan failures`.
 - `pgworkbench report run|compare|summary|history`.
 - `pgworkbench run verify|write-manifest|write-verdict`.
@@ -62,7 +63,7 @@ Already started:
 
 Good Go candidates:
 
-- JSON output for experiment plans and expanded dry-runs.
+- JSON output for workload and dataset plans.
 
 Keep in shell for now:
 

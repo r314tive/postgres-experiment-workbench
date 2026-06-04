@@ -2,6 +2,7 @@ package experimentplan
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,16 +22,16 @@ type Plan struct {
 }
 
 type Phase struct {
-	Name    string
-	Enabled bool
-	Details string
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+	Details string `json:"details"`
 }
 
 type Preview struct {
-	Kind    string
-	ID      string
-	Title   string
-	Content string
+	Kind    string `json:"kind"`
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
 }
 
 func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
@@ -210,6 +211,27 @@ func Render(w io.Writer, plan Plan) error {
 		}
 	}
 	return nil
+}
+
+func RenderJSON(w io.Writer, plan Plan) error {
+	payload := struct {
+		Spec     string            `json:"spec"`
+		SpecPath string            `json:"spec_path"`
+		Name     string            `json:"name"`
+		Fields   map[string]string `json:"fields"`
+		Phases   []Phase           `json:"phases"`
+		Previews []Preview         `json:"previews,omitempty"`
+	}{
+		Spec:     plan.Spec.ID,
+		SpecPath: plan.Spec.Path,
+		Name:     plan.Fields["name"],
+		Fields:   plan.Fields,
+		Phases:   plan.Phases,
+		Previews: plan.Previews,
+	}
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(payload)
 }
 
 func writeRow(w io.Writer, field string, value string) {

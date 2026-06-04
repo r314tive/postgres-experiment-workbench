@@ -15,12 +15,12 @@ the runner.
 
 `make check` is a no-Docker static/synthetic test set, including Go unit tests,
 Go profile validation, Go env spec validation, Go run artifact verification,
-Go env spec reference/schema rendering, Go experiment plan and expanded plan
-rendering, Go matrix JSON plan rendering, Go profile SQL plan rendering, Go
-topology inspection, Go patchset validation, Go workload/dataset validation, Go
-workload and dataset plan rendering, Go source-check plan rendering, Go
-source-check artifact classification tests, Go topology runtime parser tests,
-and Go failure scanning.
+Go env spec reference/schema rendering, Go experiment plan, expanded plan, and
+JSON plan rendering, Go matrix JSON plan rendering, Go profile SQL plan
+rendering, Go topology inspection, Go patchset validation, Go workload/dataset
+validation, Go workload and dataset plan rendering, Go source-check plan
+rendering, Go source-check artifact classification tests, Go topology runtime
+parser tests, and Go failure scanning.
 `make test` is the full local runtime verification and uses Docker Compose.
 `make release-check` is the local pre-release gate: it runs doctor checks,
 static checks, quickstart, full runtime tests, artifact scans, privacy scan, and
