@@ -50,6 +50,9 @@ help:
 	@printf '  %-24s %s\n' 'make psql' 'Open psql'
 	@printf '  %-24s %s\n' 'make pg-config-apply' 'Apply PG_CONFIG to disposable PostgreSQL'
 	@printf '  %-24s %s\n' 'make snapshot' 'Capture PostgreSQL snapshot artifacts'
+	@printf '  %-24s %s\n' 'make profile-list' 'List profiles'
+	@printf '  %-24s %s\n' 'make profile-show' 'Show PROFILE metadata'
+	@printf '  %-24s %s\n' 'make profile-validate' 'Validate profile metadata and required files'
 	@printf '  %-24s %s\n' 'make profile-setup' 'Run profiles/$(PROFILE)/sql/00_setup.sql'
 	@printf '  %-24s %s\n' 'make profile-run' 'Run profiles/$(PROFILE)/sql/$(WORKLOAD_SQL)'
 	@printf '  %-24s %s\n' 'make profile-reset' 'Run setup and run SQL for PROFILE'
@@ -135,6 +138,18 @@ pg-config-apply: docker-up
 .PHONY: snapshot
 snapshot: docker-up
 	./scripts/snapshot_pg.sh
+
+.PHONY: profile-list
+profile-list:
+	./scripts/profile_catalog.sh list
+
+.PHONY: profile-show
+profile-show:
+	./scripts/profile_catalog.sh show "$(PROFILE)"
+
+.PHONY: profile-validate
+profile-validate:
+	./scripts/profile_catalog.sh validate
 
 .PHONY: profile-setup
 profile-setup: docker-up
@@ -297,6 +312,7 @@ noisia-temp:
 .PHONY: test
 test: docker-up
 	./tests/smoke.sh
+	./tests/profile_catalog.sh
 	./tests/profiles.sh
 	./tests/datasets.sh
 	./tests/workloads.sh

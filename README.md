@@ -65,6 +65,8 @@ profiles/<profile-name>/sql/10_run.sql
 Run:
 
 ```bash
+make profile-list
+make profile-show PROFILE=locks
 make profile-reset PROFILE=smoke PROFILE_SIZE=small
 ```
 

@@ -6,6 +6,7 @@ Recommended structure:
 
 ```text
 profiles/<name>/
+  profile.env
   README.md
   sql/
     00_setup.sql
@@ -23,6 +24,14 @@ The workbench passes these psql variables:
 Keep profiles resettable and safe for disposable local databases. Default
 `small` runs should stay quick; `medium` and `large` may be slower but should
 still be bounded.
+
+Machine-readable metadata is optional but recommended:
+
+```bash
+make profile-list
+make profile-show PROFILE=locks
+make profile-validate
+```
 
 See [../docs/profile-authoring.md](../docs/profile-authoring.md) for conventions
 and [../docs/profile-template.md](../docs/profile-template.md) for a README

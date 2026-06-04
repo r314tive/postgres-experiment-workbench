@@ -19,6 +19,28 @@ profiles/<name>/
     10_run.sql
 ```
 
+Optional metadata gives tools a stable catalog without parsing README text:
+
+```text
+profiles/<name>/profile.env
+```
+
+Supported metadata fields:
+
+```text
+PROFILE_NAME
+PROFILE_DESCRIPTION
+PROFILE_TAGS
+PROFILE_SCHEMAS
+PROFILE_SIZES
+PROFILE_DEFAULT_SIZE
+PROFILE_REQUIRES_TOPOLOGY
+PROFILE_BACKGROUND_WORKLOADS
+PROFILE_DIAGNOSTIC_SQL
+```
+
+Run `make profile-validate` before committing profile metadata.
+
 Optional files are useful for concurrent or diagnostic workflows:
 
 ```text
