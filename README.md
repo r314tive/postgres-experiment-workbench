@@ -215,6 +215,17 @@ Default CI runs `make check`, `make test`, and `make scan-artifacts`.
 PostgreSQL source-tree checks are manual/opt-in. Details live in
 [docs/ci.md](docs/ci.md).
 
+## Go CLI
+
+The first Go command is available for profile catalog operations:
+
+```bash
+go run ./cmd/pgworkbench profile list
+go run ./cmd/pgworkbench profile validate
+```
+
+Go migration notes live in [docs/go-migration.md](docs/go-migration.md).
+
 ## Logs
 
 Run any SQL file with logging:

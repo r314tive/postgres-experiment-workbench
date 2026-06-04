@@ -32,6 +32,9 @@ METRICS_SAMPLES ?=
 METRICS_OUT ?=
 NOISIA_DURATION ?= 60
 NOISIA_JOBS ?= 2
+GO ?= go
+GO_CACHE ?= $(CURDIR)/.tmp/go-cache
+GO_MOD_CACHE ?= $(CURDIR)/.tmp/go-mod-cache
 
 .DEFAULT_GOAL := help
 
@@ -88,6 +91,8 @@ help:
 	@printf '  %-24s %s\n' 'make noisia-help' 'Show noisia help'
 	@printf '  %-24s %s\n' 'make noisia-wait' 'Run noisia wait transactions'
 	@printf '  %-24s %s\n' 'make noisia-temp' 'Run noisia temp files'
+	@printf '  %-24s %s\n' 'make go-test' 'Run Go unit tests'
+	@printf '  %-24s %s\n' 'make pgworkbench' 'Build Go CLI into generated/bin'
 	@printf '  %-24s %s\n' 'make check' 'Run static and no-Docker checks'
 	@printf '  %-24s %s\n' 'make test' 'Run profile and workload verification'
 
@@ -310,10 +315,21 @@ noisia-wait:
 noisia-temp:
 	NOISIA_DURATION="$(NOISIA_DURATION)" NOISIA_JOBS="$(NOISIA_JOBS)" ./scripts/run_noisia.sh temp-files
 
+.PHONY: go-test
+go-test:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test ./...
+
+.PHONY: pgworkbench
+pgworkbench:
+	mkdir -p generated/bin
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) build -o generated/bin/pgworkbench ./cmd/pgworkbench
+
 .PHONY: check
 check:
 	bash -n scripts/*.sh tests/*.sh
 	git diff --check
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test ./...
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile validate >/dev/null
 	./tests/profile_catalog.sh
 	./tests/scan_failures.sh
 	./tests/report_runs.sh
