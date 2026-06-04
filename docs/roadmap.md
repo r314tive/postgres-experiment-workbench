@@ -67,7 +67,6 @@ shell behavior, then switch Make targets only after compatibility is proven.
 ## Candidate Profiles
 
 - `pg-source-check`: maintained patchsets for testing PostgreSQL source builds.
-- `logical-ddl`: DDL compatibility checks around logical replication.
 
 ## Boundary
 

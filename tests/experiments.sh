@@ -10,6 +10,7 @@ grep -q '^jsonb-indexing$' <<< "$EXPERIMENT_LIST"
 grep -q '^locks-under-contention$' <<< "$EXPERIMENT_LIST"
 grep -q '^replica-readonly$' <<< "$EXPERIMENT_LIST"
 grep -q '^logical-replication$' <<< "$EXPERIMENT_LIST"
+grep -q '^logical-ddl$' <<< "$EXPERIMENT_LIST"
 grep -q '^pgbouncer-smoke$' <<< "$EXPERIMENT_LIST"
 grep -q '^multi-version-upgrade-smoke$' <<< "$EXPERIMENT_LIST"
 grep -q '^temp-spill$' <<< "$EXPERIMENT_LIST"
@@ -72,6 +73,16 @@ EXPERIMENT_METRICS_SAMPLES=1 \
 LOGICAL_RUN_DIR="$REPO_DIR/runs/$LOGICAL_RUN_ID"
 grep -q '"status": "passed"' "$LOGICAL_RUN_DIR/verdict.json"
 grep -q 'experiment_topology=logical-replication' "$LOGICAL_RUN_DIR/manifest.env"
+
+LOGICAL_DDL_RUN_ID="test-logical-ddl-$(date -u +%Y%m%d_%H%M%S)"
+EXPERIMENT_RUN_ID="$LOGICAL_DDL_RUN_ID" \
+EXPERIMENT_SNAPSHOT=0 \
+EXPERIMENT_METRICS_SAMPLES=1 \
+  "$REPO_DIR/scripts/run_experiment.sh" run logical-ddl >/dev/null
+
+LOGICAL_DDL_RUN_DIR="$REPO_DIR/runs/$LOGICAL_DDL_RUN_ID"
+grep -q '"status": "passed"' "$LOGICAL_DDL_RUN_DIR/verdict.json"
+grep -q 'profile=logical-ddl' "$LOGICAL_DDL_RUN_DIR/manifest.env"
 
 PGBOUNCER_RUN_ID="test-pgbouncer-smoke-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$PGBOUNCER_RUN_ID" \

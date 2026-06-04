@@ -142,6 +142,7 @@ make experiment-run EXPERIMENT_SPEC=jsonb-indexing
 make experiment-run EXPERIMENT_SPEC=locks-under-contention
 make experiment-run EXPERIMENT_SPEC=replica-readonly
 make experiment-run EXPERIMENT_SPEC=logical-replication
+make experiment-run EXPERIMENT_SPEC=logical-ddl
 make experiment-run EXPERIMENT_SPEC=pgbouncer-smoke
 make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
 make experiment-run EXPERIMENT_SPEC=temp-spill

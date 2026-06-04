@@ -52,4 +52,5 @@ starter.
 | `temp-spill` | Sort/hash spills and temporary file counters. |
 | `replication-slots` | Physical slot retention and streaming replication state. |
 | `logical-replication` | Publication/subscription convergence and DDL boundary checks. |
+| `logical-ddl` | Logical replication DDL boundary, repair, publication refresh. |
 | `connection-pressure` | Session churn, backend reuse, and pooler-shaped behavior. |

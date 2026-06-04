@@ -28,6 +28,7 @@ make experiment-plan EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=constraints-validation
 make experiment-run EXPERIMENT_SPEC=jsonb-indexing
+make experiment-run EXPERIMENT_SPEC=logical-ddl
 make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
