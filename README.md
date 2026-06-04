@@ -257,7 +257,8 @@ Build ignored local `pgworkbench` release archives:
 make release-snapshot
 ```
 
-Release notes live in [docs/release.md](docs/release.md).
+Release notes live in [CHANGELOG.md](CHANGELOG.md). Release process details
+live in [docs/release.md](docs/release.md).
 
 ## Go CLI
 

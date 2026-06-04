@@ -1,0 +1,39 @@
+# Changelog
+
+## Unreleased
+
+MVP baseline for the generic PostgreSQL experiment workbench.
+
+Added platform capabilities:
+
+- disposable PostgreSQL topologies for single-node, physical replica, logical
+  replication, PgBouncer, and multi-version upgrade workflows;
+- profile catalog metadata and validation;
+- workload adapters for profile SQL, SQL files, `pgbench`, noisia, shell,
+  Compose one-shots, PostgreSQL source checks, dump/restore, PgBouncer, and
+  upgrade utilities;
+- experiment orchestration with metrics, snapshots, background workloads,
+  assertions, artifact scanning, repeat runs, matrices, comparisons, summaries,
+  and history reports;
+- Go CLI support for doctor checks, profile/spec validation, experiment plans,
+  run artifact verification, run reports, state writing, failure scanning, and
+  release snapshots;
+- patchset catalog support for PostgreSQL source-check workloads.
+
+Added first real profiles:
+
+- `locks`
+- `vacuum-bloat`
+- `indexes`
+- `wal-pressure`
+- `partitioning`
+- `constraints`
+- `jsonb`
+- `logical-ddl`
+
+Release gate:
+
+- `make release-check` is the local pre-release gate.
+- GitHub `check` runs `make check`, `make test`, and artifact scanning.
+- PostgreSQL source builds remain opt-in through manual workflows and
+  `PG_SOURCE_ACTION=run`.
