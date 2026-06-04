@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/r314tive/postgres-experiment-workbench/internal/experimentplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runreport"
@@ -47,6 +48,8 @@ func run(args []string) error {
 		return nil
 	case "profile":
 		return runProfile(profilecatalog.New(root), args[1:])
+	case "experiment":
+		return runExperiment(speccatalog.New(root), args[1:])
 	case "scan":
 		return runScan(root, args[1:])
 	case "report":
@@ -66,6 +69,7 @@ func usage() {
   pgworkbench profile list
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]
+  pgworkbench experiment plan <experiment-spec>
   pgworkbench scan failures [path...]
   pgworkbench report run <run-dir-or-id> [output.md]
   pgworkbench report compare <baseline-run-dir> <candidate-run-dir>
@@ -117,6 +121,26 @@ func runProfile(catalog profilecatalog.Catalog, args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unsupported profile action: %s", args[0])
+	}
+}
+
+func runExperiment(catalog speccatalog.Catalog, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("experiment action is required")
+	}
+
+	switch args[0] {
+	case "plan":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench experiment plan <experiment-spec>")
+		}
+		plan, err := experimentplan.Build(catalog, args[1])
+		if err != nil {
+			return err
+		}
+		return experimentplan.Render(os.Stdout, plan)
+	default:
+		return fmt.Errorf("unsupported experiment action: %s", args[0])
 	}
 }
 

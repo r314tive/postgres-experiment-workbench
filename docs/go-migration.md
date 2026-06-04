@@ -16,6 +16,7 @@ Current Go CLI:
 go run ./cmd/pgworkbench profile list
 go run ./cmd/pgworkbench profile show locks
 go run ./cmd/pgworkbench profile validate
+go run ./cmd/pgworkbench experiment plan smoke
 go run ./cmd/pgworkbench scan failures logs generated
 go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b
@@ -41,3 +42,5 @@ until the shell experiment runner compatibility is proven by the Docker-backed
 suite.
 Run directory integrity checks are covered by `pgworkbench run verify`.
 Env spec contracts can be rendered with `pgworkbench spec reference`.
+Experiment specs can be preflighted as execution plans with
+`pgworkbench experiment plan`.

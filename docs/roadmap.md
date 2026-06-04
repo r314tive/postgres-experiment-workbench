@@ -40,6 +40,7 @@ Keep shell where it is only glue around Docker Compose, `psql`, or host tools.
 Already started:
 
 - `pgworkbench profile list|show|validate`.
+- `pgworkbench experiment plan`.
 - `pgworkbench scan failures`.
 - `pgworkbench report run|compare|summary|history`.
 - `pgworkbench run verify|write-manifest|write-verdict`.
@@ -49,7 +50,6 @@ Already started:
 Good Go candidates:
 
 - env spec JSON schema export;
-- experiment plan rendering;
 - runner compatibility switch from shell state writers to Go state writers.
 
 Keep in shell for now:

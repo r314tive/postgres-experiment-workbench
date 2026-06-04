@@ -123,6 +123,7 @@ metrics, snapshots, assertions, scans, and verdicts into `runs/<run-id>/`:
 
 ```bash
 make experiment-list
+make experiment-plan EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=locks-under-contention
 make experiment-run EXPERIMENT_SPEC=replica-readonly
@@ -249,6 +250,7 @@ scanning:
 go run ./cmd/pgworkbench version
 go run ./cmd/pgworkbench profile list
 go run ./cmd/pgworkbench profile validate
+go run ./cmd/pgworkbench experiment plan smoke
 go run ./cmd/pgworkbench scan failures logs generated
 go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b

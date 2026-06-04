@@ -10,7 +10,8 @@ make scan-artifacts
 
 `make check` is a no-Docker static/synthetic test set, including Go unit tests,
 Go profile validation, Go env spec validation, Go run artifact verification,
-Go env spec reference rendering, and Go failure scanning.
+Go env spec reference rendering, Go experiment plan rendering, and Go failure
+scanning.
 `make test` is the full local runtime verification and uses Docker Compose.
 
 PostgreSQL source-tree checks are intentionally opt-in. Use the
