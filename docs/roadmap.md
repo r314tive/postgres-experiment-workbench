@@ -22,7 +22,7 @@ Release means the repo has stable public contracts, documented extension points,
 and a small number of reliable binaries/scripts.
 
 - Add release notes and versioned tags once MVP checks are stable.
-- Add packaged `pgworkbench` binaries for common platforms.
+- Keep packaged `pgworkbench` snapshot binaries buildable for common platforms.
 - Add a minimal quickstart video or terminal transcript in docs.
 - Add schema/reference docs for profile, workload, topology, experiment, and
   matrix env specs.
@@ -43,11 +43,11 @@ Already started:
 - `pgworkbench scan failures`.
 - `pgworkbench report run|compare|summary|history`.
 - `pgworkbench spec list|show|validate`.
+- `make release-snapshot`.
 
 Good Go candidates:
 
 - manifest/verdict JSON writer;
-- release bundle generator.
 
 Keep in shell for now:
 

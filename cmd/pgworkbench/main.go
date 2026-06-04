@@ -14,6 +14,10 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 )
 
+var version = "dev"
+var commit = "unknown"
+var builtAt = "unknown"
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		if errors.Is(err, failurescan.ErrEvidenceFound) {
@@ -36,6 +40,9 @@ func run(args []string) error {
 	}
 
 	switch args[0] {
+	case "version":
+		fmt.Printf("pgworkbench version=%s commit=%s built_at=%s\n", version, commit, builtAt)
+		return nil
 	case "profile":
 		return runProfile(profilecatalog.New(root), args[1:])
 	case "scan":
@@ -51,6 +58,7 @@ func run(args []string) error {
 
 func usage() {
 	fmt.Println(`Usage:
+  pgworkbench version
   pgworkbench profile list
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]

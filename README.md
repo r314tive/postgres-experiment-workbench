@@ -229,12 +229,23 @@ Default CI runs `make check`, `make test`, and `make scan-artifacts`.
 PostgreSQL source-tree checks are manual/opt-in. Details live in
 [docs/ci.md](docs/ci.md).
 
+## Release Snapshot
+
+Build ignored local `pgworkbench` release archives:
+
+```bash
+make release-snapshot
+```
+
+Release notes live in [docs/release.md](docs/release.md).
+
 ## Go CLI
 
 The first Go commands are available for profile catalog operations and failure
 scanning:
 
 ```bash
+go run ./cmd/pgworkbench version
 go run ./cmd/pgworkbench profile list
 go run ./cmd/pgworkbench profile validate
 go run ./cmd/pgworkbench scan failures logs generated

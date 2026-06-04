@@ -23,6 +23,7 @@ go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>
 go run ./cmd/pgworkbench report history runs/repeats/a runs/repeats/b
 go run ./cmd/pgworkbench spec validate
 make pgworkbench
+make release-snapshot
 ```
 
 The shell scripts remain the compatibility layer for now. `make check` runs the

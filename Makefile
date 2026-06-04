@@ -37,6 +37,12 @@ NOISIA_JOBS ?= 2
 GO ?= go
 GO_CACHE ?= $(CURDIR)/.tmp/go-cache
 GO_MOD_CACHE ?= $(CURDIR)/.tmp/go-mod-cache
+VERSION ?= 0.0.0-dev
+BUILD_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+RELEASE_DIR ?= generated/release
+RELEASE_PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
+PGWORKBENCH_LDFLAGS ?= -s -w -X main.version=$(VERSION) -X main.commit=$(BUILD_COMMIT) -X main.builtAt=$(BUILD_DATE)
 
 .DEFAULT_GOAL := help
 
@@ -103,6 +109,7 @@ help:
 	@printf '  %-24s %s\n' 'make noisia-temp' 'Run noisia temp files'
 	@printf '  %-24s %s\n' 'make go-test' 'Run Go unit tests'
 	@printf '  %-24s %s\n' 'make pgworkbench' 'Build Go CLI into generated/bin'
+	@printf '  %-24s %s\n' 'make release-snapshot' 'Build pgworkbench release archives'
 	@printf '  %-24s %s\n' 'make check' 'Run static and no-Docker checks'
 	@printf '  %-24s %s\n' 'make test' 'Run profile and workload verification'
 
@@ -382,7 +389,24 @@ go-test:
 .PHONY: pgworkbench
 pgworkbench:
 	mkdir -p generated/bin
-	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) build -o generated/bin/pgworkbench ./cmd/pgworkbench
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) build -trimpath -ldflags '$(PGWORKBENCH_LDFLAGS)' -o generated/bin/pgworkbench ./cmd/pgworkbench
+
+.PHONY: release-snapshot
+release-snapshot:
+	mkdir -p "$(RELEASE_DIR)"
+	@for target in $(RELEASE_PLATFORMS); do \
+		os="$${target%/*}"; \
+		arch="$${target#*/}"; \
+		name="pgworkbench-$(VERSION)-$${os}-$${arch}"; \
+		out_dir="$(RELEASE_DIR)/$${name}"; \
+		rm -rf "$$out_dir"; \
+		mkdir -p "$$out_dir"; \
+		echo "building $$name"; \
+		CGO_ENABLED=0 GOOS="$$os" GOARCH="$$arch" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(GO) build -trimpath -ldflags '$(PGWORKBENCH_LDFLAGS)' -o "$$out_dir/pgworkbench" ./cmd/pgworkbench; \
+		tar -C "$$out_dir" -czf "$(RELEASE_DIR)/$${name}.tar.gz" pgworkbench; \
+	done
+	@ls -1 "$(RELEASE_DIR)"/*.tar.gz
 
 .PHONY: check
 check:
