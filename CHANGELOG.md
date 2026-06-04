@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+No changes yet.
+
+## v0.1.6 - 2026-06-04
+
 Added platform capabilities:
 
 - JSON output for Go experiment plans and expanded experiment dry-runs.
