@@ -456,6 +456,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment plan smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS) >/dev/null
 	./tests/profile_catalog.sh
+	./tests/shell_portability.sh
 	./tests/scan_failures.sh
 	./tests/run_verify.sh
 	./tests/report_runs.sh

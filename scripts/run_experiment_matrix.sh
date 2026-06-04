@@ -142,7 +142,7 @@ env_value() {
     return 0
   fi
 
-  awk -F '=' -v key="$key" -v default="$default" '
+  awk -F '=' -v key="$key" -v fallback="$default" '
     $1 == key {
       print substr($0, length(key) + 2)
       found = 1
@@ -150,7 +150,7 @@ env_value() {
     }
     END {
       if (!found) {
-        printf "%s", default
+        printf "%s", fallback
       }
     }
   ' "$file"
