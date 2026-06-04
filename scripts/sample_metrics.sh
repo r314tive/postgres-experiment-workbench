@@ -69,7 +69,7 @@ if [[ "${METRICS_APPEND:-0}" != "1" || ! -s "$OUT_FILE" ]]; then
 fi
 
 sample_once() {
-  "$REPO_DIR/scripts/psql.sh" -A -t -F ',' -f "$REPO_DIR/sql/metrics_sample.sql" >> "$OUT_FILE"
+  "$REPO_DIR/scripts/psql.sh" -q -f "$REPO_DIR/sql/metrics_sample.sql" >> "$OUT_FILE"
 }
 
 if [[ -n "$SAMPLES" ]]; then

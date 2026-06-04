@@ -23,7 +23,7 @@ and a small number of reliable binaries/scripts.
 
 - Add release notes and versioned tags once MVP checks are stable.
 - Keep packaged `pgworkbench` snapshot binaries buildable for common platforms.
-- Add a minimal quickstart video or terminal transcript in docs.
+- Keep the minimal quickstart transcript current.
 - Keep schema/reference docs for profile, workload, topology, experiment, and
   matrix env specs generated from code.
 - Keep compatibility notes current for Docker, Compose, PostgreSQL image

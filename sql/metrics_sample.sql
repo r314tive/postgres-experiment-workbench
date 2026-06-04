@@ -1,9 +1,6 @@
 \set ON_ERROR_STOP on
-\pset pager off
-\pset format unaligned
-\pset tuples_only on
-\pset fieldsep ','
 
+COPY (
 WITH database_oid AS (
     SELECT oid
     FROM pg_database
@@ -79,4 +76,5 @@ SELECT
 FROM activity
 CROSS JOIN lock_summary
 CROSS JOIN database_stats
-CROSS JOIN wal_stats;
+CROSS JOIN wal_stats
+) TO STDOUT WITH (FORMAT csv);

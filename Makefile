@@ -21,6 +21,7 @@ DATASET_SCHEMA ?= dataset_synthetic
 BASELINE_RUN ?=
 CANDIDATE_RUN ?=
 RUN_DIR ?=
+QUICKSTART_RUN_ID ?= quickstart-$(shell date -u +%Y%m%d_%H%M%S)
 SPEC_KIND ?= workload
 SPEC_ID ?=
 SUMMARY_INPUT ?=
@@ -52,6 +53,8 @@ help:
 	@printf '  %-24s %s\n' 'make docker-up' 'Start PostgreSQL workbench'
 	@printf '  %-24s %s\n' 'make docker-down' 'Stop PostgreSQL workbench, keep volume'
 	@printf '  %-24s %s\n' 'make docker-reset' 'Recreate PostgreSQL volume'
+	@printf '  %-24s %s\n' 'make quickstart-plan' 'Preview the smoke experiment quickstart'
+	@printf '  %-24s %s\n' 'make quickstart' 'Run smoke quickstart and write report.md'
 	@printf '  %-24s %s\n' 'make topology-list' 'List topology specs'
 	@printf '  %-24s %s\n' 'make topology-show' 'Show TOPOLOGY'
 	@printf '  %-24s %s\n' 'make topology-up' 'Start TOPOLOGY'
@@ -129,6 +132,18 @@ docker-down:
 docker-reset:
 	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh reset "$(TOPOLOGY)"
 	@if [[ "$(PG_CONFIG)" != "default" ]]; then ./scripts/apply_pg_config.sh "$(PG_CONFIG)"; fi
+
+.PHONY: quickstart-plan
+quickstart-plan:
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment plan smoke
+
+.PHONY: quickstart
+quickstart:
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" EXPERIMENT_RUN_ID="$(QUICKSTART_RUN_ID)" ./scripts/run_experiment.sh run smoke
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run verify "runs/$(QUICKSTART_RUN_ID)"
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report run "runs/$(QUICKSTART_RUN_ID)" > "runs/$(QUICKSTART_RUN_ID)/report.md"
+	@printf 'Quickstart run: %s\n' "runs/$(QUICKSTART_RUN_ID)"
+	@printf 'Quickstart report: %s\n' "runs/$(QUICKSTART_RUN_ID)/report.md"
 
 .PHONY: topology-list
 topology-list:

@@ -25,6 +25,15 @@ make profile-reset PROFILE=smoke PROFILE_SIZE=small
 make monitor
 ```
 
+For the experiment-layer smoke flow:
+
+```bash
+make quickstart-plan
+make quickstart
+```
+
+The full transcript lives in [docs/quickstart.md](docs/quickstart.md).
+
 Run one of the starter experiment profiles:
 
 ```bash

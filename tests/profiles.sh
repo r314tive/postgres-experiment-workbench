@@ -26,4 +26,16 @@ if [[ "$(wc -l < "$REPO_DIR/logs/test-metrics.csv" | tr -d ' ')" -lt 2 ]]; then
   exit 1
 fi
 
+if grep -Eq 'Pager usage|Output format|Field separator' "$REPO_DIR/logs/test-metrics.csv"; then
+  echo "FAIL: metrics sampler wrote psql formatting output into CSV" >&2
+  exit 1
+fi
+
+if awk -F ',' 'NR == 1 { cols = NF; next } NF != cols { bad = 1 } END { exit bad }' "$REPO_DIR/logs/test-metrics.csv"; then
+  :
+else
+  echo "FAIL: metrics sampler wrote rows with inconsistent column counts" >&2
+  exit 1
+fi
+
 echo "PASS: metrics sampler"
