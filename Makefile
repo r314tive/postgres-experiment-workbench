@@ -14,6 +14,7 @@ EXPERIMENT_SPEC ?= smoke
 EXPERIMENT_REPEAT_COUNT ?= 3
 EXPERIMENT_REPEAT_ID ?=
 MATRIX_SPEC ?= smoke
+PATCHSET ?= chaos/master
 DATASET_SPEC ?= synthetic/items
 DATASET_SIZE ?= small
 DATASET_SEED ?= 1
@@ -69,6 +70,9 @@ help:
 	@printf '  %-24s %s\n' 'make profile-list' 'List profiles'
 	@printf '  %-24s %s\n' 'make profile-show' 'Show PROFILE metadata'
 	@printf '  %-24s %s\n' 'make profile-validate' 'Validate profile metadata and required files'
+	@printf '  %-24s %s\n' 'make patchset-list' 'List PostgreSQL source patchsets'
+	@printf '  %-24s %s\n' 'make patchset-show' 'Show PATCHSET metadata'
+	@printf '  %-24s %s\n' 'make patchset-validate' 'Validate patchset metadata and files'
 	@printf '  %-24s %s\n' 'make profile-setup' 'Run profiles/$(PROFILE)/sql/00_setup.sql'
 	@printf '  %-24s %s\n' 'make profile-run' 'Run profiles/$(PROFILE)/sql/$(WORKLOAD_SQL)'
 	@printf '  %-24s %s\n' 'make profile-reset' 'Run setup and run SQL for PROFILE'
@@ -200,6 +204,18 @@ profile-show:
 .PHONY: profile-validate
 profile-validate:
 	./scripts/profile_catalog.sh validate
+
+.PHONY: patchset-list
+patchset-list:
+	./scripts/patchset_catalog.sh list
+
+.PHONY: patchset-show
+patchset-show:
+	./scripts/patchset_catalog.sh show "$(PATCHSET)"
+
+.PHONY: patchset-validate
+patchset-validate:
+	./scripts/patchset_catalog.sh validate
 
 .PHONY: profile-setup
 profile-setup: docker-up
@@ -492,6 +508,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment plan smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS) >/dev/null
 	./tests/profile_catalog.sh
+	./tests/patchsets.sh
 	./tests/shell_portability.sh
 	./tests/scan_failures.sh
 	./tests/run_verify.sh

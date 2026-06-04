@@ -90,5 +90,9 @@ make workload-run WORKLOAD_SPEC=pg-source/check
 Run with a local patchset:
 
 ```bash
-PG_PATCH_DIR=patchsets/chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
+PG_SOURCE_ACTION=plan PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/check
+PG_SOURCE_ACTION=run PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
 ```
+
+Patchset catalog metadata lives under `patchsets/`; use `make patchset-list`
+and `make patchset-validate` before running a heavyweight source build.

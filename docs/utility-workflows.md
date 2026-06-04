@@ -65,6 +65,7 @@ Render and run the lightweight source-check plan:
 make experiment-plan EXPERIMENT_SPEC=pg-source-plan
 make experiment-run EXPERIMENT_SPEC=pg-source-plan
 PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
+PG_SOURCE_ACTION=plan PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/check
 ```
 
 Real PostgreSQL source builds are opt-in. Keep them outside default CI unless a
@@ -72,7 +73,15 @@ specific run needs them:
 
 ```bash
 PG_SOURCE_ACTION=run make workload-run WORKLOAD_SPEC=pg-source/check
-PG_SOURCE_ACTION=run PG_PATCH_DIR=patchsets/chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
+PG_SOURCE_ACTION=run PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
+```
+
+Patchsets are cataloged under `patchsets/`:
+
+```bash
+make patchset-list
+make patchset-show PATCHSET=chaos/master
+make patchset-validate
 ```
 
 Source-check artifacts remain local and ignored. Scan them with the generic

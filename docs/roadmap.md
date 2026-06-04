@@ -66,7 +66,9 @@ shell behavior, then switch Make targets only after compatibility is proven.
 
 ## Candidate Profiles
 
-- `pg-source-check`: maintained patchsets for testing PostgreSQL source builds.
+No named MVP candidate profile is pending. Next profile additions should come
+from concrete utility, topology, or PostgreSQL behavior gaps found during real
+runs.
 
 ## Boundary
 

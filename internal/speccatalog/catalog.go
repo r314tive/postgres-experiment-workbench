@@ -218,6 +218,19 @@ func (c Catalog) validateWorkload(spec Spec) []error {
 		if script != "" && !isDynamic(script) && !c.pathExists(script) {
 			errs = append(errs, specError(spec, "PGBENCH_SCRIPT not found: %s", script))
 		}
+	case "pg-source-check":
+		action := valueOr(spec.Values["PG_SOURCE_ACTION"], "run")
+		if !isDynamic(action) && !oneOf(action, "plan", "run", "scan") {
+			errs = append(errs, specError(spec, "unsupported PG_SOURCE_ACTION: %s", action))
+		}
+		patchset := spec.Values["PG_PATCHSET"]
+		if patchset != "" && !isDynamic(patchset) && !c.fileExists("patchsets", filepath.FromSlash(patchset), "patchset.env") {
+			errs = append(errs, specError(spec, "PG_PATCHSET not found: %s", patchset))
+		}
+		patchDir := spec.Values["PG_PATCH_DIR"]
+		if patchDir != "" && !isDynamic(patchDir) && !c.pathExists(patchDir) {
+			errs = append(errs, specError(spec, "PG_PATCH_DIR not found: %s", patchDir))
+		}
 	case "noisia":
 		workload := requireValue(&errs, spec, "NOISIA_WORKLOAD")
 		if workload != "" && !oneOf(workload, "wait-xacts", "temp-files") {

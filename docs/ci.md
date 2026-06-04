@@ -22,6 +22,7 @@ PostgreSQL source-tree checks are intentionally opt-in. Use the
 
 ```bash
 PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
+PG_SOURCE_ACTION=plan PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=run make workload-run WORKLOAD_SPEC=pg-source/check
 ```
 

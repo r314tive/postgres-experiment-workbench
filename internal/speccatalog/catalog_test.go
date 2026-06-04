@@ -76,6 +76,22 @@ func TestCatalogValidateExperimentStateWriter(t *testing.T) {
 	}
 }
 
+func TestCatalogValidatePgSourcePatchset(t *testing.T) {
+	root := t.TempDir()
+	writeSpec(t, root, "patchsets/chaos/master/patchset.env", "PATCHSET_NAME=chaos/master\nPATCHSET_DESCRIPTION=Chaos\nPATCHSET_PG_REF=master\nPATCHSET_ALLOW_EMPTY=1\n")
+	writeSpec(t, root, "workloads/pg-source/chaos.env", "WORKLOAD_NAME=chaos\nWORKLOAD_KIND=pg-source-check\nPG_SOURCE_ACTION=plan\nPG_PATCHSET=chaos/master\n")
+
+	if errs := New(root).Validate("workload", nil); len(errs) != 0 {
+		t.Fatalf("unexpected validation errors: %#v", errs)
+	}
+
+	writeSpec(t, root, "workloads/pg-source/broken.env", "WORKLOAD_NAME=broken\nWORKLOAD_KIND=pg-source-check\nPG_SOURCE_ACTION=explode\nPG_PATCHSET=missing/master\n")
+	errs := New(root).Validate("workload", []string{"pg-source/broken"})
+	if len(errs) != 2 {
+		t.Fatalf("expected two validation errors, got %#v", errs)
+	}
+}
+
 func TestRenderReference(t *testing.T) {
 	var out bytes.Buffer
 	if err := RenderReference(&out, "all"); err != nil {
@@ -87,6 +103,7 @@ func TestRenderReference(t *testing.T) {
 		"## workload",
 		"`WORKLOAD_KIND`",
 		"profile-sql, sql, pgbench, pg-source-check, noisia, shell, compose-run",
+		"`PG_PATCHSET`",
 		"## experiment",
 		"`EXPERIMENT_NAME`",
 		"## dataset",

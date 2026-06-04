@@ -96,12 +96,17 @@ For testing PostgreSQL source itself:
 
 ```bash
 PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
+PG_SOURCE_ACTION=plan PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/check
 make workload-run WORKLOAD_SPEC=pg-source/check
-PG_PATCH_DIR=patchsets/chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
+PG_SOURCE_ACTION=run PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
 ```
 
 The GitHub `source-check` workflow is manual and defaults to
 `PG_SOURCE_ACTION=plan`; heavy source builds are not part of default CI.
+
+Patchset catalog metadata lives under `patchsets/`. Use `make patchset-list`,
+`make patchset-show PATCHSET=chaos/master`, and `make patchset-validate` to
+inspect local patchsets without cloning PostgreSQL.
 
 The source-check adapter follows the same discipline as other workloads: a spec
 declares the work, logs and artifacts are stored under ignored local folders,

@@ -103,6 +103,7 @@ make workload-show WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=compose/pg-isready
 PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
+PG_SOURCE_ACTION=plan PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/check
 make workload-run WORKLOAD_SPEC=topology/native-pg-upgrade
 ```
 

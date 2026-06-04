@@ -93,6 +93,7 @@ capture_env_overrides() {
     PGBENCH_EXTRA_ARGS
     PG_REPO_URL
     PG_REF
+    PG_PATCHSET
     PG_SOURCE_ACTION
     PG_SOURCE_RUN_ID
     PG_SOURCE_RUN_DIR

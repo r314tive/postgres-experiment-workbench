@@ -8,18 +8,49 @@ Recommended layout:
 patchsets/
   <name>/
     <pg-ref>/
+      patchset.env
       0001-description.patch
       0002-description.patch
+      series
 ```
 
-Run with:
+Catalog commands:
+
+```bash
+make patchset-list
+make patchset-show PATCHSET=chaos/master
+make patchset-validate
+```
+
+Run a plan with a named patchset:
+
+```bash
+PG_SOURCE_ACTION=plan PG_PATCHSET=chaos/master \
+make workload-run WORKLOAD_SPEC=pg-source/check
+```
+
+Run with an ad hoc patch directory:
 
 ```bash
 PG_PATCH_DIR=patchsets/<name>/<pg-ref> \
 make workload-run WORKLOAD_SPEC=pg-source/check
 ```
 
-Patches are applied in lexicographic order. Keep patchsets small, named, and
+`patchset.env` fields:
+
+```bash
+PATCHSET_NAME="<name>/<pg-ref>"
+PATCHSET_DESCRIPTION="short purpose"
+PATCHSET_PG_REF="master"
+PATCHSET_FILES=""
+PATCHSET_ALLOW_EMPTY="0"
+PATCHSET_CONFIGURE_ARGS=""
+PATCHSET_BUILD_CFLAGS=""
+PATCHSET_TEST_INITDB_EXTRA_OPTS=""
+```
+
+Patch order is resolved from `PATCHSET_FILES`, then from a `series` file, then
+from lexicographic `.patch`/`.diff` filenames. Keep patchsets small, named, and
 explicit about the PostgreSQL ref they target. Do not vendor large external
 patch suites into the generic workbench unless they are maintained as part of a
 clear local experiment.
