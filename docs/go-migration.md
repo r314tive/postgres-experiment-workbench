@@ -21,6 +21,7 @@ go run ./cmd/pgworkbench patchset show chaos/master
 go run ./cmd/pgworkbench patchset validate
 go run ./cmd/pgworkbench experiment plan smoke
 go run ./cmd/pgworkbench topology inspect primary-replica
+go run ./cmd/pgworkbench topology ps primary-replica
 go run ./cmd/pgworkbench source plan pg-source/check
 go run ./cmd/pgworkbench source classify generated/pg-source/<run-id>
 go run ./cmd/pgworkbench scan failures logs generated
@@ -53,7 +54,8 @@ Env spec contracts can be rendered with `pgworkbench spec reference` and
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.
 Topology specs can be inspected with `pgworkbench topology inspect` without
-starting Docker.
+starting Docker. Live Compose state can be parsed with `pgworkbench topology ps`
+after a topology has been started.
 Patchset metadata and PostgreSQL source-check planning can be inspected with
 `pgworkbench patchset` and `pgworkbench source plan`; PostgreSQL source-check
 artifacts can be summarized with `pgworkbench source classify`. The

@@ -89,6 +89,7 @@ func usage() {
   pgworkbench profile validate [profile...]
   pgworkbench experiment plan <experiment-spec>
   pgworkbench topology inspect <topology>
+  pgworkbench topology ps <topology>
   pgworkbench source plan [workload-spec]
   pgworkbench source classify <pg-source-run-dir-or-artifact-dir>
   pgworkbench scan failures [path...]
@@ -286,6 +287,17 @@ func runTopology(root string, args []string) error {
 			return err
 		}
 		return topologyinspect.Render(os.Stdout, inspection)
+	case "ps":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench topology ps <topology>")
+		}
+		status, err := topologyinspect.Runtime(root, args[1], topologyinspect.RuntimeOptions{
+			Env: topologyinspect.EnvFromOS(),
+		})
+		if err != nil {
+			return err
+		}
+		return topologyinspect.RenderRuntime(os.Stdout, status)
 	default:
 		return fmt.Errorf("unsupported topology action: %s", args[0])
 	}

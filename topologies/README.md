@@ -21,6 +21,7 @@ Run:
 make topology-list
 make topology-inspect TOPOLOGY=primary-replica
 make topology-up TOPOLOGY=primary-replica
+make topology-ps TOPOLOGY=primary-replica
 make topology-status TOPOLOGY=primary-replica
 make topology-reset TOPOLOGY=primary-replica
 make topology-up TOPOLOGY=logical-replication
@@ -30,5 +31,6 @@ make topology-up TOPOLOGY=multi-version-upgrade
 
 `make topology-inspect` is a no-Docker Go preflight. It renders the topology
 spec path, env file, Compose command, required profiles, services, and resolved
-topology variables. Use `make topology-status` for live container and SQL
-status after a topology has been started.
+topology variables. `make topology-ps` parses live `docker compose ps --format
+json` output into a stable service summary after a topology has been started.
+Use `make topology-status` for richer live container and SQL status.

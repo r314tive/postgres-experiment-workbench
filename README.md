@@ -121,6 +121,7 @@ Runtime topologies describe the PostgreSQL shape an experiment needs:
 make topology-list
 make topology-inspect TOPOLOGY=primary-replica
 make topology-up TOPOLOGY=primary-replica
+make topology-ps TOPOLOGY=primary-replica
 make topology-status TOPOLOGY=primary-replica
 ```
 

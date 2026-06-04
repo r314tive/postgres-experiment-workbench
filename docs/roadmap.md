@@ -49,14 +49,14 @@ Already started:
 - experiment runner state writer defaulted to Go with explicit shell
   compatibility mode.
 - `pgworkbench spec list|show|reference|schema|validate`.
-- `pgworkbench topology inspect`.
+- `pgworkbench topology inspect|ps`.
 - `pgworkbench patchset list|show|validate`.
 - `pgworkbench source plan|classify`.
 - `make release-snapshot`.
 
 Good Go candidates:
 
-- Docker Compose runtime state parsing when live containers are present.
+- machine-readable experiment matrix output.
 
 Keep in shell for now:
 

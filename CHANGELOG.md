@@ -5,6 +5,7 @@
 Added platform capabilities:
 
 - Go topology inspection command for no-Docker topology runtime preflight.
+- Go topology live Compose state parser for started topologies.
 
 ## v0.1.1 - 2026-06-04
 

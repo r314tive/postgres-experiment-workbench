@@ -64,6 +64,7 @@ help:
 	@printf '  %-24s %s\n' 'make topology-list' 'List topology specs'
 	@printf '  %-24s %s\n' 'make topology-show' 'Show TOPOLOGY'
 	@printf '  %-24s %s\n' 'make topology-inspect' 'Inspect TOPOLOGY runtime shape with Go CLI'
+	@printf '  %-24s %s\n' 'make topology-ps' 'Parse live TOPOLOGY Compose state with Go CLI'
 	@printf '  %-24s %s\n' 'make topology-up' 'Start TOPOLOGY'
 	@printf '  %-24s %s\n' 'make topology-reset' 'Recreate TOPOLOGY volumes'
 	@printf '  %-24s %s\n' 'make topology-status' 'Show TOPOLOGY runtime status'
@@ -175,6 +176,10 @@ topology-show:
 .PHONY: topology-inspect
 topology-inspect:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology inspect "$(TOPOLOGY)"
+
+.PHONY: topology-ps
+topology-ps:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology ps "$(TOPOLOGY)"
 
 .PHONY: topology-up
 topology-up:
