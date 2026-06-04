@@ -24,6 +24,19 @@ GO_PGBENCH_SPEC="$(
 )"
 grep -q 'WORKLOAD_KIND="pgbench"' <<< "$GO_PGBENCH_SPEC"
 
+GO_WORKLOAD_PLAN="$(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload plan pgbench/tiny
+)"
+grep -q '# Workload Plan' <<< "$GO_WORKLOAD_PLAN"
+grep -q 'Run pgbench' <<< "$GO_WORKLOAD_PLAN"
+
+GO_SHELL_WORKLOAD_PLAN="$(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload plan topology/pgbouncer-smoke
+)"
+grep -q 'bash -lc' <<< "$GO_SHELL_WORKLOAD_PLAN"
+
 (
   cd "$REPO_DIR"
   GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload validate >/dev/null

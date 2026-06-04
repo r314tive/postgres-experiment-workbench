@@ -56,11 +56,12 @@ Already started:
 - `pgworkbench patchset list|show|validate`.
 - `pgworkbench source plan|classify`.
 - `pgworkbench profile plan`.
+- `pgworkbench workload plan`.
 - `make release-snapshot`.
 
 Good Go candidates:
 
-- Go workload execution planning without running adapters.
+- Go dataset load planning without running loaders.
 
 Keep in shell for now:
 

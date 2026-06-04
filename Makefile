@@ -125,6 +125,7 @@ help:
 	@printf '  %-24s %s\n' 'make workload-show' 'Show WORKLOAD_SPEC'
 	@printf '  %-24s %s\n' 'make workload-list-go' 'List workload specs with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-show-go' 'Show WORKLOAD_SPEC with Go CLI'
+	@printf '  %-24s %s\n' 'make workload-plan-go' 'Preview WORKLOAD_SPEC execution plan'
 	@printf '  %-24s %s\n' 'make workload-run' 'Run WORKLOAD_SPEC'
 	@printf '  %-24s %s\n' 'make workload-start' 'Run profile SQL in the background'
 	@printf '  %-24s %s\n' 'make workload-start-spec' 'Run WORKLOAD_SPEC in the background'
@@ -283,6 +284,10 @@ workload-list-go:
 .PHONY: workload-show-go
 workload-show-go:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload show "$(WORKLOAD_SPEC)"
+
+.PHONY: workload-plan-go
+workload-plan-go:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan "$(WORKLOAD_SPEC)"
 
 .PHONY: dataset-list
 dataset-list:
@@ -584,6 +589,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology inspect single >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix plan --json smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference all >/dev/null

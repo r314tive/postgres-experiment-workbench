@@ -34,6 +34,12 @@ transactions, deadlocks, temporary files, connection exhaustion, cancelled
 queries, and idle transactions. See the upstream project:
 <https://github.com/lesovsky/noisia>.
 
+Preview a workload without running its adapter:
+
+```bash
+make workload-plan-go WORKLOAD_SPEC=pgbench/tiny
+```
+
 ## External Utility Testing
 
 For a utility installed on the host:

@@ -20,6 +20,7 @@ go run ./cmd/pgworkbench profile plan locks
 go run ./cmd/pgworkbench workload list
 go run ./cmd/pgworkbench workload show pgbench/tiny
 go run ./cmd/pgworkbench workload validate
+go run ./cmd/pgworkbench workload plan pgbench/tiny
 go run ./cmd/pgworkbench dataset list
 go run ./cmd/pgworkbench dataset show synthetic/items
 go run ./cmd/pgworkbench dataset validate
@@ -66,6 +67,8 @@ Matrix specs can be preflighted as Markdown or JSON with
 `pgworkbench matrix plan`.
 Workload and dataset specs can be listed, shown, and validated with
 `pgworkbench workload` and `pgworkbench dataset`.
+Workload specs can be preflighted as execution plans with
+`pgworkbench workload plan`.
 Topology specs can be inspected with `pgworkbench topology inspect` without
 starting Docker. Live Compose state can be parsed with `pgworkbench topology ps`
 after a topology has been started.

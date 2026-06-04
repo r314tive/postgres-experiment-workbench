@@ -104,6 +104,7 @@ make workload-list
 make workload-list-go
 make workload-show WORKLOAD_SPEC=pgbench/tiny
 make workload-show-go WORKLOAD_SPEC=pgbench/tiny
+make workload-plan-go WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=compose/pg-isready
 make source-plan SOURCE_WORKLOAD_SPEC=pg-source/check

@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-No changes yet.
+Added platform capabilities:
+
+- Go workload execution plan renderer for no-Docker workload preflight.
 
 ## v0.1.2 - 2026-06-04
 

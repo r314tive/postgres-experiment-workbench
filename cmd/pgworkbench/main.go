@@ -23,6 +23,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/runverify"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/topologyinspect"
+	"github.com/r314tive/postgres-experiment-workbench/internal/workloadplan"
 )
 
 var version = "dev"
@@ -63,7 +64,7 @@ func run(args []string) error {
 	case "profile":
 		return runProfile(root, profilecatalog.New(root), args[1:])
 	case "workload":
-		return runKindCatalog("workload", speccatalog.New(root), args[1:])
+		return runWorkload(root, speccatalog.New(root), args[1:])
 	case "experiment":
 		return runExperiment(speccatalog.New(root), args[1:])
 	case "matrix":
@@ -102,6 +103,7 @@ func usage() {
   pgworkbench workload list
   pgworkbench workload show <workload>
   pgworkbench workload validate [workload...]
+  pgworkbench workload plan <workload>
   pgworkbench experiment plan <experiment-spec>
   pgworkbench matrix plan [--json] <matrix-spec>
   pgworkbench topology inspect <topology>
@@ -181,6 +183,26 @@ func runKindCatalog(kind string, catalog speccatalog.Catalog, args []string) err
 		return nil
 	default:
 		return fmt.Errorf("unsupported %s action: %s", kind, args[0])
+	}
+}
+
+func runWorkload(root string, catalog speccatalog.Catalog, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("workload action is required")
+	}
+
+	switch args[0] {
+	case "plan":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench workload plan <workload>")
+		}
+		plan, err := workloadplan.Build(root, catalog, args[1])
+		if err != nil {
+			return err
+		}
+		return workloadplan.Render(os.Stdout, plan)
+	default:
+		return runKindCatalog("workload", catalog, args)
 	}
 }
 
