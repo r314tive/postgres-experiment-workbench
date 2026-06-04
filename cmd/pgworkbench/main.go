@@ -11,6 +11,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runreport"
+	"github.com/r314tive/postgres-experiment-workbench/internal/runstate"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 )
 
@@ -49,6 +50,8 @@ func run(args []string) error {
 		return runScan(root, args[1:])
 	case "report":
 		return runReport(root, args[1:])
+	case "run":
+		return runState(args[1:])
 	case "spec":
 		return runSpec(speccatalog.New(root), args[1:])
 	default:
@@ -67,6 +70,8 @@ func usage() {
   pgworkbench report compare <baseline-run-dir> <candidate-run-dir>
   pgworkbench report summary [--output output.md] <series-dir|run-dir> [run-dir...]
   pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]
+  pgworkbench run write-manifest --run-dir <run-dir>
+  pgworkbench run write-verdict --run-dir <run-dir> --status <status> --message <message> [--finished-at <time>]
   pgworkbench spec list <workload|experiment|matrix|topology|dataset>
   pgworkbench spec show <kind> <spec>
   pgworkbench spec validate [kind] [spec...]`)
@@ -110,6 +115,56 @@ func runProfile(catalog profilecatalog.Catalog, args []string) error {
 	default:
 		return fmt.Errorf("unsupported profile action: %s", args[0])
 	}
+}
+
+func runState(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("run action is required")
+	}
+
+	switch args[0] {
+	case "write-manifest":
+		options, err := parseFlagArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		runDir := options["run-dir"]
+		if runDir == "" {
+			return fmt.Errorf("usage: pgworkbench run write-manifest --run-dir <run-dir>")
+		}
+		return runstate.WriteManifest(runDir, runstate.ManifestFromEnv(os.Getenv))
+	case "write-verdict":
+		options, err := parseFlagArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		runDir := options["run-dir"]
+		status := options["status"]
+		message := options["message"]
+		if runDir == "" || status == "" || message == "" {
+			return fmt.Errorf("usage: pgworkbench run write-verdict --run-dir <run-dir> --status <status> --message <message> [--finished-at <time>]")
+		}
+		verdict := runstate.VerdictFromEnv(os.Getenv, status, message, options["finished-at"])
+		return runstate.WriteVerdict(runDir, verdict)
+	default:
+		return fmt.Errorf("unsupported run action: %s", args[0])
+	}
+}
+
+func parseFlagArgs(args []string) (map[string]string, error) {
+	options := make(map[string]string)
+	for i := 0; i < len(args); i++ {
+		if len(args[i]) < 3 || args[i][:2] != "--" {
+			return nil, fmt.Errorf("unexpected argument: %s", args[i])
+		}
+		key := args[i][2:]
+		if i+1 >= len(args) {
+			return nil, fmt.Errorf("%s requires a value", args[i])
+		}
+		options[key] = args[i+1]
+		i++
+	}
+	return options, nil
 }
 
 func runSpec(catalog speccatalog.Catalog, args []string) error {

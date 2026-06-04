@@ -51,6 +51,17 @@ go run ./cmd/pgworkbench report history runs/repeats/a runs/repeats/b
 Reports are Markdown summaries built from `manifest.env`, `verdict.env`,
 `metrics.csv`, snapshots, background logs, and scan artifacts.
 
+## Run State
+
+The runner writes machine-readable state files for every experiment. Shell
+scripts remain the default compatibility path, and the Go CLI can write the same
+public artifacts for future runner migration:
+
+```bash
+go run ./cmd/pgworkbench run write-manifest --run-dir runs/<run-id>
+go run ./cmd/pgworkbench run write-verdict --run-dir runs/<run-id> --status passed --message 'experiment passed'
+```
+
 ## Statistical Summary
 
 ```bash
