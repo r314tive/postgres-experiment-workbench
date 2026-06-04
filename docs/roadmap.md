@@ -8,6 +8,7 @@ MVP means a user can clone the repo, run local experiments, test external
 utilities, inspect evidence, and trust the result shape.
 
 - Keep `smoke` as the tiny platform verification profile.
+- Keep `pgworkbench doctor` useful for prerequisite checks.
 - Keep default commands local/disposable and guarded against accidental
   non-local PostgreSQL targets.
 - Keep `make check`, `make test`, and `make scan-artifacts` green.
@@ -22,6 +23,7 @@ Release means the repo has stable public contracts, documented extension points,
 and a small number of reliable binaries/scripts.
 
 - Add release notes and versioned tags once MVP checks are stable.
+- Keep `make release-check` green before tags.
 - Keep packaged `pgworkbench` snapshot binaries buildable for common platforms.
 - Keep the minimal quickstart transcript current.
 - Keep schema/reference docs for profile, workload, topology, experiment, and

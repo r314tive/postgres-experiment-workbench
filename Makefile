@@ -29,6 +29,7 @@ SUMMARY_OUT ?=
 HISTORY_INPUTS ?=
 HISTORY_OUT ?=
 SCAN_PATHS ?= logs generated
+DOCTOR_FLAGS ?=
 METRICS_INTERVAL ?= 1
 METRICS_DURATION ?= 30
 METRICS_SAMPLES ?=
@@ -55,6 +56,7 @@ help:
 	@printf '  %-24s %s\n' 'make docker-reset' 'Recreate PostgreSQL volume'
 	@printf '  %-24s %s\n' 'make quickstart-plan' 'Preview the smoke experiment quickstart'
 	@printf '  %-24s %s\n' 'make quickstart' 'Run smoke quickstart and write report.md'
+	@printf '  %-24s %s\n' 'make doctor' 'Check local workbench prerequisites'
 	@printf '  %-24s %s\n' 'make topology-list' 'List topology specs'
 	@printf '  %-24s %s\n' 'make topology-show' 'Show TOPOLOGY'
 	@printf '  %-24s %s\n' 'make topology-up' 'Start TOPOLOGY'
@@ -74,6 +76,7 @@ help:
 	@printf '  %-24s %s\n' 'make metrics-sample' 'Sample generic PostgreSQL metrics to CSV'
 	@printf '  %-24s %s\n' 'make scan-artifacts' 'Scan logs/artifacts for PG failure evidence'
 	@printf '  %-24s %s\n' 'make scan-artifacts-go' 'Scan logs/artifacts with Go CLI'
+	@printf '  %-24s %s\n' 'make privacy-scan' 'Scan public files for sensitive-looking text'
 	@printf '  %-24s %s\n' 'make dataset-list' 'List dataset specs'
 	@printf '  %-24s %s\n' 'make dataset-show' 'Show DATASET_SPEC'
 	@printf '  %-24s %s\n' 'make dataset-load' 'Load DATASET_SPEC'
@@ -119,6 +122,7 @@ help:
 	@printf '  %-24s %s\n' 'make release-snapshot' 'Build pgworkbench release archives'
 	@printf '  %-24s %s\n' 'make check' 'Run static and no-Docker checks'
 	@printf '  %-24s %s\n' 'make test' 'Run profile and workload verification'
+	@printf '  %-24s %s\n' 'make release-check' 'Run release readiness checks'
 
 .PHONY: docker-up
 docker-up:
@@ -144,6 +148,10 @@ quickstart:
 	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report run "runs/$(QUICKSTART_RUN_ID)" > "runs/$(QUICKSTART_RUN_ID)/report.md"
 	@printf 'Quickstart run: %s\n' "runs/$(QUICKSTART_RUN_ID)"
 	@printf 'Quickstart report: %s\n' "runs/$(QUICKSTART_RUN_ID)/report.md"
+
+.PHONY: doctor
+doctor:
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench doctor $(DOCTOR_FLAGS)
 
 .PHONY: topology-list
 topology-list:
@@ -368,6 +376,29 @@ scan-artifacts:
 scan-artifacts-go:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS)
 
+.PHONY: privacy-scan
+privacy-scan:
+	@tmp="$$(mktemp "$${TMPDIR:-/tmp}/postgres-experiment-workbench-privacy.XXXXXX")"; \
+	home_pattern="$$(printf '%s' "$$HOME" | sed 's/[][\\.^$$*+?{}|()]/\\&/g')"; \
+	pattern="$$(printf '%s|%s|%s|%s' 'gh''o_' 'gh''p_' 'to''ken' 'se''cret')"; \
+	if [[ -n "$$home_pattern" ]]; then pattern="$$pattern|$$home_pattern"; fi; \
+	rg -n -i "$$pattern" . -g '!notes/**' -g '!logs/**' -g '!runs/**' -g '!generated/**' -g '!.tmp/**' -g '!.git/**' > "$$tmp" 2>&1; \
+	status="$$?"; \
+	if [[ "$$status" = "1" ]]; then \
+		rm -f "$$tmp"; \
+		echo 'PASS: privacy scan'; \
+	elif [[ "$$status" = "0" ]]; then \
+		cat "$$tmp"; \
+		rm -f "$$tmp"; \
+		echo 'FAIL: privacy scan found sensitive-looking public text' >&2; \
+		exit 1; \
+	else \
+		cat "$$tmp"; \
+		rm -f "$$tmp"; \
+		echo 'FAIL: privacy scan command failed' >&2; \
+		exit "$$status"; \
+	fi
+
 .PHONY: workload-start
 workload-start: docker-up
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" ./scripts/workload_bg.sh start-profile "$(PROFILE)" "$(WORKLOAD_SQL)"
@@ -442,7 +473,12 @@ release-snapshot:
 			$(GO) build -trimpath -ldflags '$(PGWORKBENCH_LDFLAGS)' -o "$$out_dir/pgworkbench" ./cmd/pgworkbench; \
 		tar -C "$$out_dir" -czf "$(RELEASE_DIR)/$${name}.tar.gz" pgworkbench; \
 	done
-	@ls -1 "$(RELEASE_DIR)"/*.tar.gz
+	@for target in $(RELEASE_PLATFORMS); do \
+		os="$${target%/*}"; \
+		arch="$${target#*/}"; \
+		name="pgworkbench-$(VERSION)-$${os}-$${arch}"; \
+		printf '%s\n' "$(RELEASE_DIR)/$${name}.tar.gz"; \
+	done
 
 .PHONY: check
 check:
@@ -479,3 +515,7 @@ test: docker-up
 	./tests/compare_runs.sh
 	./tests/history.sh
 	./tests/matrices.sh
+
+.PHONY: release-check
+release-check: doctor check quickstart test scan-artifacts scan-artifacts-go pgworkbench privacy-scan
+	@echo 'PASS: release-check'

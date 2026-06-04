@@ -13,6 +13,9 @@ Go profile validation, Go env spec validation, Go run artifact verification,
 Go env spec reference/schema rendering, Go experiment plan rendering, and Go
 failure scanning.
 `make test` is the full local runtime verification and uses Docker Compose.
+`make release-check` is the local pre-release gate: it runs doctor checks,
+static checks, quickstart, full runtime tests, artifact scans, privacy scan, and
+the local `pgworkbench` build.
 
 PostgreSQL source-tree checks are intentionally opt-in. Use the
 `source-check` workflow manually, or run locally:

@@ -57,6 +57,7 @@ the Go writer.
 Run the portable checks:
 
 ```bash
+make doctor
 make check
 make scan-artifacts
 make scan-artifacts-go
@@ -65,5 +66,6 @@ make scan-artifacts-go
 Run the Docker-backed suite before release-level changes:
 
 ```bash
+make release-check
 make test
 ```

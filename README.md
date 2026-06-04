@@ -28,6 +28,7 @@ make monitor
 For the experiment-layer smoke flow:
 
 ```bash
+make doctor
 make quickstart-plan
 make quickstart
 ```
@@ -261,6 +262,7 @@ scanning:
 
 ```bash
 go run ./cmd/pgworkbench version
+go run ./cmd/pgworkbench doctor
 go run ./cmd/pgworkbench profile list
 go run ./cmd/pgworkbench profile validate
 go run ./cmd/pgworkbench experiment plan smoke

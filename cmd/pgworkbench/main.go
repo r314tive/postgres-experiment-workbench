@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/r314tive/postgres-experiment-workbench/internal/doctor"
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
@@ -46,6 +47,8 @@ func run(args []string) error {
 	case "version":
 		fmt.Printf("pgworkbench version=%s commit=%s built_at=%s\n", version, commit, builtAt)
 		return nil
+	case "doctor":
+		return runDoctor(root, args[1:])
 	case "profile":
 		return runProfile(profilecatalog.New(root), args[1:])
 	case "experiment":
@@ -66,6 +69,7 @@ func run(args []string) error {
 func usage() {
 	fmt.Println(`Usage:
   pgworkbench version
+  pgworkbench doctor [--skip-docker-daemon]
   pgworkbench profile list
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]
@@ -83,6 +87,27 @@ func usage() {
   pgworkbench spec reference [workload|experiment|matrix|topology|dataset|all]
   pgworkbench spec schema [workload|experiment|matrix|topology|dataset|all]
   pgworkbench spec validate [kind] [spec...]`)
+}
+
+func runDoctor(root string, args []string) error {
+	options := doctor.Options{}
+	for _, arg := range args {
+		switch arg {
+		case "--skip-docker-daemon":
+			options.SkipDockerDaemon = true
+		default:
+			return fmt.Errorf("usage: pgworkbench doctor [--skip-docker-daemon]")
+		}
+	}
+
+	result := doctor.Run(root, options, doctor.Deps{})
+	if err := doctor.Render(os.Stdout, result); err != nil {
+		return err
+	}
+	if !result.Valid() {
+		return fmt.Errorf("doctor found failed checks")
+	}
+	return nil
 }
 
 func runProfile(catalog profilecatalog.Catalog, args []string) error {
