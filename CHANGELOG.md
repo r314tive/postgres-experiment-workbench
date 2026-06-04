@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+No changes yet.
+
+## v0.1.5 - 2026-06-04
+
 Added platform capabilities:
 
 - Expanded Go experiment dry-run previews for topology, dataset, foreground
