@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+No changes yet.
+
+## v0.1.2 - 2026-06-04
+
 Added platform capabilities:
 
 - Go topology inspection command for no-Docker topology runtime preflight.
