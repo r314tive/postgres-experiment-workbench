@@ -55,11 +55,12 @@ Already started:
 - `pgworkbench topology inspect|ps`.
 - `pgworkbench patchset list|show|validate`.
 - `pgworkbench source plan|classify`.
+- `pgworkbench profile plan`.
 - `make release-snapshot`.
 
 Good Go candidates:
 
-- Go profile reset/SQL-run planning without executing `psql`.
+- Go workload execution planning without running adapters.
 
 Keep in shell for now:
 

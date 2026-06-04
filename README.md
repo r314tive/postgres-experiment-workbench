@@ -78,12 +78,14 @@ Run:
 ```bash
 make profile-list
 make profile-show PROFILE=locks
+make profile-plan PROFILE=locks
 make profile-reset PROFILE=smoke PROFILE_SIZE=small
 ```
 
 Run a specific profile SQL file:
 
 ```bash
+make profile-plan PROFILE=locks PROFILE_PLAN_SQL=30_diagnostics.sql
 make profile-run PROFILE=locks WORKLOAD_SQL=30_diagnostics.sql
 ```
 

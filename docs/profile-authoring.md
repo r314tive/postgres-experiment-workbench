@@ -40,6 +40,9 @@ PROFILE_DIAGNOSTIC_SQL
 ```
 
 Run `make profile-validate` before committing profile metadata.
+Run `make profile-plan PROFILE=<name>` to verify the default setup/run SQL
+sequence and rendered `PROFILE_SIZE`/`PROFILE_SECONDS` command shape without
+opening `psql`.
 
 Optional files are useful for concurrent or diagnostic workflows:
 

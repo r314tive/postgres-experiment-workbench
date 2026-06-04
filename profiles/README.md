@@ -31,6 +31,7 @@ Machine-readable metadata is optional but recommended:
 make profile-list
 make profile-show PROFILE=locks
 make profile-validate
+make profile-plan PROFILE=locks
 ```
 
 See [../docs/profile-authoring.md](../docs/profile-authoring.md) for conventions

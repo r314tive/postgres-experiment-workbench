@@ -17,6 +17,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourcecheck"
 	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourceplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
+	"github.com/r314tive/postgres-experiment-workbench/internal/profileplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runreport"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runstate"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runverify"
@@ -60,7 +61,7 @@ func run(args []string) error {
 	case "patchset":
 		return runPatchset(patchsetcatalog.New(root), args[1:])
 	case "profile":
-		return runProfile(profilecatalog.New(root), args[1:])
+		return runProfile(root, profilecatalog.New(root), args[1:])
 	case "workload":
 		return runKindCatalog("workload", speccatalog.New(root), args[1:])
 	case "experiment":
@@ -97,6 +98,7 @@ func usage() {
   pgworkbench profile list
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]
+  pgworkbench profile plan [--size <size>] [--seconds <seconds>] <profile> [sql-file...]
   pgworkbench workload list
   pgworkbench workload show <workload>
   pgworkbench workload validate [workload...]
@@ -222,7 +224,7 @@ func runPatchset(catalog patchsetcatalog.Catalog, args []string) error {
 	}
 }
 
-func runProfile(catalog profilecatalog.Catalog, args []string) error {
+func runProfile(root string, catalog profilecatalog.Catalog, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("profile action is required")
 	}
@@ -257,9 +259,57 @@ func runProfile(catalog profilecatalog.Catalog, args []string) error {
 		}
 		fmt.Println("PASS: profile catalog")
 		return nil
+	case "plan":
+		options, inputs, err := parseProfilePlanArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if len(inputs) == 0 {
+			return fmt.Errorf("usage: pgworkbench profile plan [--size <size>] [--seconds <seconds>] <profile> [sql-file...]")
+		}
+		plan, err := profileplan.Build(root, catalog, inputs[0], profileplan.Options{
+			Size:    valueOr(options["size"], os.Getenv("PROFILE_SIZE")),
+			Seconds: valueOr(options["seconds"], os.Getenv("PROFILE_SECONDS")),
+			SQL:     inputs[1:],
+		})
+		if err != nil {
+			return err
+		}
+		return profileplan.Render(os.Stdout, plan)
 	default:
 		return fmt.Errorf("unsupported profile action: %s", args[0])
 	}
+}
+
+func parseProfilePlanArgs(args []string) (map[string]string, []string, error) {
+	options := make(map[string]string)
+	var inputs []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--size", "--seconds":
+			if i+1 >= len(args) {
+				return nil, nil, fmt.Errorf("%s requires a value", args[i])
+			}
+			options[strings.TrimPrefix(args[i], "--")] = args[i+1]
+			i++
+		case "--":
+			inputs = append(inputs, args[i+1:]...)
+			return options, inputs, nil
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return nil, nil, fmt.Errorf("unknown option: %s", args[i])
+			}
+			inputs = append(inputs, args[i])
+		}
+	}
+	return options, inputs, nil
+}
+
+func valueOr(value string, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func runExperiment(catalog speccatalog.Catalog, args []string) error {

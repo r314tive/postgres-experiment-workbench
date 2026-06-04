@@ -8,6 +8,7 @@ Added platform capabilities:
 - Go topology live Compose state parser for started topologies.
 - Go experiment matrix plan renderer with JSON output for external tooling.
 - Go workload and dataset catalog list/show/validate commands.
+- Go profile SQL plan renderer for no-Docker profile reset/run preflight.
 
 ## v0.1.1 - 2026-06-04
 

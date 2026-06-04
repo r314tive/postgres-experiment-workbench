@@ -16,6 +16,7 @@ Current Go CLI:
 go run ./cmd/pgworkbench profile list
 go run ./cmd/pgworkbench profile show locks
 go run ./cmd/pgworkbench profile validate
+go run ./cmd/pgworkbench profile plan locks
 go run ./cmd/pgworkbench workload list
 go run ./cmd/pgworkbench workload show pgbench/tiny
 go run ./cmd/pgworkbench workload validate
@@ -47,7 +48,8 @@ make release-snapshot
 ```
 
 The shell scripts remain the compatibility layer for now. `make check` runs the
-Go profile validator and Go failure scanner alongside the existing shell tests.
+Go profile validator, profile SQL planner, and Go failure scanner alongside the
+existing shell tests.
 Run reporting, comparison, summary, and history now have Go equivalents through
 `pgworkbench report`. Env spec listing, display, and validation are covered by
 `pgworkbench spec`. When a Go command matches shell behavior and is covered by
@@ -71,3 +73,5 @@ Patchset metadata and PostgreSQL source-check planning can be inspected with
 `pgworkbench patchset` and `pgworkbench source plan`; PostgreSQL source-check
 artifacts can be summarized with `pgworkbench source classify`. The
 clone/build/test runtime stays in shell.
+Profile reset/run SQL can be preflighted with `pgworkbench profile plan`
+without opening `psql`; actual profile execution stays in shell.

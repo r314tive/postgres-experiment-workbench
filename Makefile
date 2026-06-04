@@ -5,6 +5,7 @@ ENV_FILE ?= $(if $(wildcard .env),.env,.env.example)
 PROFILE ?= smoke
 PROFILE_SIZE ?= small
 PROFILE_SECONDS ?= 30
+PROFILE_PLAN_SQL ?=
 PG_CONFIG ?= default
 TOPOLOGY ?= single
 WORKLOAD_SQL ?= 10_run.sql
@@ -75,6 +76,7 @@ help:
 	@printf '  %-24s %s\n' 'make profile-list' 'List profiles'
 	@printf '  %-24s %s\n' 'make profile-show' 'Show PROFILE metadata'
 	@printf '  %-24s %s\n' 'make profile-validate' 'Validate profile metadata and required files'
+	@printf '  %-24s %s\n' 'make profile-plan' 'Preview PROFILE SQL steps without psql'
 	@printf '  %-24s %s\n' 'make patchset-list' 'List PostgreSQL source patchsets'
 	@printf '  %-24s %s\n' 'make patchset-show' 'Show PATCHSET metadata'
 	@printf '  %-24s %s\n' 'make patchset-validate' 'Validate patchset metadata and files'
@@ -226,6 +228,10 @@ profile-show:
 .PHONY: profile-validate
 profile-validate:
 	./scripts/profile_catalog.sh validate
+
+.PHONY: profile-plan
+profile-plan:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile plan --size "$(PROFILE_SIZE)" --seconds "$(PROFILE_SECONDS)" "$(PROFILE)" $(PROFILE_PLAN_SQL)
 
 .PHONY: patchset-list
 patchset-list:
@@ -572,6 +578,7 @@ check:
 	git diff --check
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test ./...
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile plan smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench patchset validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source plan pg-source/check >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology inspect single >/dev/null
