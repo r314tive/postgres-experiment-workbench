@@ -18,13 +18,13 @@ make release-snapshot VERSION=0.1.0
 ```
 
 The snapshot target builds `pgworkbench` archives for common Linux and macOS
-platforms. Default CI keeps using source-based checks; tagged release publishing
-can be added once the MVP contract is stable.
+platforms and writes a `pgworkbench-<version>-SHA256SUMS.txt` checksum file.
+Default CI keeps using source-based checks.
 
 GitHub Actions also has a `release-snapshot` workflow. It runs on `v*` tags or
 manual dispatch, builds the same archives, and uploads them as workflow
 artifacts. On tag pushes it also creates or updates the matching GitHub Release
-and attaches the archives.
+and attaches the archives plus checksum file.
 
 ## Versioning
 
@@ -34,6 +34,7 @@ public MVP tag, prefer `v0.1.0` after:
 - local `make release-check` is green;
 - GitHub `check` is green on the tag candidate commit;
 - `make release-snapshot VERSION=0.1.0` builds all configured archives;
+- the generated SHA256SUMS file lists every release archive;
 - GitHub `release-snapshot` is green for the candidate version;
 - tracked env spec docs/schema pass `make spec-docs-check`;
 - [../CHANGELOG.md](../CHANGELOG.md) describes user-visible changes.

@@ -54,7 +54,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: pgworkbench-${{ env.VERSION }}
-          path: generated/release/*.tar.gz
+          path: |
+            generated/release/*.tar.gz
+            generated/release/*-SHA256SUMS.txt
           if-no-files-found: error
 
       - name: Publish GitHub release
@@ -64,11 +66,12 @@ jobs:
         shell: bash
         run: |
           tag="$GITHUB_REF_NAME"
+          assets=(generated/release/*.tar.gz generated/release/*-SHA256SUMS.txt)
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" generated/release/*.tar.gz --clobber
+            gh release upload "$tag" "${assets[@]}" --clobber
           else
-            gh release create "$tag" generated/release/*.tar.gz \
+            gh release create "$tag" "${assets[@]}" \
               --title "$tag" \
               --notes-file CHANGELOG.md
           fi

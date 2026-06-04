@@ -44,8 +44,8 @@ contains the required old and new PostgreSQL binary directories.
 ## Release Snapshot Workflow
 
 The `release-snapshot` workflow builds ignored local-style `pgworkbench`
-archives and uploads them as workflow artifacts. It runs on tags matching `v*`
-and can also be started manually:
+archives plus a SHA256SUMS file and uploads them as workflow artifacts. It runs
+on tags matching `v*` and can also be started manually:
 
 ```bash
 gh workflow run release-snapshot.yml -f version=0.1.0
@@ -58,4 +58,4 @@ make release-snapshot VERSION=<version>
 ```
 
 On tag pushes, the workflow also creates or updates the matching GitHub Release
-and attaches the generated archives.
+and attaches the generated archives plus checksum file.

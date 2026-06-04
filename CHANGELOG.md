@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+Added platform capabilities:
+
+- Go patchset catalog, PostgreSQL source-check planning, and source-check
+  artifact classification commands.
+- SHA256 checksum files for release snapshots and GitHub Release assets.
+
+## v0.1.0 - 2026-06-04
+
 MVP baseline for the generic PostgreSQL experiment workbench.
 
 Added platform capabilities:
@@ -18,7 +26,7 @@ Added platform capabilities:
 - Go CLI support for doctor checks, profile/spec validation, experiment plans,
   run artifact verification, run reports, state writing, failure scanning, and
   release snapshots;
-- patchset catalog support for PostgreSQL source-check workloads.
+- patchset catalog support for PostgreSQL source-check workloads;
 - tag/manual release snapshot workflow for `pgworkbench` archives and GitHub
   Release publishing.
 

@@ -47,6 +47,7 @@ BUILD_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 RELEASE_DIR ?= generated/release
 RELEASE_PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
+RELEASE_CHECKSUM_FILE ?= $(RELEASE_DIR)/pgworkbench-$(VERSION)-SHA256SUMS.txt
 PGWORKBENCH_LDFLAGS ?= -s -w -X main.version=$(VERSION) -X main.commit=$(BUILD_COMMIT) -X main.builtAt=$(BUILD_DATE)
 
 .DEFAULT_GOAL := help
@@ -506,12 +507,24 @@ release-snapshot:
 			$(GO) build -trimpath -ldflags '$(PGWORKBENCH_LDFLAGS)' -o "$$out_dir/pgworkbench" ./cmd/pgworkbench; \
 		tar -C "$$out_dir" -czf "$(RELEASE_DIR)/$${name}.tar.gz" pgworkbench; \
 	done
+	@rm -f "$(RELEASE_CHECKSUM_FILE)"
+	@for target in $(RELEASE_PLATFORMS); do \
+		os="$${target%/*}"; \
+		arch="$${target#*/}"; \
+		name="pgworkbench-$(VERSION)-$${os}-$${arch}.tar.gz"; \
+		if command -v sha256sum >/dev/null 2>&1; then \
+			(cd "$(RELEASE_DIR)" && sha256sum "$$name") >> "$(RELEASE_CHECKSUM_FILE)"; \
+		else \
+			(cd "$(RELEASE_DIR)" && shasum -a 256 "$$name") >> "$(RELEASE_CHECKSUM_FILE)"; \
+		fi; \
+	done
 	@for target in $(RELEASE_PLATFORMS); do \
 		os="$${target%/*}"; \
 		arch="$${target#*/}"; \
 		name="pgworkbench-$(VERSION)-$${os}-$${arch}"; \
 		printf '%s\n' "$(RELEASE_DIR)/$${name}.tar.gz"; \
 	done
+	@printf '%s\n' "$(RELEASE_CHECKSUM_FILE)"
 
 .PHONY: check
 check:
