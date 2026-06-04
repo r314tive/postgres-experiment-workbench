@@ -48,9 +48,9 @@ Keep experiments disposable. The default commands are intended for local Docker
 targets, not production PostgreSQL instances.
 
 The experiment runner writes `manifest.env`, `verdict.env`, and `verdict.json`
-with the Go state writer when available. Set `EXPERIMENT_STATE_WRITER=shell` to
-force the shell compatibility path, or `EXPERIMENT_STATE_WRITER=go` to require
-the Go writer.
+with the Go state writer by default. Set `EXPERIMENT_STATE_WRITER=shell` to
+force the shell compatibility path. `EXPERIMENT_STATE_WRITER=auto` remains a
+compatibility alias for the Go writer.
 
 ## Verification
 

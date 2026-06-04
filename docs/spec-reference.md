@@ -79,7 +79,7 @@ Experiment specs live under `experiments/**/*.env` and orchestrate topology, set
 | `EXPERIMENT_METRICS_SAMPLES` | optional | - | - | Fixed sample count; overrides duration loop. |
 | `EXPERIMENT_SNAPSHOT` | optional | 1 | 0, 1 | Capture before/after PostgreSQL snapshots. |
 | `EXPERIMENT_DOCKER_RESET` | optional | 0 | 0, 1 | Reset runtime before the run. |
-| `EXPERIMENT_STATE_WRITER` | optional | auto | auto, go, shell | State-file writer mode for manifest and verdict artifacts. |
+| `EXPERIMENT_STATE_WRITER` | optional | go | auto, go, shell | State-file writer mode for manifest and verdict artifacts. `auto` is a compatibility alias for `go`. |
 | `EXPERIMENT_SCAN_PATHS` | optional | run directory | - | Paths scanned for failure evidence. |
 | `EXPERIMENT_RUN_ID` | optional | generated | - | Explicit run id. |
 

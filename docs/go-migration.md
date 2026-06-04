@@ -38,9 +38,9 @@ Run reporting, comparison, summary, and history now have Go equivalents through
 `pgworkbench report`. Env spec listing, display, and validation are covered by
 `pgworkbench spec`. When a Go command matches shell behavior and is covered by
 tests, Make targets can move to the Go implementation.
-Run manifest and verdict writing now uses Go in `EXPERIMENT_STATE_WRITER=auto`
-mode when `pgworkbench` or `go run` is available, with shell fallback for
-compatibility.
+Run manifest and verdict writing now uses Go by default. The explicit
+`EXPERIMENT_STATE_WRITER=shell` mode keeps the shell compatibility path
+available; `auto` remains a compatibility alias for Go.
 Run directory integrity checks are covered by `pgworkbench run verify`.
 Env spec contracts can be rendered with `pgworkbench spec reference` and
 `pgworkbench spec schema`.

@@ -50,7 +50,7 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 		"metrics_samples":   shellDefault(values["EXPERIMENT_METRICS_SAMPLES"]),
 		"snapshot":          defaultValue(values["EXPERIMENT_SNAPSHOT"], "1"),
 		"docker_reset":      defaultValue(values["EXPERIMENT_DOCKER_RESET"], "0"),
-		"state_writer":      defaultValue(values["EXPERIMENT_STATE_WRITER"], "auto"),
+		"state_writer":      defaultValue(values["EXPERIMENT_STATE_WRITER"], "go"),
 		"scan_paths":        shellDefault(values["EXPERIMENT_SCAN_PATHS"]),
 		"run_id":            shellDefault(values["EXPERIMENT_RUN_ID"]),
 	}

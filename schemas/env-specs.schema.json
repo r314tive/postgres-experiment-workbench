@@ -280,8 +280,8 @@
           "x-workbench-requirement": "optional"
         },
         "EXPERIMENT_STATE_WRITER": {
-          "default": "auto",
-          "description": "State-file writer mode for manifest and verdict artifacts.",
+          "default": "go",
+          "description": "State-file writer mode for manifest and verdict artifacts. `auto` is a compatibility alias for `go`.",
           "enum": [
             "auto",
             "go",

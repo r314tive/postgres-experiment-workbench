@@ -34,6 +34,17 @@ grep -q '"status": "passed"' "$RUN_DIR/verdict.json"
 test -s "$RUN_DIR/manifest.env"
 test -s "$RUN_DIR/metrics.csv"
 
+SHELL_WRITER_RUN_ID="test-smoke-shell-writer-$(date -u +%Y%m%d_%H%M%S)"
+EXPERIMENT_RUN_ID="$SHELL_WRITER_RUN_ID" \
+EXPERIMENT_STATE_WRITER=shell \
+EXPERIMENT_SNAPSHOT=0 \
+EXPERIMENT_METRICS_SAMPLES=1 \
+  "$REPO_DIR/scripts/run_experiment.sh" run smoke >/dev/null
+
+SHELL_WRITER_RUN_DIR="$REPO_DIR/runs/$SHELL_WRITER_RUN_ID"
+grep -q '"status": "passed"' "$SHELL_WRITER_RUN_DIR/verdict.json"
+grep -q 'experiment_topology=single' "$SHELL_WRITER_RUN_DIR/manifest.env"
+
 CONSTRAINTS_RUN_ID="test-constraints-validation-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$CONSTRAINTS_RUN_ID" \
 EXPERIMENT_SNAPSHOT=0 \

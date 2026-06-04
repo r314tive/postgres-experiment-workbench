@@ -262,7 +262,7 @@ func (c Catalog) validateExperiment(spec Spec) []error {
 		errs = append(errs, specError(spec, "PostgreSQL config not found: %s", pgConfig))
 	}
 
-	stateWriter := valueOr(spec.Values["EXPERIMENT_STATE_WRITER"], "auto")
+	stateWriter := valueOr(spec.Values["EXPERIMENT_STATE_WRITER"], "go")
 	if !isDynamic(stateWriter) && !oneOf(stateWriter, "auto", "go", "shell") {
 		errs = append(errs, specError(spec, "unsupported EXPERIMENT_STATE_WRITER: %s", stateWriter))
 	}

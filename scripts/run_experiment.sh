@@ -208,15 +208,12 @@ write_manifest_go() {
 }
 
 write_manifest() {
-  case "${EXPERIMENT_STATE_WRITER:-auto}" in
-    go)
+  case "${EXPERIMENT_STATE_WRITER:-go}" in
+    go|auto)
       write_manifest_go
       ;;
     shell)
       write_manifest_shell
-      ;;
-    auto)
-      write_manifest_go >/dev/null 2>&1 || write_manifest_shell
       ;;
     *)
       echo "Unsupported EXPERIMENT_STATE_WRITER: ${EXPERIMENT_STATE_WRITER:-}" >&2
@@ -379,15 +376,12 @@ write_verdict_go() {
 }
 
 write_verdict() {
-  case "${EXPERIMENT_STATE_WRITER:-auto}" in
-    go)
+  case "${EXPERIMENT_STATE_WRITER:-go}" in
+    go|auto)
       write_verdict_go "$@"
       ;;
     shell)
       write_verdict_shell "$@"
-      ;;
-    auto)
-      write_verdict_go "$@" >/dev/null 2>&1 || write_verdict_shell "$@"
       ;;
     *)
       echo "Unsupported EXPERIMENT_STATE_WRITER: ${EXPERIMENT_STATE_WRITER:-}" >&2
