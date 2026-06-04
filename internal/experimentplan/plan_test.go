@@ -16,6 +16,8 @@ func TestBuildRenderExperimentPlan(t *testing.T) {
 	writeFile(t, root, "profiles/smoke/profile.env", "PROFILE_NAME=smoke\nPROFILE_DESCRIPTION=Smoke\n")
 	writeFile(t, root, "profiles/smoke/sql/00_setup.sql", "SELECT 1;\n")
 	writeFile(t, root, "profiles/smoke/sql/10_run.sql", "SELECT 1;\n")
+	writeFile(t, root, "sql/datasets/items.sql", "SELECT 1;\n")
+	writeFile(t, root, "datasets/synthetic/items.env", "DATASET_NAME=items\nDATASET_KIND=sql\nDATASET_SQL=sql/datasets/items.sql\n")
 	writeFile(t, root, "topologies/single.env", "TOPOLOGY_NAME=single\nTOPOLOGY_DESCRIPTION=Single\n")
 	writeFile(t, root, "workloads/sql/smoke-run.env", "WORKLOAD_NAME=smoke\nWORKLOAD_KIND=profile-sql\nPROFILE=smoke\nWORKLOAD_SQL=10_run.sql\n")
 	writeFile(t, root, "workloads/profile/background.env", "WORKLOAD_NAME=background\nWORKLOAD_KIND=profile-sql\nPROFILE=smoke\nWORKLOAD_SQL=10_run.sql\n")
@@ -25,6 +27,7 @@ EXPERIMENT_PG_CONFIG="default"
 EXPERIMENT_PROFILE="smoke"
 EXPERIMENT_PROFILE_SIZE="${EXPERIMENT_PROFILE_SIZE:-small}"
 EXPERIMENT_PROFILE_SETUP=1
+EXPERIMENT_DATASET_SPEC="synthetic/items"
 EXPERIMENT_BACKGROUND_SPECS="profile/background"
 EXPERIMENT_BACKGROUND_WARMUP=2
 EXPERIMENT_WORKLOAD_SPEC="sql/smoke-run"
@@ -55,6 +58,29 @@ EXPERIMENT_ASSERT_SQL="SELECT 1;"
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("plan output missing %q:\n%s", want, content)
+		}
+	}
+
+	expanded, err := BuildExpanded(root, speccatalog.New(root), "smoke")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expanded.Previews) != 4 {
+		t.Fatalf("expected topology, dataset, foreground workload, and background previews, got %#v", expanded.Previews)
+	}
+	out.Reset()
+	if err := Render(&out, expanded); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"## Embedded Previews",
+		"### Topology Preview: single",
+		"# Dataset Plan",
+		"# Workload Plan",
+		"### Background Workload Preview: profile/background",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("expanded plan output missing %q:\n%s", want, out.String())
 		}
 	}
 }

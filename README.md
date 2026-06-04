@@ -146,6 +146,7 @@ metrics, snapshots, assertions, scans, and verdicts into `runs/<run-id>/`:
 ```bash
 make experiment-list
 make experiment-plan EXPERIMENT_SPEC=smoke
+make experiment-plan-expanded EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=constraints-validation
 make experiment-run EXPERIMENT_SPEC=jsonb-indexing

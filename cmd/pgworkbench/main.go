@@ -67,7 +67,7 @@ func run(args []string) error {
 	case "workload":
 		return runWorkload(root, speccatalog.New(root), args[1:])
 	case "experiment":
-		return runExperiment(speccatalog.New(root), args[1:])
+		return runExperiment(root, speccatalog.New(root), args[1:])
 	case "matrix":
 		return runMatrix(speccatalog.New(root), args[1:])
 	case "source":
@@ -106,7 +106,7 @@ func usage() {
   pgworkbench workload show <workload>
   pgworkbench workload validate [workload...]
   pgworkbench workload plan <workload>
-  pgworkbench experiment plan <experiment-spec>
+  pgworkbench experiment plan [--expanded] <experiment-spec>
   pgworkbench matrix plan [--json] <matrix-spec>
   pgworkbench topology inspect <topology>
   pgworkbench topology ps <topology>
@@ -356,17 +356,31 @@ func valueOr(value string, fallback string) string {
 	return value
 }
 
-func runExperiment(catalog speccatalog.Catalog, args []string) error {
+func runExperiment(root string, catalog speccatalog.Catalog, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("experiment action is required")
 	}
 
 	switch args[0] {
 	case "plan":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: pgworkbench experiment plan <experiment-spec>")
+		expanded := false
+		inputs := args[1:]
+		if len(inputs) > 0 && inputs[0] == "--expanded" {
+			expanded = true
+			inputs = inputs[1:]
 		}
-		plan, err := experimentplan.Build(catalog, args[1])
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench experiment plan [--expanded] <experiment-spec>")
+		}
+		var (
+			plan experimentplan.Plan
+			err  error
+		)
+		if expanded {
+			plan, err = experimentplan.BuildExpanded(root, catalog, inputs[0])
+		} else {
+			plan, err = experimentplan.Build(catalog, inputs[0])
+		}
 		if err != nil {
 			return err
 		}

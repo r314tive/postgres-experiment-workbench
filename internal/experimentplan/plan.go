@@ -1,24 +1,36 @@
 package experimentplan
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
 
+	"github.com/r314tive/postgres-experiment-workbench/internal/datasetplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
+	"github.com/r314tive/postgres-experiment-workbench/internal/topologyinspect"
+	"github.com/r314tive/postgres-experiment-workbench/internal/workloadplan"
 )
 
 type Plan struct {
-	Spec   speccatalog.Spec
-	Fields map[string]string
-	Phases []Phase
+	Spec     speccatalog.Spec
+	Fields   map[string]string
+	Phases   []Phase
+	Previews []Preview
 }
 
 type Phase struct {
 	Name    string
 	Enabled bool
 	Details string
+}
+
+type Preview struct {
+	Kind    string
+	ID      string
+	Title   string
+	Content string
 }
 
 func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
@@ -76,6 +88,84 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 	return Plan{Spec: spec, Fields: fields, Phases: phases}, nil
 }
 
+func BuildExpanded(root string, catalog speccatalog.Catalog, input string) (Plan, error) {
+	plan, err := Build(catalog, input)
+	if err != nil {
+		return Plan{}, err
+	}
+
+	topologyID := plan.Fields["topology"]
+	if topologyID != "" && !isDynamic(topologyID) {
+		inspection, err := topologyinspect.Inspect(root, topologyID, topologyinspect.Options{})
+		if err != nil {
+			return Plan{}, err
+		}
+		var out bytes.Buffer
+		if err := topologyinspect.Render(&out, inspection); err != nil {
+			return Plan{}, err
+		}
+		plan.Previews = append(plan.Previews, Preview{
+			Kind:    "topology",
+			ID:      topologyID,
+			Title:   "Topology Preview",
+			Content: strings.TrimSpace(out.String()),
+		})
+	}
+
+	if datasetID := plan.Fields["dataset"]; datasetID != "" && !isDynamic(datasetID) {
+		dataset, err := datasetplan.Build(root, catalog, datasetID)
+		if err != nil {
+			return Plan{}, err
+		}
+		var out bytes.Buffer
+		if err := datasetplan.Render(&out, dataset); err != nil {
+			return Plan{}, err
+		}
+		plan.Previews = append(plan.Previews, Preview{
+			Kind:    "dataset",
+			ID:      datasetID,
+			Title:   "Dataset Preview",
+			Content: strings.TrimSpace(out.String()),
+		})
+	}
+
+	if workloadID := plan.Fields["workload"]; workloadID != "" && !isDynamic(workloadID) {
+		workload, err := workloadplan.Build(root, catalog, workloadID)
+		if err != nil {
+			return Plan{}, err
+		}
+		var out bytes.Buffer
+		if err := workloadplan.Render(&out, workload); err != nil {
+			return Plan{}, err
+		}
+		plan.Previews = append(plan.Previews, Preview{
+			Kind:    "workload",
+			ID:      workloadID,
+			Title:   "Foreground Workload Preview",
+			Content: strings.TrimSpace(out.String()),
+		})
+	}
+
+	for _, workloadID := range staticWords(plan.Fields["backgrounds"]) {
+		workload, err := workloadplan.Build(root, catalog, workloadID)
+		if err != nil {
+			return Plan{}, err
+		}
+		var out bytes.Buffer
+		if err := workloadplan.Render(&out, workload); err != nil {
+			return Plan{}, err
+		}
+		plan.Previews = append(plan.Previews, Preview{
+			Kind:    "background workload",
+			ID:      workloadID,
+			Title:   "Background Workload Preview",
+			Content: strings.TrimSpace(out.String()),
+		})
+	}
+
+	return plan, nil
+}
+
 func Render(w io.Writer, plan Plan) error {
 	fmt.Fprintln(w, "# Experiment Plan")
 	fmt.Fprintln(w)
@@ -106,6 +196,18 @@ func Render(w io.Writer, plan Plan) error {
 			enabled = "yes"
 		}
 		writePhase(w, phase.Name, enabled, phase.Details)
+	}
+	if len(plan.Previews) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "## Embedded Previews")
+		for _, preview := range plan.Previews {
+			fmt.Fprintln(w)
+			fmt.Fprintf(w, "### %s: %s\n", tableCell(preview.Title), tableCell(preview.ID))
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, "```text")
+			fmt.Fprintln(w, preview.Content)
+			fmt.Fprintln(w, "```")
+		}
 	}
 	return nil
 }
@@ -211,6 +313,17 @@ func shellDefault(value string) string {
 		return value
 	}
 	return fallback
+}
+
+func staticWords(value string) []string {
+	if value == "" || isDynamic(value) {
+		return nil
+	}
+	return strings.Fields(value)
+}
+
+func isDynamic(value string) bool {
+	return strings.Contains(value, "$")
 }
 
 func tableCell(value string) string {

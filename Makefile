@@ -99,6 +99,7 @@ help:
 	@printf '  %-24s %s\n' 'make experiment-list' 'List experiment specs'
 	@printf '  %-24s %s\n' 'make experiment-show' 'Show EXPERIMENT_SPEC'
 	@printf '  %-24s %s\n' 'make experiment-plan' 'Render EXPERIMENT_SPEC execution plan'
+	@printf '  %-24s %s\n' 'make experiment-plan-expanded' 'Render expanded EXPERIMENT_SPEC plan'
 	@printf '  %-24s %s\n' 'make experiment-run' 'Run EXPERIMENT_SPEC into runs/<run-id>'
 	@printf '  %-24s %s\n' 'make experiment-verify' 'Verify RUN_DIR artifact integrity'
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report for RUN_DIR'
@@ -325,6 +326,10 @@ experiment-show:
 .PHONY: experiment-plan
 experiment-plan:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment plan "$(EXPERIMENT_SPEC)"
+
+.PHONY: experiment-plan-expanded
+experiment-plan-expanded:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment plan --expanded "$(EXPERIMENT_SPEC)"
 
 .PHONY: experiment-run
 experiment-run:
@@ -602,6 +607,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec schema all >/dev/null
 	GO_CACHE="$(GO_CACHE)" GO_MOD_CACHE="$(GO_MOD_CACHE)" ./tests/spec_docs.sh
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment plan smoke >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment plan --expanded smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS) >/dev/null
 	./tests/profile_catalog.sh
 	./tests/patchsets.sh
