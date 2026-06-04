@@ -6,8 +6,6 @@ This project should stay a generic PostgreSQL experiment platform.
 
 - Keep `smoke` as the tiny platform verification profile.
 - Expand profile-specific diagnostic SQL where it helps interpretation.
-- Add optional native `pg_upgrade` binary-pair adapter on top of the
-  multi-version topology.
 
 ## Candidate Profiles
 

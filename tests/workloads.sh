@@ -24,6 +24,13 @@ grep -q 'WORKLOAD_KIND="shell"' <<< "$PGBOUNCER_SPEC"
 UPGRADE_SPEC="$("$REPO_DIR/scripts/run_workload.sh" show topology/upgrade-dump-restore)"
 grep -q 'WORKLOAD_NAME="multi-version dump restore upgrade"' <<< "$UPGRADE_SPEC"
 grep -q 'WORKLOAD_REQUIRES_POSTGRES=0' <<< "$UPGRADE_SPEC"
+NATIVE_UPGRADE_SPEC="$("$REPO_DIR/scripts/run_workload.sh" show topology/native-pg-upgrade)"
+grep -q 'WORKLOAD_NAME="native pg_upgrade adapter"' <<< "$NATIVE_UPGRADE_SPEC"
+grep -q 'WORKLOAD_REQUIRES_POSTGRES=0' <<< "$NATIVE_UPGRADE_SPEC"
+
+NATIVE_UPGRADE_PLAN="$(PG_UPGRADE_ACTION=plan WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/native-pg-upgrade)"
+grep -q 'PG_UPGRADE_ACTION=plan' <<< "$NATIVE_UPGRADE_PLAN"
+grep -q 'Required for check/run' <<< "$NATIVE_UPGRADE_PLAN"
 
 PROFILE_SIZE=small "$REPO_DIR/scripts/run_profile_sql.sh" smoke 00_setup.sql >/dev/null
 PROFILE_SIZE=small "$REPO_DIR/scripts/run_workload.sh" run workloads/sql/smoke-run.env >/dev/null

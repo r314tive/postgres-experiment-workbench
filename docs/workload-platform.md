@@ -85,7 +85,12 @@ make workload-run WORKLOAD_SPEC=topology/pgbouncer-admin
 make topology-up TOPOLOGY=multi-version-upgrade
 make workload-run WORKLOAD_SPEC=topology/upgrade-status
 make workload-run WORKLOAD_SPEC=topology/upgrade-dump-restore
+make workload-run WORKLOAD_SPEC=topology/native-pg-upgrade
 ```
+
+`topology/native-pg-upgrade` defaults to `PG_UPGRADE_ACTION=plan`. Real
+`check` or `run` modes require `PG_UPGRADE_IMAGE` to contain both old and new
+PostgreSQL binaries plus `PG_UPGRADE_OLD_BINDIR` and `PG_UPGRADE_NEW_BINDIR`.
 
 For testing PostgreSQL source itself:
 

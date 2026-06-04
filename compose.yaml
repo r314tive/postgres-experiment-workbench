@@ -192,6 +192,24 @@ services:
       timeout: 3s
       retries: 60
 
+  pg-upgrade-native:
+    image: ${PG_UPGRADE_IMAGE:-postgres:16-alpine}
+    profiles:
+      - upgrade
+    user: postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pg_experiment_workbench}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres-upgrade-old-data:/var/lib/postgresql/old-data
+      - postgres-upgrade-new-data:/var/lib/postgresql/new-data
+    entrypoint:
+      - /bin/sh
+      - -lc
+    command:
+      - ${PG_UPGRADE_COMMAND:-pg_upgrade --help}
+
   noisia:
     image: ${NOISIA_IMAGE:-lesovsky/noisia:latest}
     platform: ${NOISIA_PLATFORM:-linux/amd64}
