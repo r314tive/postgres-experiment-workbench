@@ -81,6 +81,7 @@ func usage() {
   pgworkbench spec list <workload|experiment|matrix|topology|dataset>
   pgworkbench spec show <kind> <spec>
   pgworkbench spec reference [workload|experiment|matrix|topology|dataset|all]
+  pgworkbench spec schema [workload|experiment|matrix|topology|dataset|all]
   pgworkbench spec validate [kind] [spec...]`)
 }
 
@@ -256,6 +257,15 @@ func runSpec(catalog speccatalog.Catalog, args []string) error {
 			kind = args[1]
 		}
 		return speccatalog.RenderReference(os.Stdout, kind)
+	case "schema":
+		kind := "all"
+		if len(args) > 2 {
+			return fmt.Errorf("usage: pgworkbench spec schema [workload|experiment|matrix|topology|dataset|all]")
+		}
+		if len(args) == 2 {
+			kind = args[1]
+		}
+		return speccatalog.RenderSchema(os.Stdout, kind)
 	case "validate":
 		kind := "all"
 		ids := []string(nil)

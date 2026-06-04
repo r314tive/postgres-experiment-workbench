@@ -26,6 +26,7 @@ go run ./cmd/pgworkbench run verify runs/<run-id>
 go run ./cmd/pgworkbench run write-manifest --run-dir runs/<run-id>
 go run ./cmd/pgworkbench run write-verdict --run-dir runs/<run-id> --status passed --message 'experiment passed'
 go run ./cmd/pgworkbench spec reference all
+go run ./cmd/pgworkbench spec schema all
 go run ./cmd/pgworkbench spec validate
 make pgworkbench
 make release-snapshot
@@ -41,6 +42,7 @@ Run manifest and verdict writing now have Go commands too; keep them parallel
 until the shell experiment runner compatibility is proven by the Docker-backed
 suite.
 Run directory integrity checks are covered by `pgworkbench run verify`.
-Env spec contracts can be rendered with `pgworkbench spec reference`.
+Env spec contracts can be rendered with `pgworkbench spec reference` and
+`pgworkbench spec schema`.
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.

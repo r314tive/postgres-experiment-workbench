@@ -2,6 +2,7 @@ package speccatalog
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,6 +84,52 @@ func TestRenderReference(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Fatalf("reference missing %q:\n%s", want, content)
 		}
+	}
+}
+
+func TestRenderSchema(t *testing.T) {
+	var out bytes.Buffer
+	if err := RenderSchema(&out, "workload"); err != nil {
+		t.Fatal(err)
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal(out.Bytes(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	required := schema["required"].([]interface{})
+	if len(required) < 2 || required[0] != "WORKLOAD_NAME" || required[1] != "WORKLOAD_KIND" {
+		t.Fatalf("unexpected required keys: %#v", required)
+	}
+	properties := schema["properties"].(map[string]interface{})
+	kindProperty := properties["WORKLOAD_KIND"].(map[string]interface{})
+	enum := kindProperty["enum"].([]interface{})
+	if len(enum) != 7 || enum[0] != "profile-sql" || enum[6] != "compose-run" {
+		t.Fatalf("unexpected enum: %#v", enum)
+	}
+	if kindProperty["x-workbench-requirement"] != "required" {
+		t.Fatalf("missing requirement metadata: %#v", kindProperty)
+	}
+}
+
+func TestRenderAllSchemas(t *testing.T) {
+	var out bytes.Buffer
+	if err := RenderSchema(&out, "all"); err != nil {
+		t.Fatal(err)
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal(out.Bytes(), &schema); err != nil {
+		t.Fatal(err)
+	}
+	defs := schema["$defs"].(map[string]interface{})
+	for _, kind := range []string{"workload", "experiment", "matrix", "topology", "dataset"} {
+		if _, ok := defs[kind]; !ok {
+			t.Fatalf("missing $defs schema for %s", kind)
+		}
+	}
+	if !strings.Contains(out.String(), "runs/matrices/<id>") {
+		t.Fatalf("schema output escaped matrix run dir default:\n%s", out.String())
 	}
 }
 

@@ -155,7 +155,9 @@ Render the generated env spec contract with:
 
 ```bash
 make spec-reference SPEC_KIND=all
+make spec-schema SPEC_KIND=all
 go run ./cmd/pgworkbench spec reference all
+go run ./cmd/pgworkbench spec schema all
 ```
 
 ## Topology Examples

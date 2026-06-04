@@ -44,12 +44,11 @@ Already started:
 - `pgworkbench scan failures`.
 - `pgworkbench report run|compare|summary|history`.
 - `pgworkbench run verify|write-manifest|write-verdict`.
-- `pgworkbench spec list|show|reference|validate`.
+- `pgworkbench spec list|show|reference|schema|validate`.
 - `make release-snapshot`.
 
 Good Go candidates:
 
-- env spec JSON schema export;
 - runner compatibility switch from shell state writers to Go state writers.
 
 Keep in shell for now:
