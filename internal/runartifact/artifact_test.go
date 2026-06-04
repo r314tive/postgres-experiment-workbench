@@ -58,3 +58,30 @@ func TestListRelativeFiles(t *testing.T) {
 		t.Fatalf("unexpected files: %#v", files)
 	}
 }
+
+func TestCollectRunDirsFromSeries(t *testing.T) {
+	root := t.TempDir()
+	runDir := filepath.Join(root, "runs", "run-a")
+	seriesDir := filepath.Join(root, "series")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(seriesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "manifest.env"), []byte("run_id=run-a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runsTSV := "iteration\trun_id\texit_code\tstatus\tmessage\trun_dir\n1\trun-a\t0\tpassed\tok\t" + runDir + "\n"
+	if err := os.WriteFile(filepath.Join(seriesDir, "runs.tsv"), []byte(runsTSV), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runDirs, err := CollectRunDirs(root, []string{seriesDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runDirs) != 1 || runDirs[0] != runDir {
+		t.Fatalf("unexpected run dirs: %#v", runDirs)
+	}
+}

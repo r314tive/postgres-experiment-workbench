@@ -41,11 +41,10 @@ Already started:
 
 - `pgworkbench profile list|show|validate`.
 - `pgworkbench scan failures`.
-- `pgworkbench report run|compare`.
+- `pgworkbench report run|compare|summary|history`.
 
 Good Go candidates:
 
-- run summary, comparison, and history reports;
 - env spec parsing and validation for workloads, experiments, matrices, and
   topologies;
 - manifest/verdict JSON writer;

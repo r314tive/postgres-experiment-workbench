@@ -72,7 +72,9 @@ help:
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report for RUN_DIR'
 	@printf '  %-24s %s\n' 'make experiment-report-go' 'Render Markdown report with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-summary' 'Summarize a repeat/matrix/run series'
+	@printf '  %-24s %s\n' 'make experiment-summary-go' 'Summarize runs with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-history' 'Compare repeat/matrix/run series history'
+	@printf '  %-24s %s\n' 'make experiment-history-go' 'Compare run history with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-repeat' 'Run EXPERIMENT_SPEC repeatedly'
 	@printf '  %-24s %s\n' 'make experiment-compare' 'Compare BASELINE_RUN and CANDIDATE_RUN'
 	@printf '  %-24s %s\n' 'make experiment-compare-go' 'Compare runs with Go CLI'
@@ -226,6 +228,15 @@ experiment-summary:
 		./scripts/summarize_runs.sh "$(SUMMARY_INPUT)"; \
 	fi
 
+.PHONY: experiment-summary-go
+experiment-summary-go:
+	@test -n "$(SUMMARY_INPUT)" || { echo 'Usage: make experiment-summary-go SUMMARY_INPUT=runs/repeats/<id>' >&2; exit 2; }
+	@if [[ -n "$(SUMMARY_OUT)" ]]; then \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report summary --output "$(SUMMARY_OUT)" "$(SUMMARY_INPUT)"; \
+	else \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report summary "$(SUMMARY_INPUT)"; \
+	fi
+
 .PHONY: experiment-history
 experiment-history:
 	@test -n "$(HISTORY_INPUTS)" || { echo 'Usage: make experiment-history HISTORY_INPUTS="runs/repeats/a runs/repeats/b"' >&2; exit 2; }
@@ -233,6 +244,15 @@ experiment-history:
 		./scripts/compare_run_history.sh --output "$(HISTORY_OUT)" $(HISTORY_INPUTS); \
 	else \
 		./scripts/compare_run_history.sh $(HISTORY_INPUTS); \
+	fi
+
+.PHONY: experiment-history-go
+experiment-history-go:
+	@test -n "$(HISTORY_INPUTS)" || { echo 'Usage: make experiment-history-go HISTORY_INPUTS="runs/repeats/a runs/repeats/b"' >&2; exit 2; }
+	@if [[ -n "$(HISTORY_OUT)" ]]; then \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report history --output "$(HISTORY_OUT)" $(HISTORY_INPUTS); \
+	else \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report history $(HISTORY_INPUTS); \
 	fi
 
 .PHONY: experiment-repeat

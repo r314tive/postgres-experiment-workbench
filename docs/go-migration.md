@@ -19,11 +19,13 @@ go run ./cmd/pgworkbench profile validate
 go run ./cmd/pgworkbench scan failures logs generated
 go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b
+go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>
+go run ./cmd/pgworkbench report history runs/repeats/a runs/repeats/b
 make pgworkbench
 ```
 
 The shell scripts remain the compatibility layer for now. `make check` runs the
 Go profile validator and Go failure scanner alongside the existing shell tests.
-Run reporting and comparison now have Go equivalents through `pgworkbench
-report`. When a Go command matches shell behavior and is covered by tests, Make
-targets can move to the Go implementation.
+Run reporting, comparison, summary, and history now have Go equivalents through
+`pgworkbench report`. When a Go command matches shell behavior and is covered by
+tests, Make targets can move to the Go implementation.

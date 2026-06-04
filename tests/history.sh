@@ -70,4 +70,15 @@ grep -q '| `active_sessions` | `3.500` | `5.500` | `2` |' <<< "$OUT"
 "$REPO_DIR/scripts/compare_run_history.sh" --output "$BASE/history.md" "$SERIES_A" "$SERIES_B" >/dev/null
 grep -q '# Run History Comparison' "$BASE/history.md"
 
+GO_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" go run ./cmd/pgworkbench report history "$SERIES_A" "$SERIES_B")"
+grep -q '# Run History Comparison' <<< "$GO_OUT"
+grep -q '| `history/series-a` | `2` | `2` | `0` | `0` |' <<< "$GO_OUT"
+grep -q '| `history/series-b` | `2` | `2` | `0` | `0` |' <<< "$GO_OUT"
+grep -q '| `wal_bytes` | `150` | `400` | `250` |' <<< "$GO_OUT"
+grep -q '| `active_sessions` | `3.500` | `5.500` | `2` |' <<< "$GO_OUT"
+
+(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
+  go run ./cmd/pgworkbench report history --output "$BASE/history-go.md" "$SERIES_A" "$SERIES_B") >/dev/null
+grep -q '# Run History Comparison' "$BASE/history-go.md"
+
 echo "PASS: run history comparison"

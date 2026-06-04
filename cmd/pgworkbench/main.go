@@ -52,7 +52,9 @@ func usage() {
   pgworkbench profile validate [profile...]
   pgworkbench scan failures [path...]
   pgworkbench report run <run-dir-or-id> [output.md]
-  pgworkbench report compare <baseline-run-dir> <candidate-run-dir>`)
+  pgworkbench report compare <baseline-run-dir> <candidate-run-dir>
+  pgworkbench report summary [--output output.md] <series-dir|run-dir> [run-dir...]
+  pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]`)
 }
 
 func runProfile(catalog profilecatalog.Catalog, args []string) error {
@@ -131,9 +133,77 @@ func runReport(root string, args []string) error {
 			return fmt.Errorf("usage: pgworkbench report compare <baseline-run-dir> <candidate-run-dir>")
 		}
 		return runreport.RenderComparison(root, args[1], args[2], os.Stdout)
+	case "summary":
+		outPath, inputs, err := parseOutputArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if len(inputs) == 0 {
+			return fmt.Errorf("usage: pgworkbench report summary [--output output.md] <series-dir|run-dir> [run-dir...]")
+		}
+		return renderMaybeFile(root, outPath, "summary", func(w *os.File) error {
+			return runreport.RenderSummary(root, inputs, w)
+		})
+	case "history":
+		outPath, inputs, err := parseOutputArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if len(inputs) == 0 {
+			return fmt.Errorf("usage: pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]")
+		}
+		return renderMaybeFile(root, outPath, "run history comparison", func(w *os.File) error {
+			return runreport.RenderHistory(root, inputs, w)
+		})
 	default:
 		return fmt.Errorf("unsupported report action: %s", args[0])
 	}
+}
+
+func parseOutputArgs(args []string) (string, []string, error) {
+	var outPath string
+	var inputs []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--output":
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("--output requires a path")
+			}
+			outPath = args[i+1]
+			i++
+		case "--":
+			inputs = append(inputs, args[i+1:]...)
+			return outPath, inputs, nil
+		default:
+			if len(args[i]) > 0 && args[i][0] == '-' {
+				return "", nil, fmt.Errorf("unknown option: %s", args[i])
+			}
+			inputs = append(inputs, args[i])
+		}
+	}
+	return outPath, inputs, nil
+}
+
+func renderMaybeFile(root string, outPath string, label string, render func(*os.File) error) error {
+	if outPath == "" {
+		return render(os.Stdout)
+	}
+	if !filepath.IsAbs(outPath) {
+		outPath = filepath.Join(root, outPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		return err
+	}
+	file, err := os.Create(outPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if err := render(file); err != nil {
+		return err
+	}
+	fmt.Printf("Wrote %s: %s\n", label, outPath)
+	return nil
 }
 
 func runScan(root string, args []string) error {

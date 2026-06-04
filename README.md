@@ -134,7 +134,9 @@ make experiment-report RUN_DIR=runs/<run-id>
 make experiment-report-go RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 make experiment-summary SUMMARY_INPUT=runs/repeats/<repeat-id>
+make experiment-summary-go SUMMARY_INPUT=runs/repeats/<repeat-id>
 make experiment-history HISTORY_INPUTS='runs/repeats/a runs/repeats/b'
+make experiment-history-go HISTORY_INPUTS='runs/repeats/a runs/repeats/b'
 make experiment-compare-go BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b
 ```
 
@@ -230,6 +232,8 @@ go run ./cmd/pgworkbench profile validate
 go run ./cmd/pgworkbench scan failures logs generated
 go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b
+go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>
+go run ./cmd/pgworkbench report history runs/repeats/a runs/repeats/b
 ```
 
 Go migration notes live in [docs/go-migration.md](docs/go-migration.md).

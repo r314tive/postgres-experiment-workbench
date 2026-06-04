@@ -44,6 +44,8 @@ make experiment-report RUN_DIR=runs/<run-id>
 make experiment-report-go RUN_DIR=runs/<run-id>
 ./scripts/report_run.sh runs/<run-id> runs/<run-id>/report.md
 go run ./cmd/pgworkbench report run runs/<run-id> runs/<run-id>/report.md
+go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>
+go run ./cmd/pgworkbench report history runs/repeats/a runs/repeats/b
 ```
 
 Reports are Markdown summaries built from `manifest.env`, `verdict.env`,
