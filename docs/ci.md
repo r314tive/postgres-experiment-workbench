@@ -11,8 +11,8 @@ make scan-artifacts
 `make check` is a no-Docker static/synthetic test set, including Go unit tests,
 Go profile validation, Go env spec validation, Go run artifact verification,
 Go env spec reference/schema rendering, Go experiment plan rendering, Go
-patchset validation, Go source-check plan rendering, Go source-check artifact
-classification tests, and Go failure scanning.
+topology inspection, Go patchset validation, Go source-check plan rendering, Go
+source-check artifact classification tests, and Go failure scanning.
 `make test` is the full local runtime verification and uses Docker Compose.
 `make release-check` is the local pre-release gate: it runs doctor checks,
 static checks, quickstart, full runtime tests, artifact scans, privacy scan, and

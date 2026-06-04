@@ -63,6 +63,7 @@ help:
 	@printf '  %-24s %s\n' 'make doctor' 'Check local workbench prerequisites'
 	@printf '  %-24s %s\n' 'make topology-list' 'List topology specs'
 	@printf '  %-24s %s\n' 'make topology-show' 'Show TOPOLOGY'
+	@printf '  %-24s %s\n' 'make topology-inspect' 'Inspect TOPOLOGY runtime shape with Go CLI'
 	@printf '  %-24s %s\n' 'make topology-up' 'Start TOPOLOGY'
 	@printf '  %-24s %s\n' 'make topology-reset' 'Recreate TOPOLOGY volumes'
 	@printf '  %-24s %s\n' 'make topology-status' 'Show TOPOLOGY runtime status'
@@ -170,6 +171,10 @@ topology-list:
 .PHONY: topology-show
 topology-show:
 	./scripts/topology.sh show "$(TOPOLOGY)"
+
+.PHONY: topology-inspect
+topology-inspect:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology inspect "$(TOPOLOGY)"
 
 .PHONY: topology-up
 topology-up:
@@ -534,6 +539,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench patchset validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source plan pg-source/check >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology inspect single >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference all >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec schema all >/dev/null

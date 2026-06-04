@@ -20,6 +20,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/runstate"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runverify"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
+	"github.com/r314tive/postgres-experiment-workbench/internal/topologyinspect"
 )
 
 var version = "dev"
@@ -61,6 +62,8 @@ func run(args []string) error {
 		return runExperiment(speccatalog.New(root), args[1:])
 	case "source":
 		return runSource(root, args[1:])
+	case "topology":
+		return runTopology(root, args[1:])
 	case "scan":
 		return runScan(root, args[1:])
 	case "report":
@@ -85,6 +88,7 @@ func usage() {
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]
   pgworkbench experiment plan <experiment-spec>
+  pgworkbench topology inspect <topology>
   pgworkbench source plan [workload-spec]
   pgworkbench source classify <pg-source-run-dir-or-artifact-dir>
   pgworkbench scan failures [path...]
@@ -262,6 +266,28 @@ func runSource(root string, args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unsupported source action: %s", args[0])
+	}
+}
+
+func runTopology(root string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("topology action is required")
+	}
+
+	switch args[0] {
+	case "inspect":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench topology inspect <topology>")
+		}
+		inspection, err := topologyinspect.Inspect(root, args[1], topologyinspect.Options{
+			Env: topologyinspect.EnvFromOS(),
+		})
+		if err != nil {
+			return err
+		}
+		return topologyinspect.Render(os.Stdout, inspection)
+	default:
+		return fmt.Errorf("unsupported topology action: %s", args[0])
 	}
 }
 
