@@ -206,7 +206,9 @@ Scan logs and generated artifacts for PostgreSQL crash/error evidence:
 
 ```bash
 make scan-artifacts
+make scan-artifacts-go
 ./scripts/scan_pg_failures.sh logs generated
+go run ./cmd/pgworkbench scan failures logs generated
 ```
 
 ## CI
@@ -217,11 +219,13 @@ PostgreSQL source-tree checks are manual/opt-in. Details live in
 
 ## Go CLI
 
-The first Go command is available for profile catalog operations:
+The first Go commands are available for profile catalog operations and failure
+scanning:
 
 ```bash
 go run ./cmd/pgworkbench profile list
 go run ./cmd/pgworkbench profile validate
+go run ./cmd/pgworkbench scan failures logs generated
 ```
 
 Go migration notes live in [docs/go-migration.md](docs/go-migration.md).

@@ -62,6 +62,7 @@ help:
 	@printf '  %-24s %s\n' 'make monitor' 'Show basic PostgreSQL activity/statistics'
 	@printf '  %-24s %s\n' 'make metrics-sample' 'Sample generic PostgreSQL metrics to CSV'
 	@printf '  %-24s %s\n' 'make scan-artifacts' 'Scan logs/artifacts for PG failure evidence'
+	@printf '  %-24s %s\n' 'make scan-artifacts-go' 'Scan logs/artifacts with Go CLI'
 	@printf '  %-24s %s\n' 'make dataset-list' 'List dataset specs'
 	@printf '  %-24s %s\n' 'make dataset-show' 'Show DATASET_SPEC'
 	@printf '  %-24s %s\n' 'make dataset-load' 'Load DATASET_SPEC'
@@ -265,6 +266,10 @@ workload-run:
 scan-artifacts:
 	./scripts/scan_pg_failures.sh $(SCAN_PATHS)
 
+.PHONY: scan-artifacts-go
+scan-artifacts-go:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS)
+
 .PHONY: workload-start
 workload-start: docker-up
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" ./scripts/workload_bg.sh start-profile "$(PROFILE)" "$(WORKLOAD_SQL)"
@@ -330,6 +335,7 @@ check:
 	git diff --check
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test ./...
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS) >/dev/null
 	./tests/profile_catalog.sh
 	./tests/scan_failures.sh
 	./tests/report_runs.sh

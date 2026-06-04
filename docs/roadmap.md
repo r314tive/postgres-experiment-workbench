@@ -40,10 +40,10 @@ Keep shell where it is only glue around Docker Compose, `psql`, or host tools.
 Already started:
 
 - `pgworkbench profile list|show|validate`.
+- `pgworkbench scan failures`.
 
 Good Go candidates:
 
-- failure scanner;
 - run report renderer;
 - run summary, comparison, and history reports;
 - env spec parsing and validation for workloads, experiments, matrices, and

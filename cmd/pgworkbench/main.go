@@ -1,15 +1,21 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
+	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
 )
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		if errors.Is(err, failurescan.ErrEvidenceFound) {
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -29,6 +35,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "profile":
 		return runProfile(profilecatalog.New(root), args[1:])
+	case "scan":
+		return runScan(root, args[1:])
 	default:
 		return fmt.Errorf("unsupported command: %s", args[0])
 	}
@@ -38,7 +46,8 @@ func usage() {
 	fmt.Println(`Usage:
   pgworkbench profile list
   pgworkbench profile show <profile>
-  pgworkbench profile validate [profile...]`)
+  pgworkbench profile validate [profile...]
+  pgworkbench scan failures [path...]`)
 }
 
 func runProfile(catalog profilecatalog.Catalog, args []string) error {
@@ -78,6 +87,41 @@ func runProfile(catalog profilecatalog.Catalog, args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unsupported profile action: %s", args[0])
+	}
+}
+
+func runScan(root string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("scan action is required")
+	}
+
+	switch args[0] {
+	case "failures":
+		contextLines := 2
+		if value := os.Getenv("SCAN_CONTEXT_LINES"); value != "" {
+			parsed, err := strconv.Atoi(value)
+			if err != nil || parsed < 0 {
+				return fmt.Errorf("SCAN_CONTEXT_LINES must be a non-negative integer")
+			}
+			contextLines = parsed
+		}
+
+		result, err := failurescan.Scan(root, failurescan.Options{
+			Paths:        args[1:],
+			ContextLines: contextLines,
+		})
+		if err != nil {
+			return err
+		}
+		if err := failurescan.Render(os.Stdout, result); err != nil {
+			return err
+		}
+		if result.Found {
+			return failurescan.ErrEvidenceFound
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported scan action: %s", args[0])
 	}
 }
 
