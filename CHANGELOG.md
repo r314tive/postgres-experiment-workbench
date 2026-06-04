@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+No changes yet.
+
+## v0.1.1 - 2026-06-04
+
 Added platform capabilities:
 
 - Go patchset catalog, PostgreSQL source-check planning, and source-check
