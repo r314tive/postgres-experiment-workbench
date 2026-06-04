@@ -95,6 +95,9 @@ make workload-run WORKLOAD_SPEC=pg-source/check
 PG_PATCH_DIR=patchsets/chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
 ```
 
+The GitHub `source-check` workflow is manual and defaults to
+`PG_SOURCE_ACTION=plan`; heavy source builds are not part of default CI.
+
 The source-check adapter follows the same discipline as other workloads: a spec
 declares the work, logs and artifacts are stored under ignored local folders,
 and `scripts/scan_pg_failures.sh` provides the generic verdict layer.

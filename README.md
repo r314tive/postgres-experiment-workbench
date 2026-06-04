@@ -206,6 +206,12 @@ make scan-artifacts
 ./scripts/scan_pg_failures.sh logs generated
 ```
 
+## CI
+
+Default CI runs `make check`, `make test`, and `make scan-artifacts`.
+PostgreSQL source-tree checks are manual/opt-in. Details live in
+[docs/ci.md](docs/ci.md).
+
 ## Logs
 
 Run any SQL file with logging:

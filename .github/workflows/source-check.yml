@@ -1,0 +1,32 @@
+name: source-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      pg_ref:
+        description: PostgreSQL git ref to test
+        required: true
+        default: master
+      pg_source_action:
+        description: Use plan for a dry run; run performs the source check.
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - run
+
+jobs:
+  pg-source-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run PostgreSQL source-check workload
+        env:
+          PG_REF: ${{ inputs.pg_ref }}
+          PG_SOURCE_ACTION: ${{ inputs.pg_source_action }}
+        run: make workload-run WORKLOAD_SPEC=pg-source/check

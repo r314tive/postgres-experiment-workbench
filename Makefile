@@ -88,6 +88,7 @@ help:
 	@printf '  %-24s %s\n' 'make noisia-help' 'Show noisia help'
 	@printf '  %-24s %s\n' 'make noisia-wait' 'Run noisia wait transactions'
 	@printf '  %-24s %s\n' 'make noisia-temp' 'Run noisia temp files'
+	@printf '  %-24s %s\n' 'make check' 'Run static and no-Docker checks'
 	@printf '  %-24s %s\n' 'make test' 'Run profile and workload verification'
 
 .PHONY: docker-up
@@ -308,6 +309,17 @@ noisia-wait:
 .PHONY: noisia-temp
 noisia-temp:
 	NOISIA_DURATION="$(NOISIA_DURATION)" NOISIA_JOBS="$(NOISIA_JOBS)" ./scripts/run_noisia.sh temp-files
+
+.PHONY: check
+check:
+	bash -n scripts/*.sh tests/*.sh
+	git diff --check
+	./tests/profile_catalog.sh
+	./tests/scan_failures.sh
+	./tests/report_runs.sh
+	./tests/summarize_runs.sh
+	./tests/compare_runs.sh
+	./tests/history.sh
 
 .PHONY: test
 test: docker-up
