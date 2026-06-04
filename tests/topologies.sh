@@ -7,9 +7,11 @@ TOPOLOGY_LIST="$("$REPO_DIR/scripts/topology.sh" list)"
 grep -q '^single$' <<< "$TOPOLOGY_LIST"
 grep -q '^primary-replica$' <<< "$TOPOLOGY_LIST"
 grep -q '^logical-replication$' <<< "$TOPOLOGY_LIST"
+grep -q '^pgbouncer$' <<< "$TOPOLOGY_LIST"
 
 "$REPO_DIR/scripts/topology.sh" show primary-replica | grep -q 'TOPOLOGY_NAME="primary-replica"'
 "$REPO_DIR/scripts/topology.sh" show logical-replication | grep -q 'TOPOLOGY_NAME="logical-replication"'
+"$REPO_DIR/scripts/topology.sh" show pgbouncer | grep -q 'TOPOLOGY_NAME="pgbouncer"'
 
 TOPOLOGY=primary-replica "$REPO_DIR/scripts/topology.sh" up primary-replica >/dev/null
 
@@ -44,5 +46,16 @@ LOGICAL_REPLICATION_COMPARE_SQL="SELECT count(*), coalesce(sum(id), 0), coalesce
   "$REPO_DIR/scripts/wait_logical_replication.sh" >/dev/null
 
 WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/logical-status >/dev/null
+
+TOPOLOGY=pgbouncer "$REPO_DIR/scripts/topology.sh" up pgbouncer >/dev/null
+"$REPO_DIR/scripts/psql_pgbouncer.sh" -At -c "SELECT 1" | grep -q '^1$'
+
+PROFILE_SIZE=small "$REPO_DIR/scripts/run_profile_sql.sh" smoke 00_setup.sql >/dev/null
+WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/pgbouncer-smoke >/dev/null
+
+PROFILE_SIZE=small "$REPO_DIR/scripts/run_profile_sql.sh" connection-pressure 00_setup.sql >/dev/null
+PROFILE_SIZE=small WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/pgbouncer-connection-pressure >/dev/null
+WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/pgbouncer-prepared-statement >/dev/null
+WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/pgbouncer-admin >/dev/null
 
 echo "PASS: topologies"

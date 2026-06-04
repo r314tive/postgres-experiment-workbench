@@ -118,6 +118,7 @@ execution details in workload specs.
 primary plus physical replica before profile setup and workload execution.
 `EXPERIMENT_TOPOLOGY=logical-replication` starts a publisher plus independent
 logical subscriber.
+`EXPERIMENT_TOPOLOGY=pgbouncer` starts PostgreSQL plus PgBouncer.
 
 Examples:
 
@@ -125,4 +126,5 @@ Examples:
 make experiment-run EXPERIMENT_SPEC=replica-readonly
 make experiment-run EXPERIMENT_SPEC=replication-slots
 make experiment-run EXPERIMENT_SPEC=logical-replication
+make experiment-run EXPERIMENT_SPEC=pgbouncer-smoke
 ```

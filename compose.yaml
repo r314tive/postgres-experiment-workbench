@@ -67,6 +67,7 @@ services:
             -D "$$PGDATA" \
             -U "$$POSTGRES_USER" \
             -Fp \
+            -c fast \
             -Xs \
             -P \
             -R \
@@ -109,6 +110,40 @@ services:
       test:
         - CMD-SHELL
         - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  pgbouncer:
+    image: ${PGBOUNCER_IMAGE:-edoburu/pgbouncer:v1.25.1-p0}
+    container_name: ${PGBOUNCER_CONTAINER:-postgres-experiment-workbench-pgbouncer}
+    profiles:
+      - pgbouncer
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${POSTGRES_DB:-pg_experiment_workbench}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      AUTH_TYPE: ${PGBOUNCER_AUTH_TYPE:-plain}
+      POOL_MODE: ${PGBOUNCER_POOL_MODE:-transaction}
+      MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-100}
+      DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-10}
+      MIN_POOL_SIZE: ${PGBOUNCER_MIN_POOL_SIZE:-0}
+      RESERVE_POOL_SIZE: ${PGBOUNCER_RESERVE_POOL_SIZE:-5}
+      IGNORE_STARTUP_PARAMETERS: ${PGBOUNCER_IGNORE_STARTUP_PARAMETERS:-extra_float_digits}
+      ADMIN_USERS: ${PGBOUNCER_ADMIN_USERS:-postgres}
+      STATS_USERS: ${PGBOUNCER_STATS_USERS:-postgres}
+    ports:
+      - "${PGBOUNCER_PORT:-56432}:5432"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - psql -h 127.0.0.1 -p 5432 -U "$${DB_USER}" -d "$${DB_NAME}" -c "SELECT 1" >/dev/null 2>&1
       interval: 2s
       timeout: 3s
       retries: 60

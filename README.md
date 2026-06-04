@@ -109,6 +109,7 @@ Implemented topologies:
 - `single`: one disposable PostgreSQL container.
 - `primary-replica`: physical streaming replica with a local replication slot.
 - `logical-replication`: publisher plus independent logical subscriber.
+- `pgbouncer`: PostgreSQL plus PgBouncer pooler.
 
 ## Experiments
 
@@ -121,6 +122,7 @@ make experiment-run EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=locks-under-contention
 make experiment-run EXPERIMENT_SPEC=replica-readonly
 make experiment-run EXPERIMENT_SPEC=logical-replication
+make experiment-run EXPERIMENT_SPEC=pgbouncer-smoke
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 make experiment-summary SUMMARY_INPUT=runs/repeats/<repeat-id>
@@ -223,6 +225,7 @@ logs/
 - `partitioning`: partition attach/detach/drop experiments.
 - `replication-slots`: physical slot retention and streaming state.
 - `logical-replication`: publication/subscription convergence and DDL boundary checks.
+- `connection-pressure`: session churn and pooler-shaped behavior.
 
 Massive-DML-specific work belongs in the separate focused repository unless a
 small generic scenario is useful here.

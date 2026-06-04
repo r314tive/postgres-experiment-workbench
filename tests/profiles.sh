@@ -9,6 +9,7 @@ PROFILES=(
   indexes
   wal-pressure
   partitioning
+  connection-pressure
 )
 
 for profile in "${PROFILES[@]}"; do

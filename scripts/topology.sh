@@ -23,6 +23,7 @@ Implemented topologies:
   single               One PostgreSQL container.
   primary-replica      Primary plus one physical streaming replica.
   logical-replication  Publisher plus one logical subscriber.
+  pgbouncer            PostgreSQL plus PgBouncer pooler.
 USAGE
 }
 
@@ -33,7 +34,7 @@ capture_env_overrides() {
   local name
   while IFS= read -r name; do
     case "$name" in
-      ENV_FILE|COMPOSE|POSTGRES_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|WORKLOAD_PG*|LOGICAL_REPLICATION_*)
+      ENV_FILE|COMPOSE|POSTGRES_*|PGBOUNCER_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|WORKLOAD_PG*|LOGICAL_REPLICATION_*)
         PRESERVED_ENV_NAMES+=("$name")
         PRESERVED_ENV_VALUES+=("${!name}")
         ;;
@@ -104,7 +105,7 @@ resolve_topology_spec() {
 require_topology() {
   local topology="$1"
   case "$topology" in
-    single|primary-replica|logical-replication)
+    single|primary-replica|logical-replication|pgbouncer)
       ;;
     *)
       echo "Unsupported topology: $topology" >&2
@@ -128,6 +129,7 @@ compose_down() {
   "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" \
     --profile replica \
     --profile logical \
+    --profile pgbouncer \
     --profile workload \
     down "$@"
 }
@@ -151,6 +153,10 @@ replica_exec() {
 
 logical_exec() {
   "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" exec -T logical-subscriber "$@"
+}
+
+pgbouncer_exec() {
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" exec -T pgbouncer "$@"
 }
 
 configure_primary_for_replica() {
@@ -218,6 +224,30 @@ wait_logical_subscriber() {
   exit 1
 }
 
+up_pgbouncer() {
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" --profile pgbouncer up -d pgbouncer
+  wait_pgbouncer
+}
+
+wait_pgbouncer() {
+  for _ in {1..90}; do
+    if pgbouncer_exec env PGPASSWORD="${POSTGRES_PASSWORD:-postgres}" psql \
+      -h 127.0.0.1 \
+      -p 5432 \
+      -U "${POSTGRES_USER:-postgres}" \
+      -d "${POSTGRES_DB:-pg_experiment_workbench}" \
+      -At \
+      -v ON_ERROR_STOP=1 \
+      -c "SELECT 1" 2>/dev/null | grep -q '^1$'; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "PgBouncer is not ready" >&2
+  exit 1
+}
+
 up_topology() {
   local topology="$1"
   require_topology "$topology"
@@ -234,6 +264,10 @@ up_topology() {
     logical-replication)
       up_primary
       up_logical_subscriber
+      ;;
+    pgbouncer)
+      up_primary
+      up_pgbouncer
       ;;
   esac
 }
@@ -255,6 +289,10 @@ reset_topology() {
       compose_down logical -v
       up_topology logical-replication
       ;;
+    pgbouncer)
+      compose_down pgbouncer -v
+      up_topology pgbouncer
+      ;;
   esac
 }
 
@@ -271,6 +309,9 @@ down_topology() {
       ;;
     logical-replication)
       compose_down logical
+      ;;
+    pgbouncer)
+      compose_down pgbouncer
       ;;
   esac
 }
@@ -311,6 +352,19 @@ status_topology() {
           -c "SELECT subname, pid, received_lsn, latest_end_lsn, latest_end_time FROM pg_stat_subscription ORDER BY subname;"
       fi
       ;;
+    pgbouncer)
+      "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" --profile pgbouncer ps postgres pgbouncer
+      if "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" ps --status running pgbouncer >/dev/null 2>&1; then
+        printf '\nPgBouncer pools:\n'
+        pgbouncer_exec env PGPASSWORD="${POSTGRES_PASSWORD:-postgres}" psql \
+          -h 127.0.0.1 \
+          -p 5432 \
+          -U "${POSTGRES_USER:-postgres}" \
+          -d pgbouncer \
+          -v ON_ERROR_STOP=1 \
+          -c "SHOW POOLS;"
+      fi
+      ;;
   esac
 }
 
@@ -329,6 +383,10 @@ wait_topology() {
     logical-replication)
       wait_primary
       wait_logical_subscriber
+      ;;
+    pgbouncer)
+      wait_primary
+      wait_pgbouncer
       ;;
   esac
 }

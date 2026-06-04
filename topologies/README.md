@@ -8,6 +8,7 @@ Implemented topologies:
 - `primary-replica`: primary plus one physical streaming replica using a local
   physical replication slot.
 - `logical-replication`: one publisher plus one independent logical subscriber.
+- `pgbouncer`: PostgreSQL plus PgBouncer pooler.
 
 Planned topology specs can live here without changing profile or workload
 contracts:
@@ -26,4 +27,5 @@ make topology-up TOPOLOGY=primary-replica
 make topology-status TOPOLOGY=primary-replica
 make topology-reset TOPOLOGY=primary-replica
 make topology-up TOPOLOGY=logical-replication
+make topology-up TOPOLOGY=pgbouncer
 ```
