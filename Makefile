@@ -106,6 +106,7 @@ help:
 	@printf '  %-24s %s\n' 'make spec-show' 'Show SPEC_KIND/SPEC_ID with Go CLI'
 	@printf '  %-24s %s\n' 'make spec-reference' 'Render env spec reference with Go CLI'
 	@printf '  %-24s %s\n' 'make spec-schema' 'Render env spec JSON Schema with Go CLI'
+	@printf '  %-24s %s\n' 'make spec-docs-check' 'Check tracked env spec docs/schema are current'
 	@printf '  %-24s %s\n' 'make spec-validate' 'Validate env specs with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-list' 'List workload specs'
 	@printf '  %-24s %s\n' 'make workload-show' 'Show WORKLOAD_SPEC'
@@ -368,6 +369,10 @@ spec-reference:
 spec-schema:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec schema "$(SPEC_KIND)"
 
+.PHONY: spec-docs-check
+spec-docs-check:
+	GO_CACHE="$(GO_CACHE)" GO_MOD_CACHE="$(GO_MOD_CACHE)" ./tests/spec_docs.sh
+
 .PHONY: spec-validate
 spec-validate:
 	@if [[ -n "$(SPEC_ID)" ]]; then \
@@ -505,6 +510,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference all >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec schema all >/dev/null
+	GO_CACHE="$(GO_CACHE)" GO_MOD_CACHE="$(GO_MOD_CACHE)" ./tests/spec_docs.sh
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment plan smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS) >/dev/null
 	./tests/profile_catalog.sh

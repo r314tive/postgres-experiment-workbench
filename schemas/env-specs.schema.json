@@ -1,0 +1,666 @@
+{
+  "$defs": {
+    "dataset": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "description": "Dataset specs live under `datasets/**/*.env` and load reusable data before an experiment workload.",
+      "properties": {
+        "DATASET_KIND": {
+          "description": "Dataset loader adapter.",
+          "enum": [
+            "sql",
+            "profile",
+            "pgbench"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "DATASET_NAME": {
+          "description": "Human-readable dataset name.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "DATASET_PROFILE": {
+          "description": "Profile setup SQL used as dataset source.",
+          "type": "string",
+          "x-workbench-requirement": "required for profile"
+        },
+        "DATASET_ROWS": {
+          "default": "10000",
+          "description": "Row count variable passed to dataset SQL.",
+          "type": "string",
+          "x-workbench-requirement": "optional for sql"
+        },
+        "DATASET_SCALE": {
+          "default": "1",
+          "description": "Pgbench initialization scale.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "DATASET_SCHEMA": {
+          "default": "dataset_synthetic",
+          "description": "Target schema variable passed to dataset SQL.",
+          "type": "string",
+          "x-workbench-requirement": "optional for sql"
+        },
+        "DATASET_SEED": {
+          "default": "1",
+          "description": "Seed variable passed to dataset SQL.",
+          "type": "string",
+          "x-workbench-requirement": "optional for sql"
+        },
+        "DATASET_SIZE": {
+          "default": "small",
+          "description": "Dataset/profile size override.",
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "DATASET_SQL": {
+          "description": "Repository or absolute SQL path.",
+          "type": "string",
+          "x-workbench-requirement": "required for sql"
+        }
+      },
+      "required": [
+        "DATASET_NAME",
+        "DATASET_KIND"
+      ],
+      "title": "dataset env spec",
+      "type": "object"
+    },
+    "experiment": {
+      "$comment": "Keep interpretation profile-local; experiment specs should describe orchestration. Foreground and background workload specs use the workload contract.",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "description": "Experiment specs live under `experiments/**/*.env` and orchestrate topology, setup, workload, monitoring, assertions, and artifacts.",
+      "properties": {
+        "EXPERIMENT_AFTER_SHELL": {
+          "description": "Host shell hook run after workload.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_AFTER_SQL": {
+          "description": "Inline SQL run after workload.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_AFTER_SQL_FILES": {
+          "description": "Space-separated SQL files run after workload.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_ASSERT_SHELL": {
+          "description": "Host shell assertion hook.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_ASSERT_SQL": {
+          "description": "Inline SQL assertion.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_ASSERT_SQL_FILES": {
+          "description": "Space-separated SQL assertion files.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_BACKGROUND_SPECS": {
+          "description": "Space-separated background workload specs.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_BACKGROUND_WAIT": {
+          "default": "0",
+          "description": "Wait for background workloads before after-hooks.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_BACKGROUND_WARMUP": {
+          "default": "0",
+          "description": "Seconds to wait after background workloads start.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_BEFORE_SHELL": {
+          "description": "Host shell hook run before snapshots/workload.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_BEFORE_SQL": {
+          "description": "Inline SQL run before snapshots/workload.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_BEFORE_SQL_FILES": {
+          "description": "Space-separated SQL files run before snapshots/workload.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_DATASET_SIZE": {
+          "default": "small",
+          "description": "Dataset size passed to dataset loader.",
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_DATASET_SPEC": {
+          "description": "Dataset spec loaded before profile/workload execution.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_DOCKER_RESET": {
+          "default": "0",
+          "description": "Reset runtime before the run.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_METRICS": {
+          "default": "1",
+          "description": "Enable metrics sampling.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_METRICS_DURATION": {
+          "default": "30",
+          "description": "Metrics sampling duration in seconds.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_METRICS_INTERVAL": {
+          "default": "1",
+          "description": "Metrics sampling interval in seconds.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_METRICS_SAMPLES": {
+          "description": "Fixed sample count; overrides duration loop.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_NAME": {
+          "description": "Human-readable experiment name.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "EXPERIMENT_PG_CONFIG": {
+          "default": "default",
+          "description": "Config directory under `configs/`.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_PROFILE": {
+          "description": "Profile directory under `profiles/`.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_PROFILE_RUN": {
+          "default": "0",
+          "description": "Run profile SQL before hooks/workload.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_PROFILE_RUN_SQL": {
+          "default": "10_run.sql",
+          "description": "Profile SQL file used when `EXPERIMENT_PROFILE_RUN=1`.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_PROFILE_SECONDS": {
+          "default": "30",
+          "description": "Profile duration passed to profile SQL.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_PROFILE_SETUP": {
+          "default": "1",
+          "description": "Run profile `00_setup.sql` before hooks/workload.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_PROFILE_SIZE": {
+          "default": "small",
+          "description": "Profile scale passed to profile SQL.",
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_RUN_ID": {
+          "default": "generated",
+          "description": "Explicit run id.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_SCAN_PATHS": {
+          "default": "run directory",
+          "description": "Paths scanned for failure evidence.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_SNAPSHOT": {
+          "default": "1",
+          "description": "Capture before/after PostgreSQL snapshots.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_STATE_WRITER": {
+          "default": "auto",
+          "description": "State-file writer mode for manifest and verdict artifacts.",
+          "enum": [
+            "auto",
+            "go",
+            "shell"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_TOPOLOGY": {
+          "default": "single",
+          "description": "Runtime topology.",
+          "enum": [
+            "single",
+            "primary-replica",
+            "logical-replication",
+            "pgbouncer",
+            "multi-version-upgrade",
+            "source-tree"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_WORKLOAD_SPEC": {
+          "description": "Foreground workload spec.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        }
+      },
+      "required": [
+        "EXPERIMENT_NAME"
+      ],
+      "title": "experiment env spec",
+      "type": "object"
+    },
+    "matrix": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "description": "Matrix specs live under `matrices/**/*.env` and expand experiments across config/profile-size/repeat combinations.",
+      "properties": {
+        "MATRIX_DOCKER_RESET": {
+          "default": "0",
+          "description": "Reset runtime before each run.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "MATRIX_EXPERIMENTS": {
+          "default": "smoke",
+          "description": "Space-separated experiment specs.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "MATRIX_NAME": {
+          "description": "Human-readable matrix name.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "MATRIX_PG_CONFIGS": {
+          "default": "default",
+          "description": "Space-separated PostgreSQL config profiles.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "MATRIX_PROFILE_SIZES": {
+          "default": "small",
+          "description": "Space-separated profile sizes.",
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "MATRIX_REPEATS": {
+          "default": "1",
+          "description": "Repeat count per combination.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "MATRIX_RUN_DIR": {
+          "default": "runs/matrices/<id>",
+          "description": "Explicit matrix artifact directory.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "MATRIX_RUN_ID": {
+          "default": "generated",
+          "description": "Explicit matrix run id.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "MATRIX_STOP_ON_FAIL": {
+          "default": "0",
+          "description": "Stop matrix after first failed run.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        }
+      },
+      "required": [
+        "MATRIX_NAME"
+      ],
+      "title": "matrix env spec",
+      "type": "object"
+    },
+    "topology": {
+      "$comment": "Topology implementation remains in shell/Docker Compose adapters.",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "description": "Topology specs live under `topologies/**/*.env` and describe supported runtime shapes.",
+      "properties": {
+        "TOPOLOGY_DESCRIPTION": {
+          "description": "Human-readable topology description.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "TOPOLOGY_NAME": {
+          "description": "Topology id; must match the spec id.",
+          "enum": [
+            "single",
+            "primary-replica",
+            "logical-replication",
+            "pgbouncer",
+            "multi-version-upgrade"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "required"
+        }
+      },
+      "required": [
+        "TOPOLOGY_NAME",
+        "TOPOLOGY_DESCRIPTION"
+      ],
+      "title": "topology env spec",
+      "type": "object"
+    },
+    "workload": {
+      "$comment": "Values containing `$` are treated as dynamic by the validator and are not path-checked. Tool-specific knobs can live in workload specs as long as the adapter consumes them.",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "description": "Workload specs live under `workloads/**/*.env` and define one foreground or background executable workload.",
+      "properties": {
+        "NOISIA_EXTRA_ARGS": {
+          "description": "Extra noisia arguments split as shell words.",
+          "type": "string",
+          "x-workbench-requirement": "optional for noisia"
+        },
+        "NOISIA_WORKLOAD": {
+          "description": "Noisia workload adapter.",
+          "enum": [
+            "wait-xacts",
+            "temp-files"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "required for noisia"
+        },
+        "PGBENCH_CLIENTS": {
+          "default": "2",
+          "description": "Client count.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "PGBENCH_EXTRA_ARGS": {
+          "description": "Extra pgbench arguments split as shell words.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "PGBENCH_INIT": {
+          "default": "1",
+          "description": "Run `pgbench -i` before the workload.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "PGBENCH_MODE": {
+          "default": "builtin",
+          "description": "Builtin pgbench mode passed with `-b` when no script is set.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "PGBENCH_RESET": {
+          "default": "0",
+          "description": "Drop pgbench tables before init/run.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "PGBENCH_SCALE": {
+          "default": "1",
+          "description": "Scale factor for pgbench initialization.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "PGBENCH_SCRIPT": {
+          "description": "Custom pgbench script path.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "PGBENCH_THREADS": {
+          "default": "1",
+          "description": "Thread count.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "PGBENCH_TIME": {
+          "default": "30",
+          "description": "Run duration in seconds when transactions are unset.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "PGBENCH_TRANSACTIONS": {
+          "description": "Transaction count; overrides duration mode.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pgbench"
+        },
+        "PG_BUILD_CFLAGS": {
+          "default": "-O0 -g",
+          "description": "CFLAGS used by PostgreSQL source builds.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pg-source-check"
+        },
+        "PG_CHECK_TARGET": {
+          "default": "check",
+          "description": "Make target for PostgreSQL source tests.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pg-source-check"
+        },
+        "PG_CLONE_DEPTH": {
+          "default": "1",
+          "description": "Git clone depth for PostgreSQL source.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pg-source-check"
+        },
+        "PG_CONFIGURE_ARGS": {
+          "default": "--enable-debug --enable-cassert --enable-tap-tests",
+          "description": "Configure arguments for PostgreSQL source builds.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pg-source-check"
+        },
+        "PG_PATCHSET": {
+          "description": "Named patchset under `patchsets/<name>/<pg-ref>`.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pg-source-check"
+        },
+        "PG_PATCH_DIR": {
+          "description": "Ad hoc patch directory; overrides the directory from `PG_PATCHSET`.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pg-source-check"
+        },
+        "PG_SOURCE_ACTION": {
+          "default": "run",
+          "description": "PostgreSQL source-check action.",
+          "enum": [
+            "plan",
+            "run",
+            "scan"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional for pg-source-check"
+        },
+        "PG_SOURCE_KEEP_GOING": {
+          "default": "1",
+          "description": "When `1`, scan artifacts even if the make target failed.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional for pg-source-check"
+        },
+        "PG_TEST_INITDB_EXTRA_OPTS": {
+          "description": "Extra initdb options passed to PostgreSQL source test targets.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pg-source-check"
+        },
+        "PROFILE": {
+          "description": "Profile directory under `profiles/`.",
+          "type": "string",
+          "x-workbench-requirement": "required for profile-sql"
+        },
+        "SQL": {
+          "description": "Repository or absolute SQL path for `WORKLOAD_KIND=sql`.",
+          "type": "string",
+          "x-workbench-requirement": "required for sql if WORKLOAD_SQL is empty"
+        },
+        "WORKLOAD_CMD": {
+          "description": "Host shell command run with PostgreSQL connection env exported.",
+          "type": "string",
+          "x-workbench-requirement": "required for shell"
+        },
+        "WORKLOAD_COMMAND": {
+          "description": "Command run in the Compose workload service.",
+          "type": "string",
+          "x-workbench-requirement": "required for compose-run"
+        },
+        "WORKLOAD_IMAGE": {
+          "description": "Docker Compose workload image.",
+          "type": "string",
+          "x-workbench-requirement": "required for compose-run"
+        },
+        "WORKLOAD_KIND": {
+          "description": "Adapter used by `scripts/run_workload.sh`.",
+          "enum": [
+            "profile-sql",
+            "sql",
+            "pgbench",
+            "pg-source-check",
+            "noisia",
+            "shell",
+            "compose-run"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "WORKLOAD_LOG_DIR": {
+          "default": "logs/workloads",
+          "description": "Directory for workload logs.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "WORKLOAD_LOG_FILE": {
+          "description": "Explicit log file path.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "WORKLOAD_NAME": {
+          "description": "Human-readable workload name.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "WORKLOAD_REQUIRES_POSTGRES": {
+          "default": "1",
+          "description": "Set to `0` for host-only workloads that do not need the PostgreSQL container.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "WORKLOAD_RUN_LOG": {
+          "default": "1",
+          "description": "Set to `0` to stream directly without a workload log wrapper.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "WORKLOAD_SQL": {
+          "default": "10_run.sql for profile-sql",
+          "description": "Profile SQL file name or repository SQL path.",
+          "type": "string",
+          "x-workbench-requirement": "conditional"
+        }
+      },
+      "required": [
+        "WORKLOAD_NAME",
+        "WORKLOAD_KIND"
+      ],
+      "title": "workload env spec",
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/env-specs.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PostgreSQL Experiment Workbench env spec schemas"
+}

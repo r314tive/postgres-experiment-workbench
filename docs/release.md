@@ -29,6 +29,7 @@ public MVP tag, prefer `v0.1.0` after:
 - local `make release-check` is green;
 - GitHub `check` is green on the tag candidate commit;
 - `make release-snapshot VERSION=0.1.0` builds all configured archives;
+- tracked env spec docs/schema pass `make spec-docs-check`;
 - [../CHANGELOG.md](../CHANGELOG.md) describes user-visible changes.
 
 ## Pre-Release Gate

@@ -26,8 +26,8 @@ and a small number of reliable binaries/scripts.
 - Keep `make release-check` green before tags.
 - Keep packaged `pgworkbench` snapshot binaries buildable for common platforms.
 - Keep the minimal quickstart transcript current.
-- Keep schema/reference docs for profile, workload, topology, experiment, and
-  matrix env specs generated from code.
+- Keep schema/reference docs for workload, topology, experiment, matrix, and
+  dataset env specs generated from code and checked for drift.
 - Keep compatibility notes current for Docker, Compose, PostgreSQL image
   versions, and host tools.
 - Add more profile-specific diagnostic SQL where it helps interpretation.

@@ -23,7 +23,7 @@ func RenderSchema(w io.Writer, kind string) error {
 		}
 		document = schemaDocument{
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
-			"$id":     "https://github.com/r314tive/postgres-experiment-workbench/schema/env-specs.json",
+			"$id":     "https://github.com/r314tive/postgres-experiment-workbench/schemas/env-specs.schema.json",
 			"title":   "PostgreSQL Experiment Workbench env spec schemas",
 			"$defs":   defs,
 		}

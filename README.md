@@ -173,9 +173,14 @@ Validate env specs before running larger suites:
 make spec-validate
 make spec-reference SPEC_KIND=all
 make spec-schema SPEC_KIND=all
+make spec-docs-check
 make spec-list SPEC_KIND=workload
 make spec-show SPEC_KIND=experiment SPEC_ID=smoke
 ```
+
+Tracked env spec reference and schema live in
+[docs/spec-reference.md](docs/spec-reference.md) and
+[schemas/env-specs.schema.json](schemas/env-specs.schema.json).
 
 ## Datasets
 
