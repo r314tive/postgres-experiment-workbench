@@ -131,9 +131,11 @@ make experiment-run EXPERIMENT_SPEC=pgbouncer-smoke
 make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
 make experiment-run EXPERIMENT_SPEC=temp-spill
 make experiment-report RUN_DIR=runs/<run-id>
+make experiment-report-go RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 make experiment-summary SUMMARY_INPUT=runs/repeats/<repeat-id>
 make experiment-history HISTORY_INPUTS='runs/repeats/a runs/repeats/b'
+make experiment-compare-go BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b
 ```
 
 Experiment platform details live in [docs/experiment-platform.md](docs/experiment-platform.md).
@@ -226,6 +228,8 @@ scanning:
 go run ./cmd/pgworkbench profile list
 go run ./cmd/pgworkbench profile validate
 go run ./cmd/pgworkbench scan failures logs generated
+go run ./cmd/pgworkbench report run runs/<run-id>
+go run ./cmd/pgworkbench report compare runs/a runs/b
 ```
 
 Go migration notes live in [docs/go-migration.md](docs/go-migration.md).

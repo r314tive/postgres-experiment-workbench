@@ -42,4 +42,13 @@ grep -q '| `wal_bytes` | `100` | `250` | `150` |' <<< "$OUT"
 "$REPO_DIR/scripts/report_run.sh" "$RUN_DIR" "$RUN_DIR/report.md" >/dev/null
 grep -q '# Experiment Run Report' "$RUN_DIR/report.md"
 
+GO_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" go run ./cmd/pgworkbench report run "$RUN_DIR")"
+grep -q '# Experiment Run Report' <<< "$GO_OUT"
+grep -q '| Status | `passed` |' <<< "$GO_OUT"
+grep -q '| `wal_bytes` | `100` | `250` | `150` |' <<< "$GO_OUT"
+
+(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
+  go run ./cmd/pgworkbench report run "$RUN_DIR" "$RUN_DIR/report-go.md") >/dev/null
+grep -q '# Experiment Run Report' "$RUN_DIR/report-go.md"
+
 echo "PASS: run reports"

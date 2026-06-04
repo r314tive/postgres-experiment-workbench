@@ -38,4 +38,10 @@ grep -q 'WAL bytes delta' <<< "$OUT"
 grep -q '`60`' <<< "$OUT"
 grep -q '`120`' <<< "$OUT"
 
+GO_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" go run ./cmd/pgworkbench report compare "$BASE" "$CAND")"
+grep -q '# Run Comparison' <<< "$GO_OUT"
+grep -q 'WAL bytes delta' <<< "$GO_OUT"
+grep -q '`60`' <<< "$GO_OUT"
+grep -q '`120`' <<< "$GO_OUT"
+
 echo "PASS: run comparison"

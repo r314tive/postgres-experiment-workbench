@@ -70,10 +70,12 @@ help:
 	@printf '  %-24s %s\n' 'make experiment-show' 'Show EXPERIMENT_SPEC'
 	@printf '  %-24s %s\n' 'make experiment-run' 'Run EXPERIMENT_SPEC into runs/<run-id>'
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report for RUN_DIR'
+	@printf '  %-24s %s\n' 'make experiment-report-go' 'Render Markdown report with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-summary' 'Summarize a repeat/matrix/run series'
 	@printf '  %-24s %s\n' 'make experiment-history' 'Compare repeat/matrix/run series history'
 	@printf '  %-24s %s\n' 'make experiment-repeat' 'Run EXPERIMENT_SPEC repeatedly'
 	@printf '  %-24s %s\n' 'make experiment-compare' 'Compare BASELINE_RUN and CANDIDATE_RUN'
+	@printf '  %-24s %s\n' 'make experiment-compare-go' 'Compare runs with Go CLI'
 	@printf '  %-24s %s\n' 'make matrix-list' 'List experiment matrix specs'
 	@printf '  %-24s %s\n' 'make matrix-show' 'Show MATRIX_SPEC'
 	@printf '  %-24s %s\n' 'make matrix-plan' 'Preview MATRIX_SPEC combinations'
@@ -210,6 +212,11 @@ experiment-report:
 	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-report RUN_DIR=runs/<run-id>' >&2; exit 2; }
 	./scripts/report_run.sh "$(RUN_DIR)"
 
+.PHONY: experiment-report-go
+experiment-report-go:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-report-go RUN_DIR=runs/<run-id>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report run "$(RUN_DIR)"
+
 .PHONY: experiment-summary
 experiment-summary:
 	@test -n "$(SUMMARY_INPUT)" || { echo 'Usage: make experiment-summary SUMMARY_INPUT=runs/repeats/<id>' >&2; exit 2; }
@@ -237,6 +244,12 @@ experiment-compare:
 	@test -n "$(BASELINE_RUN)" || { echo 'Usage: make experiment-compare BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
 	@test -n "$(CANDIDATE_RUN)" || { echo 'Usage: make experiment-compare BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
 	./scripts/compare_runs.sh "$(BASELINE_RUN)" "$(CANDIDATE_RUN)"
+
+.PHONY: experiment-compare-go
+experiment-compare-go:
+	@test -n "$(BASELINE_RUN)" || { echo 'Usage: make experiment-compare-go BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
+	@test -n "$(CANDIDATE_RUN)" || { echo 'Usage: make experiment-compare-go BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report compare "$(BASELINE_RUN)" "$(CANDIDATE_RUN)"
 
 .PHONY: matrix-list
 matrix-list:

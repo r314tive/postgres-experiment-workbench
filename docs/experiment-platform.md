@@ -41,7 +41,9 @@ first-pass report, not a statistical benchmark framework.
 
 ```bash
 make experiment-report RUN_DIR=runs/<run-id>
+make experiment-report-go RUN_DIR=runs/<run-id>
 ./scripts/report_run.sh runs/<run-id> runs/<run-id>/report.md
+go run ./cmd/pgworkbench report run runs/<run-id> runs/<run-id>/report.md
 ```
 
 Reports are Markdown summaries built from `manifest.env`, `verdict.env`,

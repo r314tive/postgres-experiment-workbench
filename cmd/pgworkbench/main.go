@@ -9,6 +9,7 @@ import (
 
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
+	"github.com/r314tive/postgres-experiment-workbench/internal/runreport"
 )
 
 func main() {
@@ -37,6 +38,8 @@ func run(args []string) error {
 		return runProfile(profilecatalog.New(root), args[1:])
 	case "scan":
 		return runScan(root, args[1:])
+	case "report":
+		return runReport(root, args[1:])
 	default:
 		return fmt.Errorf("unsupported command: %s", args[0])
 	}
@@ -47,7 +50,9 @@ func usage() {
   pgworkbench profile list
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]
-  pgworkbench scan failures [path...]`)
+  pgworkbench scan failures [path...]
+  pgworkbench report run <run-dir-or-id> [output.md]
+  pgworkbench report compare <baseline-run-dir> <candidate-run-dir>`)
 }
 
 func runProfile(catalog profilecatalog.Catalog, args []string) error {
@@ -87,6 +92,47 @@ func runProfile(catalog profilecatalog.Catalog, args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unsupported profile action: %s", args[0])
+	}
+}
+
+func runReport(root string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("report action is required")
+	}
+
+	switch args[0] {
+	case "run":
+		if len(args) < 2 || len(args) > 3 {
+			return fmt.Errorf("usage: pgworkbench report run <run-dir-or-id> [output.md]")
+		}
+		if len(args) == 3 {
+			outPath := args[2]
+			if !filepath.IsAbs(outPath) {
+				outPath = filepath.Join(root, outPath)
+			}
+			if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+				return err
+			}
+			file, err := os.Create(outPath)
+			if err != nil {
+				return err
+			}
+			defer file.Close()
+
+			if err := runreport.RenderRun(root, args[1], file); err != nil {
+				return err
+			}
+			fmt.Printf("Wrote report: %s\n", outPath)
+			return nil
+		}
+		return runreport.RenderRun(root, args[1], os.Stdout)
+	case "compare":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: pgworkbench report compare <baseline-run-dir> <candidate-run-dir>")
+		}
+		return runreport.RenderComparison(root, args[1], args[2], os.Stdout)
+	default:
+		return fmt.Errorf("unsupported report action: %s", args[0])
 	}
 }
 
