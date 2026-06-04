@@ -21,6 +21,8 @@ DATASET_SCHEMA ?= dataset_synthetic
 BASELINE_RUN ?=
 CANDIDATE_RUN ?=
 RUN_DIR ?=
+SPEC_KIND ?= workload
+SPEC_ID ?=
 SUMMARY_INPUT ?=
 SUMMARY_OUT ?=
 HISTORY_INPUTS ?=
@@ -82,6 +84,9 @@ help:
 	@printf '  %-24s %s\n' 'make matrix-show' 'Show MATRIX_SPEC'
 	@printf '  %-24s %s\n' 'make matrix-plan' 'Preview MATRIX_SPEC combinations'
 	@printf '  %-24s %s\n' 'make matrix-run' 'Run MATRIX_SPEC combinations'
+	@printf '  %-24s %s\n' 'make spec-list' 'List SPEC_KIND specs with Go CLI'
+	@printf '  %-24s %s\n' 'make spec-show' 'Show SPEC_KIND/SPEC_ID with Go CLI'
+	@printf '  %-24s %s\n' 'make spec-validate' 'Validate env specs with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-list' 'List workload specs'
 	@printf '  %-24s %s\n' 'make workload-show' 'Show WORKLOAD_SPEC'
 	@printf '  %-24s %s\n' 'make workload-run' 'Run WORKLOAD_SPEC'
@@ -287,6 +292,23 @@ matrix-plan:
 matrix-run:
 	./scripts/run_experiment_matrix.sh run "$(MATRIX_SPEC)"
 
+.PHONY: spec-list
+spec-list:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec list "$(SPEC_KIND)"
+
+.PHONY: spec-show
+spec-show:
+	@test -n "$(SPEC_ID)" || { echo 'Usage: make spec-show SPEC_KIND=workload SPEC_ID=pgbench/tiny' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec show "$(SPEC_KIND)" "$(SPEC_ID)"
+
+.PHONY: spec-validate
+spec-validate:
+	@if [[ -n "$(SPEC_ID)" ]]; then \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate "$(SPEC_KIND)" "$(SPEC_ID)"; \
+	else \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate; \
+	fi
+
 .PHONY: workload-show
 workload-show:
 	./scripts/run_workload.sh show "$(WORKLOAD_SPEC)"
@@ -368,6 +390,7 @@ check:
 	git diff --check
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test ./...
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS) >/dev/null
 	./tests/profile_catalog.sh
 	./tests/scan_failures.sh

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 )
 
@@ -39,11 +38,7 @@ func Parse(path string) (map[string]string, error) {
 
 		if len(value) >= 2 {
 			if value[0] == '"' && value[len(value)-1] == '"' {
-				unquoted, err := strconv.Unquote(value)
-				if err != nil {
-					return nil, fmt.Errorf("%s:%d: %w", path, lineNumber, err)
-				}
-				value = unquoted
+				value = unquoteDouble(value)
 			} else if value[0] == '\'' && value[len(value)-1] == '\'' {
 				value = value[1 : len(value)-1]
 			}
@@ -57,4 +52,25 @@ func Parse(path string) (map[string]string, error) {
 	}
 
 	return values, nil
+}
+
+func unquoteDouble(value string) string {
+	inner := value[1 : len(value)-1]
+	var out strings.Builder
+	for i := 0; i < len(inner); i++ {
+		if inner[i] != '\\' || i+1 >= len(inner) {
+			out.WriteByte(inner[i])
+			continue
+		}
+		next := inner[i+1]
+		switch next {
+		case '"', '\\', '$', '`':
+			out.WriteByte(next)
+		default:
+			out.WriteByte('\\')
+			out.WriteByte(next)
+		}
+		i++
+	}
+	return out.String()
 }

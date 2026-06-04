@@ -8,7 +8,7 @@ import (
 
 func TestParseEnvFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profile.env")
-	content := "# comment\nPLAIN=value\nDOUBLE=\"two words\"\nSINGLE='three words here'\nSPACED = trimmed\n"
+	content := "# comment\nPLAIN=value\nDOUBLE=\"two words\"\nSINGLE='three words here'\nSPACED = trimmed\nSHELL_SQL=\"DO \\$\\$ BEGIN RAISE NOTICE 'ok'; END \\$\\$;\"\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -19,10 +19,11 @@ func TestParseEnvFile(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"PLAIN":  "value",
-		"DOUBLE": "two words",
-		"SINGLE": "three words here",
-		"SPACED": "trimmed",
+		"PLAIN":     "value",
+		"DOUBLE":    "two words",
+		"SINGLE":    "three words here",
+		"SPACED":    "trimmed",
+		"SHELL_SQL": "DO $$ BEGIN RAISE NOTICE 'ok'; END $$;",
 	}
 	for key, expected := range want {
 		if values[key] != expected {

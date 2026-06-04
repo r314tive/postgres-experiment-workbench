@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runreport"
+	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 )
 
 func main() {
@@ -40,6 +42,8 @@ func run(args []string) error {
 		return runScan(root, args[1:])
 	case "report":
 		return runReport(root, args[1:])
+	case "spec":
+		return runSpec(speccatalog.New(root), args[1:])
 	default:
 		return fmt.Errorf("unsupported command: %s", args[0])
 	}
@@ -54,7 +58,10 @@ func usage() {
   pgworkbench report run <run-dir-or-id> [output.md]
   pgworkbench report compare <baseline-run-dir> <candidate-run-dir>
   pgworkbench report summary [--output output.md] <series-dir|run-dir> [run-dir...]
-  pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]`)
+  pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]
+  pgworkbench spec list <workload|experiment|matrix|topology|dataset>
+  pgworkbench spec show <kind> <spec>
+  pgworkbench spec validate [kind] [spec...]`)
 }
 
 func runProfile(catalog profilecatalog.Catalog, args []string) error {
@@ -94,6 +101,65 @@ func runProfile(catalog profilecatalog.Catalog, args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unsupported profile action: %s", args[0])
+	}
+}
+
+func runSpec(catalog speccatalog.Catalog, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("spec action is required")
+	}
+
+	switch args[0] {
+	case "list":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench spec list <workload|experiment|matrix|topology|dataset>")
+		}
+		specs, err := catalog.List(args[1])
+		if err != nil {
+			return err
+		}
+		for _, spec := range specs {
+			fmt.Println(spec)
+		}
+		return nil
+	case "show":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: pgworkbench spec show <kind> <spec>")
+		}
+		spec, err := catalog.Show(args[1], args[2])
+		if err != nil {
+			return err
+		}
+		fmt.Printf("SPEC_KIND=\"%s\"\n", spec.Kind)
+		fmt.Printf("SPEC_ID=\"%s\"\n", spec.ID)
+		fmt.Printf("SPEC_FILE=\"%s\"\n", spec.Path)
+		keys := make([]string, 0, len(spec.Values))
+		for key := range spec.Values {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			fmt.Printf("%s=\"%s\"\n", key, spec.Values[key])
+		}
+		return nil
+	case "validate":
+		kind := "all"
+		ids := []string(nil)
+		if len(args) >= 2 {
+			kind = args[1]
+			ids = args[2:]
+		}
+		errs := catalog.Validate(kind, ids)
+		if len(errs) > 0 {
+			for _, err := range errs {
+				fmt.Fprintln(os.Stderr, err)
+			}
+			return fmt.Errorf("spec validation failed")
+		}
+		fmt.Println("PASS: specs")
+		return nil
+	default:
+		return fmt.Errorf("unsupported spec action: %s", args[0])
 	}
 }
 
