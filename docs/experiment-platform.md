@@ -119,6 +119,8 @@ primary plus physical replica before profile setup and workload execution.
 `EXPERIMENT_TOPOLOGY=logical-replication` starts a publisher plus independent
 logical subscriber.
 `EXPERIMENT_TOPOLOGY=pgbouncer` starts PostgreSQL plus PgBouncer.
+`EXPERIMENT_TOPOLOGY=multi-version-upgrade` starts old and new PostgreSQL
+versions for upgrade-path utility checks.
 
 Examples:
 
@@ -127,4 +129,5 @@ make experiment-run EXPERIMENT_SPEC=replica-readonly
 make experiment-run EXPERIMENT_SPEC=replication-slots
 make experiment-run EXPERIMENT_SPEC=logical-replication
 make experiment-run EXPERIMENT_SPEC=pgbouncer-smoke
+make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
 ```

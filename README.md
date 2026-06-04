@@ -110,6 +110,7 @@ Implemented topologies:
 - `primary-replica`: physical streaming replica with a local replication slot.
 - `logical-replication`: publisher plus independent logical subscriber.
 - `pgbouncer`: PostgreSQL plus PgBouncer pooler.
+- `multi-version-upgrade`: old and new PostgreSQL versions for upgrade tests.
 
 ## Experiments
 
@@ -123,6 +124,7 @@ make experiment-run EXPERIMENT_SPEC=locks-under-contention
 make experiment-run EXPERIMENT_SPEC=replica-readonly
 make experiment-run EXPERIMENT_SPEC=logical-replication
 make experiment-run EXPERIMENT_SPEC=pgbouncer-smoke
+make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 make experiment-summary SUMMARY_INPUT=runs/repeats/<repeat-id>

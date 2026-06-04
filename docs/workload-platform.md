@@ -3,7 +3,7 @@
 This repository should act as a generic PostgreSQL experiment platform, not a
 single-purpose lab.
 
-The platform has five layers:
+The platform has six layers:
 
 1. PostgreSQL runtime: Docker Compose starts a disposable PostgreSQL instance.
 2. Topologies: runtime shape such as `single` or `primary-replica`.
@@ -82,6 +82,9 @@ make topology-up TOPOLOGY=logical-replication
 make workload-run WORKLOAD_SPEC=topology/logical-status
 make topology-up TOPOLOGY=pgbouncer
 make workload-run WORKLOAD_SPEC=topology/pgbouncer-admin
+make topology-up TOPOLOGY=multi-version-upgrade
+make workload-run WORKLOAD_SPEC=topology/upgrade-status
+make workload-run WORKLOAD_SPEC=topology/upgrade-dump-restore
 ```
 
 For testing PostgreSQL source itself:

@@ -44,7 +44,11 @@ PROFILE_SIZE=small
 PROFILE_SECONDS=30
 WORKLOAD_RUN_LOG=1
 WORKLOAD_LOG_DIR=logs/workloads
+WORKLOAD_REQUIRES_POSTGRES=1
 ```
+
+Set `WORKLOAD_REQUIRES_POSTGRES=0` for topology specs that start their own
+runtime shape, such as replica, PgBouncer, or multi-version upgrade workloads.
 
 Shell and compose workloads receive standard connection settings:
 

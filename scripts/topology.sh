@@ -24,6 +24,8 @@ Implemented topologies:
   primary-replica      Primary plus one physical streaming replica.
   logical-replication  Publisher plus one logical subscriber.
   pgbouncer            PostgreSQL plus PgBouncer pooler.
+  multi-version-upgrade
+                       Old and new PostgreSQL versions for upgrade testing.
 USAGE
 }
 
@@ -105,7 +107,7 @@ resolve_topology_spec() {
 require_topology() {
   local topology="$1"
   case "$topology" in
-    single|primary-replica|logical-replication|pgbouncer)
+    single|primary-replica|logical-replication|pgbouncer|multi-version-upgrade)
       ;;
     *)
       echo "Unsupported topology: $topology" >&2
@@ -130,6 +132,7 @@ compose_down() {
     --profile replica \
     --profile logical \
     --profile pgbouncer \
+    --profile upgrade \
     --profile workload \
     down "$@"
 }
@@ -157,6 +160,14 @@ logical_exec() {
 
 pgbouncer_exec() {
   "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" exec -T pgbouncer "$@"
+}
+
+upgrade_old_exec() {
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" exec -T postgres-old "$@"
+}
+
+upgrade_new_exec() {
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" exec -T postgres-new "$@"
 }
 
 configure_primary_for_replica() {
@@ -248,6 +259,40 @@ wait_pgbouncer() {
   exit 1
 }
 
+wait_upgrade_server() {
+  local service="$1"
+  local label="$2"
+
+  for _ in {1..90}; do
+    if "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" exec -T "$service" pg_isready \
+      -h 127.0.0.1 \
+      -p 5432 \
+      -U "${POSTGRES_USER:-postgres}" \
+      -d "${POSTGRES_DB:-pg_experiment_workbench}" >/dev/null 2>&1; then
+      if "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" exec -T "$service" env PGPASSWORD="${POSTGRES_PASSWORD:-postgres}" psql \
+        -h 127.0.0.1 \
+        -p 5432 \
+        -U "${POSTGRES_USER:-postgres}" \
+        -d "${POSTGRES_DB:-pg_experiment_workbench}" \
+        -At \
+        -v ON_ERROR_STOP=1 \
+        -c "SELECT 1" 2>/dev/null | grep -q '^1$'; then
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+
+  echo "Upgrade $label server is not ready" >&2
+  exit 1
+}
+
+up_upgrade() {
+  "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" --profile upgrade up -d postgres-old postgres-new
+  wait_upgrade_server postgres-old old
+  wait_upgrade_server postgres-new new
+}
+
 up_topology() {
   local topology="$1"
   require_topology "$topology"
@@ -268,6 +313,9 @@ up_topology() {
     pgbouncer)
       up_primary
       up_pgbouncer
+      ;;
+    multi-version-upgrade)
+      up_upgrade
       ;;
   esac
 }
@@ -293,6 +341,10 @@ reset_topology() {
       compose_down pgbouncer -v
       up_topology pgbouncer
       ;;
+    multi-version-upgrade)
+      compose_down upgrade -v
+      up_topology multi-version-upgrade
+      ;;
   esac
 }
 
@@ -312,6 +364,9 @@ down_topology() {
       ;;
     pgbouncer)
       compose_down pgbouncer
+      ;;
+    multi-version-upgrade)
+      compose_down upgrade
       ;;
   esac
 }
@@ -365,6 +420,31 @@ status_topology() {
           -c "SHOW POOLS;"
       fi
       ;;
+    multi-version-upgrade)
+      "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" --profile upgrade ps postgres-old postgres-new
+      if "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" ps --status running postgres-old >/dev/null 2>&1; then
+        printf '\nOld PostgreSQL version:\n'
+        upgrade_old_exec env PGPASSWORD="${POSTGRES_PASSWORD:-postgres}" psql \
+          -h 127.0.0.1 \
+          -p 5432 \
+          -U "${POSTGRES_USER:-postgres}" \
+          -d "${POSTGRES_DB:-pg_experiment_workbench}" \
+          -x \
+          -v ON_ERROR_STOP=1 \
+          -c "SELECT current_database() AS database, current_setting('server_version') AS server_version, current_setting('server_version_num') AS server_version_num;"
+      fi
+      if "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" ps --status running postgres-new >/dev/null 2>&1; then
+        printf '\nNew PostgreSQL version:\n'
+        upgrade_new_exec env PGPASSWORD="${POSTGRES_PASSWORD:-postgres}" psql \
+          -h 127.0.0.1 \
+          -p 5432 \
+          -U "${POSTGRES_USER:-postgres}" \
+          -d "${POSTGRES_DB:-pg_experiment_workbench}" \
+          -x \
+          -v ON_ERROR_STOP=1 \
+          -c "SELECT current_database() AS database, current_setting('server_version') AS server_version, current_setting('server_version_num') AS server_version_num;"
+      fi
+      ;;
   esac
 }
 
@@ -387,6 +467,10 @@ wait_topology() {
     pgbouncer)
       wait_primary
       wait_pgbouncer
+      ;;
+    multi-version-upgrade)
+      wait_upgrade_server postgres-old old
+      wait_upgrade_server postgres-new new
       ;;
   esac
 }

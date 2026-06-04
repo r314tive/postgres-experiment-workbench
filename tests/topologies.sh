@@ -8,10 +8,12 @@ grep -q '^single$' <<< "$TOPOLOGY_LIST"
 grep -q '^primary-replica$' <<< "$TOPOLOGY_LIST"
 grep -q '^logical-replication$' <<< "$TOPOLOGY_LIST"
 grep -q '^pgbouncer$' <<< "$TOPOLOGY_LIST"
+grep -q '^multi-version-upgrade$' <<< "$TOPOLOGY_LIST"
 
 "$REPO_DIR/scripts/topology.sh" show primary-replica | grep -q 'TOPOLOGY_NAME="primary-replica"'
 "$REPO_DIR/scripts/topology.sh" show logical-replication | grep -q 'TOPOLOGY_NAME="logical-replication"'
 "$REPO_DIR/scripts/topology.sh" show pgbouncer | grep -q 'TOPOLOGY_NAME="pgbouncer"'
+"$REPO_DIR/scripts/topology.sh" show multi-version-upgrade | grep -q 'TOPOLOGY_NAME="multi-version-upgrade"'
 
 TOPOLOGY=primary-replica "$REPO_DIR/scripts/topology.sh" up primary-replica >/dev/null
 
@@ -57,5 +59,19 @@ PROFILE_SIZE=small "$REPO_DIR/scripts/run_profile_sql.sh" connection-pressure 00
 PROFILE_SIZE=small WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/pgbouncer-connection-pressure >/dev/null
 WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/pgbouncer-prepared-statement >/dev/null
 WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/pgbouncer-admin >/dev/null
+
+TOPOLOGY=multi-version-upgrade "$REPO_DIR/scripts/topology.sh" reset multi-version-upgrade >/dev/null
+"$REPO_DIR/scripts/psql_upgrade_old.sh" -At -c "SELECT current_setting('server_version_num')::integer < 160000" | grep -q '^t$'
+"$REPO_DIR/scripts/psql_upgrade_new.sh" -At -c "SELECT current_setting('server_version_num')::integer >= 160000" | grep -q '^t$'
+
+"$REPO_DIR/scripts/psql_upgrade_old.sh" \
+  -v profile=smoke \
+  -v profile_size=small \
+  -v profile_seconds=30 \
+  -f "$REPO_DIR/profiles/smoke/sql/00_setup.sql" >/dev/null
+
+WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/upgrade-dump-restore >/dev/null
+"$REPO_DIR/scripts/psql_upgrade_new.sh" -At -c "SELECT count(*) = 10000 FROM smoke.items" | grep -q '^t$'
+WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run topology/upgrade-status >/dev/null
 
 echo "PASS: topologies"

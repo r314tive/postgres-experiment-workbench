@@ -25,6 +25,7 @@ Run:
 make experiment-list
 make experiment-show EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=smoke
+make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 ```

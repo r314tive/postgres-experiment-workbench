@@ -9,12 +9,8 @@ Implemented topologies:
   physical replication slot.
 - `logical-replication`: one publisher plus one independent logical subscriber.
 - `pgbouncer`: PostgreSQL plus PgBouncer pooler.
-
-Planned topology specs can live here without changing profile or workload
-contracts:
-
-- `pgbouncer`
-- `multi-version-upgrade`
+- `multi-version-upgrade`: old and new PostgreSQL versions for upgrade-path
+  utility tests.
 
 The experiment runner records `EXPERIMENT_TOPOLOGY` in each run manifest. Runtime
 implementation can expand from this directory without changing experiment specs.
@@ -28,4 +24,5 @@ make topology-status TOPOLOGY=primary-replica
 make topology-reset TOPOLOGY=primary-replica
 make topology-up TOPOLOGY=logical-replication
 make topology-up TOPOLOGY=pgbouncer
+make topology-up TOPOLOGY=multi-version-upgrade
 ```

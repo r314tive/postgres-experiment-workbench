@@ -148,6 +148,50 @@ services:
       timeout: 3s
       retries: 60
 
+  postgres-old:
+    image: ${POSTGRES_UPGRADE_OLD_IMAGE:-postgres:15-alpine}
+    container_name: ${POSTGRES_UPGRADE_OLD_CONTAINER:-postgres-experiment-workbench-upgrade-old}
+    profiles:
+      - upgrade
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pg_experiment_workbench}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_UPGRADE_OLD_PORT:-55436}:5432"
+    volumes:
+      - postgres-upgrade-old-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  postgres-new:
+    image: ${POSTGRES_UPGRADE_NEW_IMAGE:-postgres:16-alpine}
+    container_name: ${POSTGRES_UPGRADE_NEW_CONTAINER:-postgres-experiment-workbench-upgrade-new}
+    profiles:
+      - upgrade
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pg_experiment_workbench}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_UPGRADE_NEW_PORT:-55437}:5432"
+    volumes:
+      - postgres-upgrade-new-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
   noisia:
     image: ${NOISIA_IMAGE:-lesovsky/noisia:latest}
     platform: ${NOISIA_PLATFORM:-linux/amd64}
@@ -185,3 +229,5 @@ volumes:
   postgres-data:
   replica-data:
   logical-subscriber-data:
+  postgres-upgrade-old-data:
+  postgres-upgrade-new-data:

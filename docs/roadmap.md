@@ -8,7 +8,8 @@ This project should stay a generic PostgreSQL experiment platform.
 - Expand profile-specific diagnostic SQL where it helps interpretation.
 - Add optional profile metadata if conventions need machine-readable fields.
 - Add CI presets for source-tree checks without making them default.
-- Add multi-version upgrade topology implementation.
+- Add optional native `pg_upgrade` binary-pair adapter on top of the
+  multi-version topology.
 - Add trend/history comparison across multiple local series directories.
 
 ## Candidate Profiles

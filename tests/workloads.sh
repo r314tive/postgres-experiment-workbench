@@ -21,6 +21,10 @@ grep -q 'WORKLOAD_KIND="shell"' <<< "$LOGICAL_SPEC"
 PGBOUNCER_SPEC="$("$REPO_DIR/scripts/run_workload.sh" show topology/pgbouncer-smoke)"
 grep -q 'WORKLOAD_KIND="shell"' <<< "$PGBOUNCER_SPEC"
 
+UPGRADE_SPEC="$("$REPO_DIR/scripts/run_workload.sh" show topology/upgrade-dump-restore)"
+grep -q 'WORKLOAD_NAME="multi-version dump restore upgrade"' <<< "$UPGRADE_SPEC"
+grep -q 'WORKLOAD_REQUIRES_POSTGRES=0' <<< "$UPGRADE_SPEC"
+
 PROFILE_SIZE=small "$REPO_DIR/scripts/run_profile_sql.sh" smoke 00_setup.sql >/dev/null
 PROFILE_SIZE=small "$REPO_DIR/scripts/run_workload.sh" run workloads/sql/smoke-run.env >/dev/null
 WORKLOAD_RUN_LOG=0 "$REPO_DIR/scripts/run_workload.sh" run workloads/compose/pg-isready.env >/dev/null
