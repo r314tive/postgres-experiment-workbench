@@ -16,6 +16,7 @@ EXPERIMENT_REPEAT_ID ?=
 MATRIX_SPEC ?= smoke
 PATCHSET ?= chaos/master
 SOURCE_WORKLOAD_SPEC ?= pg-source/check
+SOURCE_CHECK_PATH ?= generated/pg-source
 DATASET_SPEC ?= synthetic/items
 DATASET_SIZE ?= small
 DATASET_SEED ?= 1
@@ -75,6 +76,7 @@ help:
 	@printf '  %-24s %s\n' 'make patchset-show' 'Show PATCHSET metadata'
 	@printf '  %-24s %s\n' 'make patchset-validate' 'Validate patchset metadata and files'
 	@printf '  %-24s %s\n' 'make source-plan' 'Preview PostgreSQL source-check plan'
+	@printf '  %-24s %s\n' 'make source-classify' 'Classify PostgreSQL source-check artifacts'
 	@printf '  %-24s %s\n' 'make profile-setup' 'Run profiles/$(PROFILE)/sql/00_setup.sql'
 	@printf '  %-24s %s\n' 'make profile-run' 'Run profiles/$(PROFILE)/sql/$(WORKLOAD_SQL)'
 	@printf '  %-24s %s\n' 'make profile-reset' 'Run setup and run SQL for PROFILE'
@@ -223,6 +225,10 @@ patchset-validate:
 .PHONY: source-plan
 source-plan:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source plan "$(SOURCE_WORKLOAD_SPEC)"
+
+.PHONY: source-classify
+source-classify:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source classify "$(SOURCE_CHECK_PATH)"
 
 .PHONY: profile-setup
 profile-setup: docker-up

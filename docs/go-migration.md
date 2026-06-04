@@ -21,6 +21,7 @@ go run ./cmd/pgworkbench patchset show chaos/master
 go run ./cmd/pgworkbench patchset validate
 go run ./cmd/pgworkbench experiment plan smoke
 go run ./cmd/pgworkbench source plan pg-source/check
+go run ./cmd/pgworkbench source classify generated/pg-source/<run-id>
 go run ./cmd/pgworkbench scan failures logs generated
 go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b
@@ -51,5 +52,6 @@ Env spec contracts can be rendered with `pgworkbench spec reference` and
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.
 Patchset metadata and PostgreSQL source-check planning can be inspected with
-`pgworkbench patchset` and `pgworkbench source plan`; the clone/build/test
-runtime stays in shell.
+`pgworkbench patchset` and `pgworkbench source plan`; PostgreSQL source-check
+artifacts can be summarized with `pgworkbench source classify`. The
+clone/build/test runtime stays in shell.

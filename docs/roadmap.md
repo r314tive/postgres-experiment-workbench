@@ -50,12 +50,12 @@ Already started:
   compatibility mode.
 - `pgworkbench spec list|show|reference|schema|validate`.
 - `pgworkbench patchset list|show|validate`.
-- `pgworkbench source plan`.
+- `pgworkbench source plan|classify`.
 - `make release-snapshot`.
 
 Good Go candidates:
 
-- source-check result classification beyond the generic failure scanner.
+- Docker Compose lifecycle state inspection.
 
 Keep in shell for now:
 

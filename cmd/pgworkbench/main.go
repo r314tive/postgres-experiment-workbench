@@ -13,6 +13,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/patchsetcatalog"
+	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourcecheck"
 	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourceplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runreport"
@@ -85,6 +86,7 @@ func usage() {
   pgworkbench profile validate [profile...]
   pgworkbench experiment plan <experiment-spec>
   pgworkbench source plan [workload-spec]
+  pgworkbench source classify <pg-source-run-dir-or-artifact-dir>
   pgworkbench scan failures [path...]
   pgworkbench report run <run-dir-or-id> [output.md]
   pgworkbench report compare <baseline-run-dir> <candidate-run-dir>
@@ -243,6 +245,21 @@ func runSource(root string, args []string) error {
 			return err
 		}
 		return pgsourceplan.Render(os.Stdout, plan)
+	case "classify":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench source classify <pg-source-run-dir-or-artifact-dir>")
+		}
+		summary, err := pgsourcecheck.Classify(root, args[1])
+		if err != nil {
+			return err
+		}
+		if err := pgsourcecheck.Render(os.Stdout, summary); err != nil {
+			return err
+		}
+		if summary.Found {
+			return failurescan.ErrEvidenceFound
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported source action: %s", args[0])
 	}

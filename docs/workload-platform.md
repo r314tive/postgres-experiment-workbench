@@ -101,6 +101,7 @@ PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=plan PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/check
 make workload-run WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=run PG_PATCHSET=chaos/master make workload-run WORKLOAD_SPEC=pg-source/chaos-check
+make source-classify SOURCE_CHECK_PATH=generated/pg-source/<run-id>
 ```
 
 `make source-plan` uses the Go CLI and does not clone PostgreSQL or require a
@@ -117,6 +118,8 @@ inspect local patchsets without cloning PostgreSQL.
 The source-check adapter follows the same discipline as other workloads: a spec
 declares the work, logs and artifacts are stored under ignored local folders,
 and `scripts/scan_pg_failures.sh` provides the generic verdict layer.
+`make source-classify` adds a PostgreSQL-source-specific summary for logs,
+regression diffs, core files, and scanner evidence.
 
 External templates live under `workloads/external/`. They do not vendor or pin
 third-party projects; they provide the execution contract, PostgreSQL connection

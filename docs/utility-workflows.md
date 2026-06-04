@@ -85,9 +85,11 @@ make patchset-validate
 ```
 
 Source-check artifacts remain local and ignored. Scan them with the generic
-failure scanner before trusting a run:
+failure scanner and classify the source-check artifact shape before trusting a
+run:
 
 ```bash
+make source-classify SOURCE_CHECK_PATH=generated/pg-source/<run-id>
 make scan-artifacts
 make scan-artifacts-go
 ```
