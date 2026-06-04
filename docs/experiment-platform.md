@@ -59,6 +59,17 @@ Run-series summaries count verdict statuses and aggregate selected metrics
 across runs. Cumulative counters are summarized as per-run deltas
 (`last - first`). Gauge-like metrics are summarized as per-run maximums.
 
+## History
+
+```bash
+make experiment-history HISTORY_INPUTS='runs/repeats/a runs/repeats/b'
+./scripts/compare_run_history.sh runs/repeats/a runs/matrices/b
+```
+
+History comparison treats each repeat, matrix, or individual run directory as a
+series. Series are compared in argument order, and trend columns show the final
+series average minus the first series average.
+
 ## Repeat
 
 ```bash

@@ -28,6 +28,7 @@ make experiment-run EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
+make experiment-history HISTORY_INPUTS='runs/repeats/a runs/repeats/b'
 ```
 
 Specs are trusted local shell env files. Useful fields:

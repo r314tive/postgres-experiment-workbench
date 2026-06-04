@@ -10,7 +10,6 @@ This project should stay a generic PostgreSQL experiment platform.
 - Add CI presets for source-tree checks without making them default.
 - Add optional native `pg_upgrade` binary-pair adapter on top of the
   multi-version topology.
-- Add trend/history comparison across multiple local series directories.
 
 ## Candidate Profiles
 

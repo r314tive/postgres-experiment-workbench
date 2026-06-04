@@ -117,6 +117,7 @@ make experiment-run EXPERIMENT_SPEC=logical-replication
 make experiment-run EXPERIMENT_SPEC=pgbouncer-smoke
 make experiment-compare BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
+make experiment-history HISTORY_INPUTS='runs/repeats/a runs/repeats/b'
 make matrix-plan MATRIX_SPEC=smoke
 ```
 

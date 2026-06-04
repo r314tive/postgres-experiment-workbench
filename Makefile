@@ -23,6 +23,8 @@ CANDIDATE_RUN ?=
 RUN_DIR ?=
 SUMMARY_INPUT ?=
 SUMMARY_OUT ?=
+HISTORY_INPUTS ?=
+HISTORY_OUT ?=
 SCAN_PATHS ?= logs generated
 METRICS_INTERVAL ?= 1
 METRICS_DURATION ?= 30
@@ -62,6 +64,7 @@ help:
 	@printf '  %-24s %s\n' 'make experiment-run' 'Run EXPERIMENT_SPEC into runs/<run-id>'
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report for RUN_DIR'
 	@printf '  %-24s %s\n' 'make experiment-summary' 'Summarize a repeat/matrix/run series'
+	@printf '  %-24s %s\n' 'make experiment-history' 'Compare repeat/matrix/run series history'
 	@printf '  %-24s %s\n' 'make experiment-repeat' 'Run EXPERIMENT_SPEC repeatedly'
 	@printf '  %-24s %s\n' 'make experiment-compare' 'Compare BASELINE_RUN and CANDIDATE_RUN'
 	@printf '  %-24s %s\n' 'make matrix-list' 'List experiment matrix specs'
@@ -194,6 +197,15 @@ experiment-summary:
 		./scripts/summarize_runs.sh "$(SUMMARY_INPUT)"; \
 	fi
 
+.PHONY: experiment-history
+experiment-history:
+	@test -n "$(HISTORY_INPUTS)" || { echo 'Usage: make experiment-history HISTORY_INPUTS="runs/repeats/a runs/repeats/b"' >&2; exit 2; }
+	@if [[ -n "$(HISTORY_OUT)" ]]; then \
+		./scripts/compare_run_history.sh --output "$(HISTORY_OUT)" $(HISTORY_INPUTS); \
+	else \
+		./scripts/compare_run_history.sh $(HISTORY_INPUTS); \
+	fi
+
 .PHONY: experiment-repeat
 experiment-repeat:
 	EXPERIMENT_REPEAT_COUNT="$(EXPERIMENT_REPEAT_COUNT)" EXPERIMENT_REPEAT_ID="$(EXPERIMENT_REPEAT_ID)" ./scripts/run_experiment_repeated.sh "$(EXPERIMENT_SPEC)"
@@ -294,4 +306,5 @@ test: docker-up
 	./tests/report_runs.sh
 	./tests/summarize_runs.sh
 	./tests/compare_runs.sh
+	./tests/history.sh
 	./tests/matrices.sh
