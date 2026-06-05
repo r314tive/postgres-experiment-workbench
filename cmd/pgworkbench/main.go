@@ -22,6 +22,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourceplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profileplan"
+	"github.com/r314tive/postgres-experiment-workbench/internal/runcatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runreport"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runstate"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runverify"
@@ -133,6 +134,8 @@ func usage() {
   pgworkbench report compare [--raw] <baseline-run-dir> <candidate-run-dir>
   pgworkbench report summary [--output output.md] <series-dir|run-dir> [run-dir...]
   pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]
+  pgworkbench run list [--json] [path...]
+  pgworkbench run show [--json] <run-dir-or-id>
   pgworkbench run verify <run-dir-or-id>
   pgworkbench run write-manifest --run-dir <run-dir>
   pgworkbench run write-verdict --run-dir <run-dir> --status <status> --message <message> [--finished-at <time>]
@@ -246,6 +249,26 @@ func parseRawArgs(args []string) (bool, []string, error) {
 		}
 	}
 	return raw, inputs, nil
+}
+
+func parseJSONOptionArgs(args []string) (bool, []string, error) {
+	jsonOutput := false
+	var inputs []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			jsonOutput = true
+		case "--":
+			inputs = append(inputs, args[i+1:]...)
+			return jsonOutput, inputs, nil
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return false, nil, fmt.Errorf("unknown option: %s", args[i])
+			}
+			inputs = append(inputs, args[i])
+		}
+	}
+	return jsonOutput, inputs, nil
 }
 
 func runWorkload(root string, catalog speccatalog.Catalog, args []string) error {
@@ -690,6 +713,35 @@ func runState(root string, args []string) error {
 	}
 
 	switch args[0] {
+	case "list":
+		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		summaries, err := runcatalog.List(root, inputs)
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return runcatalog.RenderJSON(os.Stdout, summaries)
+		}
+		return runcatalog.RenderList(os.Stdout, summaries)
+	case "show":
+		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench run show [--json] <run-dir-or-id>")
+		}
+		summary, err := runcatalog.Show(root, inputs[0])
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return runcatalog.RenderJSON(os.Stdout, summary)
+		}
+		return runcatalog.RenderShow(os.Stdout, summary)
 	case "verify":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: pgworkbench run verify <run-dir-or-id>")

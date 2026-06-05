@@ -47,6 +47,20 @@ go run ./cmd/pgworkbench run verify runs/<run-id>
 Run verification checks required state files, env/JSON/CSV parseability, verdict
 consistency, exit-code fields, and metrics sample presence.
 
+## Inspect
+
+```bash
+make run-list
+make run-list-json
+make run-show RUN_DIR=runs/<run-id>
+make run-show-json RUN_DIR=runs/<run-id>
+go run ./cmd/pgworkbench run list --json
+go run ./cmd/pgworkbench run show runs/<run-id>
+```
+
+Run catalog commands summarize local run artifacts without starting Docker or
+connecting to PostgreSQL.
+
 ## Compare
 
 ```bash
@@ -60,7 +74,7 @@ first-pass report, not a statistical benchmark framework.
 
 ```bash
 make experiment-report RUN_DIR=runs/<run-id>
-make experiment-report-go RUN_DIR=runs/<run-id>
+make experiment-report-shell RUN_DIR=runs/<run-id>
 ./scripts/report_run.sh runs/<run-id> runs/<run-id>/report.md
 go run ./cmd/pgworkbench report run runs/<run-id> runs/<run-id>/report.md
 go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>

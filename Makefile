@@ -26,6 +26,7 @@ DIAGNOSTIC ?= activity
 BASELINE_RUN ?=
 CANDIDATE_RUN ?=
 RUN_DIR ?=
+RUN_INPUTS ?=
 QUICKSTART_RUN_ID ?= quickstart-$(shell date -u +%Y%m%d_%H%M%S)
 SPEC_KIND ?= workload
 SPEC_ID ?=
@@ -112,6 +113,10 @@ help:
 	@printf '  %-24s %s\n' 'make experiment-plan-expanded' 'Render expanded EXPERIMENT_SPEC plan'
 	@printf '  %-24s %s\n' 'make experiment-plan-expanded-json' 'Render expanded EXPERIMENT_SPEC plan as JSON'
 	@printf '  %-24s %s\n' 'make experiment-run' 'Run EXPERIMENT_SPEC into runs/<run-id>'
+	@printf '  %-24s %s\n' 'make run-list' 'List experiment run artifacts'
+	@printf '  %-24s %s\n' 'make run-list-json' 'List experiment run artifacts as JSON'
+	@printf '  %-24s %s\n' 'make run-show' 'Show RUN_DIR artifact summary'
+	@printf '  %-24s %s\n' 'make run-show-json' 'Show RUN_DIR artifact summary as JSON'
 	@printf '  %-24s %s\n' 'make experiment-verify' 'Verify RUN_DIR artifact integrity'
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-report-shell' 'Render Markdown report with shell script'
@@ -386,6 +391,24 @@ experiment-plan-expanded-json:
 .PHONY: experiment-run
 experiment-run:
 	./scripts/run_experiment.sh run "$(EXPERIMENT_SPEC)"
+
+.PHONY: run-list
+run-list:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run list $(RUN_INPUTS)
+
+.PHONY: run-list-json
+run-list-json:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run list --json $(RUN_INPUTS)
+
+.PHONY: run-show
+run-show:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make run-show RUN_DIR=runs/<run-id>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run show "$(RUN_DIR)"
+
+.PHONY: run-show-json
+run-show-json:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make run-show-json RUN_DIR=runs/<run-id>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run show --json "$(RUN_DIR)"
 
 .PHONY: experiment-report
 experiment-report:
@@ -706,6 +729,8 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference all >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec schema all >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run list >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run list --json >/dev/null
 	GO_CACHE="$(GO_CACHE)" GO_MOD_CACHE="$(GO_MOD_CACHE)" ./tests/spec_docs.sh
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment plan smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment plan --json smoke >/dev/null

@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.19 - 2026-06-05
+
+Added platform features:
+
+- Added `pgworkbench run list|show` with Markdown/JSON output for local run
+  artifact discovery and summaries.
+
 ## v0.1.18 - 2026-06-05
 
 Added platform features:
