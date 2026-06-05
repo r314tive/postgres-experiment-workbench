@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.26 - 2026-06-05
+
+Added platform features:
+
+- Added structured background workload status through
+  `pgworkbench workload bg status --json` and `make workload-status-json`.
+
 ## v0.1.25 - 2026-06-05
 
 Added platform features:

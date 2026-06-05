@@ -176,12 +176,15 @@ Any workload spec can be started in the background:
 ```bash
 make workload-start-spec WORKLOAD_SPEC=profile/locks-blocker PROFILE_SECONDS=60
 make workload-status
+make workload-status-json
 make workload-log
 make workload-stop
 ```
 
 Use this for utility tests that need concurrent pressure: start a blocker or
 load generator, run the external tool, then sample metrics and inspect logs.
+The JSON status target reports state, pid, command, log path, log presence, and
+status issues without connecting to PostgreSQL.
 
 ## Design Rule
 

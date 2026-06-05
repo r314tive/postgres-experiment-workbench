@@ -30,6 +30,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/runverify"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/topologyinspect"
+	"github.com/r314tive/postgres-experiment-workbench/internal/workloadbg"
 	"github.com/r314tive/postgres-experiment-workbench/internal/workloadplan"
 )
 
@@ -118,6 +119,7 @@ func usage() {
   pgworkbench workload show [--raw] <workload>
   pgworkbench workload validate [workload...]
   pgworkbench workload plan [--json|--raw] <workload>
+  pgworkbench workload bg status [--json]
   pgworkbench experiment list [--raw]
   pgworkbench experiment show [--raw] <experiment-spec>
   pgworkbench experiment plan [--json] [--expanded] <experiment-spec>
@@ -316,6 +318,8 @@ func runWorkload(root string, catalog speccatalog.Catalog, args []string) error 
 	}
 
 	switch args[0] {
+	case "bg":
+		return runWorkloadBG(root, args[1:])
 	case "plan":
 		jsonOutput := false
 		rawOutput := false
@@ -350,6 +354,29 @@ func runWorkload(root string, catalog speccatalog.Catalog, args []string) error 
 		return workloadplan.Render(os.Stdout, plan)
 	default:
 		return runKindCatalog("workload", catalog, args)
+	}
+}
+
+func runWorkloadBG(root string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("background workload action is required")
+	}
+	switch args[0] {
+	case "status":
+		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if len(inputs) != 0 {
+			return fmt.Errorf("usage: pgworkbench workload bg status [--json]")
+		}
+		status := workloadbg.Inspect(root)
+		if jsonOutput {
+			return workloadbg.RenderJSON(os.Stdout, status)
+		}
+		return workloadbg.Render(os.Stdout, status)
+	default:
+		return fmt.Errorf("unsupported background workload action: %s", args[0])
 	}
 }
 

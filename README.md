@@ -228,6 +228,7 @@ For profile-local SQL that should run in the background:
 ```bash
 make workload-start PROFILE=locks WORKLOAD_SQL=20_blocker.sql PROFILE_SECONDS=60
 make workload-status
+make workload-status-json
 make workload-log
 make workload-stop
 ```
@@ -236,6 +237,7 @@ Any workload spec can also run in the background:
 
 ```bash
 make workload-start-spec WORKLOAD_SPEC=profile/locks-blocker PROFILE_SECONDS=60
+make workload-status-json
 ```
 
 Noisia can also run through the background helper:

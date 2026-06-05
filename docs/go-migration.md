@@ -23,6 +23,7 @@ go run ./cmd/pgworkbench workload show pgbench/tiny
 go run ./cmd/pgworkbench workload validate
 go run ./cmd/pgworkbench workload plan pgbench/tiny
 go run ./cmd/pgworkbench workload plan --json pgbench/tiny
+go run ./cmd/pgworkbench workload bg status --json
 go run ./cmd/pgworkbench dataset list
 go run ./cmd/pgworkbench dataset show synthetic/items
 go run ./cmd/pgworkbench dataset validate

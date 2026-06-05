@@ -160,6 +160,7 @@ help:
 	@printf '  %-24s %s\n' 'make workload-start-sql' 'Run SQL=path in the background'
 	@printf '  %-24s %s\n' 'make workload-start-noisia' 'Run noisia workload in the background'
 	@printf '  %-24s %s\n' 'make workload-status' 'Show background workload status'
+	@printf '  %-24s %s\n' 'make workload-status-json' 'Show background workload status as JSON'
 	@printf '  %-24s %s\n' 'make workload-log' 'Tail background workload log'
 	@printf '  %-24s %s\n' 'make workload-stop' 'Stop background workload'
 	@printf '  %-24s %s\n' 'make run-sql SQL=path' 'Run a SQL file with logs'
@@ -659,6 +660,10 @@ workload-start-noisia: docker-up
 workload-status:
 	./scripts/workload_bg.sh status
 
+.PHONY: workload-status-json
+workload-status-json:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload bg status --json
+
 .PHONY: workload-log
 workload-log:
 	./scripts/workload_bg.sh log
@@ -762,6 +767,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan --raw pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan --json pgbench/tiny >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload bg status --json >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset list --raw >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset show --raw synthetic/items >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset validate >/dev/null

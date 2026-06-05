@@ -97,6 +97,7 @@ another session observes or contends with it:
 ```bash
 make workload-start PROFILE=locks WORKLOAD_SQL=20_blocker.sql PROFILE_SECONDS=60
 make workload-status
+make workload-status-json
 make workload-log
 make workload-stop
 ```
