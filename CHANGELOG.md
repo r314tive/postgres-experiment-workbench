@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+No changes yet.
+
+## v0.1.8 - 2026-06-05
+
 Added platform capabilities:
 
 - Read-only PostgreSQL diagnostics SQL catalog and runner for activity, locks,
