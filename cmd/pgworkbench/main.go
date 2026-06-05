@@ -22,6 +22,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourceplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profileplan"
+	"github.com/r314tive/postgres-experiment-workbench/internal/runbundle"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runcatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runreport"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runstate"
@@ -136,6 +137,7 @@ func usage() {
   pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]
   pgworkbench run list [--json] [--status status] [--limit n] [path...]
   pgworkbench run show [--json] <run-dir-or-id>
+  pgworkbench run bundle <run-dir-or-id> [output.tar.gz]
   pgworkbench run verify <run-dir-or-id>
   pgworkbench run write-manifest --run-dir <run-dir>
   pgworkbench run write-verdict --run-dir <run-dir> --status <status> --message <message> [--finished-at <time>]
@@ -778,6 +780,20 @@ func runState(root string, args []string) error {
 			return runcatalog.RenderJSON(os.Stdout, summary)
 		}
 		return runcatalog.RenderShow(os.Stdout, summary)
+	case "bundle":
+		if len(args) < 2 || len(args) > 3 {
+			return fmt.Errorf("usage: pgworkbench run bundle <run-dir-or-id> [output.tar.gz]")
+		}
+		output := ""
+		if len(args) == 3 {
+			output = args[2]
+		}
+		result, err := runbundle.Create(root, args[1], output)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Wrote bundle: %s files=%d bytes=%d\n", result.Output, result.Files, result.Bytes)
+		return nil
 	case "verify":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: pgworkbench run verify <run-dir-or-id>")

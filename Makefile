@@ -30,6 +30,7 @@ RUN_INPUTS ?=
 RUN_STATUS ?=
 RUN_LIMIT ?=
 RUN_LIST_ARGS = $(if $(RUN_STATUS),--status $(RUN_STATUS),) $(if $(RUN_LIMIT),--limit $(RUN_LIMIT),) $(RUN_INPUTS)
+RUN_BUNDLE_OUT ?=
 QUICKSTART_RUN_ID ?= quickstart-$(shell date -u +%Y%m%d_%H%M%S)
 SPEC_KIND ?= workload
 SPEC_ID ?=
@@ -120,6 +121,7 @@ help:
 	@printf '  %-24s %s\n' 'make run-list-json' 'List experiment run artifacts as JSON'
 	@printf '  %-24s %s\n' 'make run-show' 'Show RUN_DIR artifact summary'
 	@printf '  %-24s %s\n' 'make run-show-json' 'Show RUN_DIR artifact summary as JSON'
+	@printf '  %-24s %s\n' 'make run-bundle' 'Bundle RUN_DIR artifact into tar.gz'
 	@printf '  %-24s %s\n' 'make experiment-verify' 'Verify RUN_DIR artifact integrity'
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-report-shell' 'Render Markdown report with shell script'
@@ -412,6 +414,15 @@ run-show:
 run-show-json:
 	@test -n "$(RUN_DIR)" || { echo 'Usage: make run-show-json RUN_DIR=runs/<run-id>' >&2; exit 2; }
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run show --json "$(RUN_DIR)"
+
+.PHONY: run-bundle
+run-bundle:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make run-bundle RUN_DIR=runs/<run-id> [RUN_BUNDLE_OUT=generated/run.tar.gz]' >&2; exit 2; }
+	@if [[ -n "$(RUN_BUNDLE_OUT)" ]]; then \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run bundle "$(RUN_DIR)" "$(RUN_BUNDLE_OUT)"; \
+	else \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run bundle "$(RUN_DIR)"; \
+	fi
 
 .PHONY: experiment-report
 experiment-report:

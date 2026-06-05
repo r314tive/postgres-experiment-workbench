@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.21 - 2026-06-05
+
+Added platform features:
+
+- Added `pgworkbench run bundle` and `make run-bundle` for portable tar.gz
+  archives of local run artifacts.
+
 ## v0.1.20 - 2026-06-05
 
 Added platform features:
