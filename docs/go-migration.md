@@ -17,6 +17,7 @@ go run ./cmd/pgworkbench profile list
 go run ./cmd/pgworkbench profile show locks
 go run ./cmd/pgworkbench profile validate
 go run ./cmd/pgworkbench profile plan locks
+go run ./cmd/pgworkbench profile plan --json locks
 go run ./cmd/pgworkbench workload list
 go run ./cmd/pgworkbench workload show pgbench/tiny
 go run ./cmd/pgworkbench workload validate
@@ -80,7 +81,8 @@ Workload specs can be preflighted as execution plans with
 `pgworkbench workload plan`.
 Dataset specs can be preflighted as load plans with
 `pgworkbench dataset plan`.
-Use `--json` with workload and dataset plans for machine-readable previews.
+Use `--json` with profile, workload, and dataset plans for machine-readable
+previews.
 Topology specs can be inspected with `pgworkbench topology inspect` without
 starting Docker. Live Compose state can be parsed with `pgworkbench topology ps`
 after a topology has been started.
@@ -89,4 +91,5 @@ Patchset metadata and PostgreSQL source-check planning can be inspected with
 artifacts can be summarized with `pgworkbench source classify`. The
 clone/build/test runtime stays in shell.
 Profile reset/run SQL can be preflighted with `pgworkbench profile plan`
-without opening `psql`; actual profile execution stays in shell.
+without opening `psql`; use `--json` for external orchestration. Actual
+profile execution stays in shell.

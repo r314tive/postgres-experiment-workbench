@@ -78,6 +78,7 @@ help:
 	@printf '  %-24s %s\n' 'make profile-show' 'Show PROFILE metadata'
 	@printf '  %-24s %s\n' 'make profile-validate' 'Validate profile metadata and required files'
 	@printf '  %-24s %s\n' 'make profile-plan' 'Preview PROFILE SQL steps without psql'
+	@printf '  %-24s %s\n' 'make profile-plan-json' 'Preview PROFILE SQL steps as JSON'
 	@printf '  %-24s %s\n' 'make patchset-list' 'List PostgreSQL source patchsets'
 	@printf '  %-24s %s\n' 'make patchset-show' 'Show PATCHSET metadata'
 	@printf '  %-24s %s\n' 'make patchset-validate' 'Validate patchset metadata and files'
@@ -243,6 +244,10 @@ profile-validate:
 .PHONY: profile-plan
 profile-plan:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile plan --size "$(PROFILE_SIZE)" --seconds "$(PROFILE_SECONDS)" "$(PROFILE)" $(PROFILE_PLAN_SQL)
+
+.PHONY: profile-plan-json
+profile-plan-json:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile plan --json --size "$(PROFILE_SIZE)" --seconds "$(PROFILE_SECONDS)" "$(PROFILE)" $(PROFILE_PLAN_SQL)
 
 .PHONY: patchset-list
 patchset-list:
@@ -630,6 +635,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test ./...
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile plan smoke >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile plan --json smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench patchset validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source plan pg-source/check >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology inspect single >/dev/null

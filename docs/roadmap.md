@@ -58,14 +58,15 @@ Already started:
 - `pgworkbench topology inspect|ps`.
 - `pgworkbench patchset list|show|validate`.
 - `pgworkbench source plan|classify`.
-- `pgworkbench profile plan`.
+- `pgworkbench profile plan`, including JSON output.
 - `pgworkbench workload plan`, including JSON output.
 - `pgworkbench dataset plan`, including JSON output.
 - `make release-snapshot`.
 
 Good Go candidates:
 
-- JSON output for profile SQL plans.
+- Move the remaining shell-only execution/report glue only when a stable
+  structured contract already exists.
 
 Keep in shell for now:
 

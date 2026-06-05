@@ -1,6 +1,7 @@
 package profileplan
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,17 +19,17 @@ type Options struct {
 }
 
 type Plan struct {
-	Profile     string
-	Description string
-	Size        string
-	Seconds     string
-	SQL         []SQLStep
+	Profile     string    `json:"profile"`
+	Description string    `json:"description"`
+	Size        string    `json:"size"`
+	Seconds     string    `json:"seconds"`
+	SQL         []SQLStep `json:"sql"`
 }
 
 type SQLStep struct {
-	Name    string
-	Path    string
-	Command []string
+	Name    string   `json:"name"`
+	Path    string   `json:"path"`
+	Command []string `json:"command"`
 }
 
 func Build(root string, catalog profilecatalog.Catalog, profile string, options Options) (Plan, error) {
@@ -141,6 +142,12 @@ func Render(w io.Writer, plan Plan) error {
 		}
 	}
 	return nil
+}
+
+func RenderJSON(w io.Writer, plan Plan) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(plan)
 }
 
 func catalogFileExists(path string) bool {

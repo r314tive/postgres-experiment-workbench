@@ -4,6 +4,12 @@
 
 No changes yet.
 
+## v0.1.11 - 2026-06-05
+
+Added platform capabilities:
+
+- JSON output for Go profile SQL plans.
+
 ## v0.1.10 - 2026-06-05
 
 Changed licensing:

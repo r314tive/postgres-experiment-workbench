@@ -101,7 +101,7 @@ func usage() {
   pgworkbench profile list
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]
-  pgworkbench profile plan [--size <size>] [--seconds <seconds>] <profile> [sql-file...]
+  pgworkbench profile plan [--json] [--size <size>] [--seconds <seconds>] <profile> [sql-file...]
   pgworkbench workload list
   pgworkbench workload show <workload>
   pgworkbench workload validate [workload...]
@@ -337,7 +337,7 @@ func runProfile(root string, catalog profilecatalog.Catalog, args []string) erro
 			return err
 		}
 		if len(inputs) == 0 {
-			return fmt.Errorf("usage: pgworkbench profile plan [--size <size>] [--seconds <seconds>] <profile> [sql-file...]")
+			return fmt.Errorf("usage: pgworkbench profile plan [--json] [--size <size>] [--seconds <seconds>] <profile> [sql-file...]")
 		}
 		plan, err := profileplan.Build(root, catalog, inputs[0], profileplan.Options{
 			Size:    valueOr(options["size"], os.Getenv("PROFILE_SIZE")),
@@ -346,6 +346,9 @@ func runProfile(root string, catalog profilecatalog.Catalog, args []string) erro
 		})
 		if err != nil {
 			return err
+		}
+		if options["json"] == "1" {
+			return profileplan.RenderJSON(os.Stdout, plan)
 		}
 		return profileplan.Render(os.Stdout, plan)
 	default:
@@ -358,6 +361,8 @@ func parseProfilePlanArgs(args []string) (map[string]string, []string, error) {
 	var inputs []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--json":
+			options["json"] = "1"
 		case "--size", "--seconds":
 			if i+1 >= len(args) {
 				return nil, nil, fmt.Errorf("%s requires a value", args[i])

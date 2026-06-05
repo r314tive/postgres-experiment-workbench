@@ -2,6 +2,7 @@ package profileplan
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,6 +79,20 @@ func TestBuildSpecificSQLPlan(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("rendered plan missing %q:\n%s", want, out.String())
 		}
+	}
+	out.Reset()
+	if err := RenderJSON(&out, plan); err != nil {
+		t.Fatal(err)
+	}
+	var payload Plan
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Profile != "locks" || payload.Size != "medium" || len(payload.SQL) != 1 {
+		t.Fatalf("unexpected JSON payload: %#v", payload)
+	}
+	if payload.SQL[0].Name != "30_diagnostics.sql" || len(payload.SQL[0].Command) == 0 {
+		t.Fatalf("unexpected JSON SQL step: %#v", payload.SQL[0])
 	}
 }
 

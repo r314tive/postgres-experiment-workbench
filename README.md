@@ -81,6 +81,7 @@ Run:
 make profile-list
 make profile-show PROFILE=locks
 make profile-plan PROFILE=locks
+make profile-plan-json PROFILE=locks
 make profile-reset PROFILE=smoke PROFILE_SIZE=small
 ```
 
