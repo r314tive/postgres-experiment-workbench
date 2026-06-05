@@ -44,4 +44,12 @@ grep -q 'WAL bytes delta' <<< "$GO_OUT"
 grep -q '`60`' <<< "$GO_OUT"
 grep -q '`120`' <<< "$GO_OUT"
 
+GO_RAW_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" go run ./cmd/pgworkbench report compare --raw "$BASE" "$CAND")"
+if [[ "$OUT" != "$GO_RAW_OUT" ]]; then
+  printf 'shell compare and Go raw compare outputs differ\n' >&2
+  printf 'shell output:\n%s\n' "$OUT" >&2
+  printf 'go raw output:\n%s\n' "$GO_RAW_OUT" >&2
+  exit 1
+fi
+
 echo "PASS: run comparison"

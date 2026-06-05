@@ -64,6 +64,8 @@ Already started:
 - Make `matrix-plan` default to Go raw output with shell-compatible Markdown.
 - Make run report, summary, and history targets default to Go with explicit
   shell compatibility targets.
+- Make run comparison default to Go raw output with explicit shell
+  compatibility target.
 - `pgworkbench spec list|show|reference|schema|validate`.
 - `pgworkbench topology inspect|ps`.
 - `pgworkbench patchset list|show|validate`.

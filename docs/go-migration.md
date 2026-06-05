@@ -46,6 +46,7 @@ go run ./cmd/pgworkbench source classify generated/pg-source/<run-id>
 go run ./cmd/pgworkbench scan failures logs generated
 go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b
+go run ./cmd/pgworkbench report compare --raw runs/a runs/b
 go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>
 go run ./cmd/pgworkbench report history runs/repeats/a runs/repeats/b
 go run ./cmd/pgworkbench run verify runs/<run-id>
@@ -81,6 +82,8 @@ Diagnostic catalog Make targets now use Go for list/show while diagnostic
 execution remains shell/`psql`.
 Run report, summary, and history Make targets now default to Go; shell
 compatibility targets remain available with the `-shell` suffix.
+Run comparison Make target now defaults to Go `--raw` output; the shell
+compatibility target remains available with the `-shell` suffix.
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.
 Use `pgworkbench experiment plan --expanded` to embed topology, dataset,

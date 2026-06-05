@@ -125,7 +125,7 @@ func usage() {
   pgworkbench source classify <pg-source-run-dir-or-artifact-dir>
   pgworkbench scan failures [path...]
   pgworkbench report run <run-dir-or-id> [output.md]
-  pgworkbench report compare <baseline-run-dir> <candidate-run-dir>
+  pgworkbench report compare [--raw] <baseline-run-dir> <candidate-run-dir>
   pgworkbench report summary [--output output.md] <series-dir|run-dir> [run-dir...]
   pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]
   pgworkbench run verify <run-dir-or-id>
@@ -805,10 +805,20 @@ func runReport(root string, args []string) error {
 		}
 		return runreport.RenderRun(root, args[1], os.Stdout)
 	case "compare":
-		if len(args) != 3 {
-			return fmt.Errorf("usage: pgworkbench report compare <baseline-run-dir> <candidate-run-dir>")
+		raw, inputs, err := parseRawArgs(args[1:])
+		if err != nil {
+			return err
 		}
-		return runreport.RenderComparison(root, args[1], args[2], os.Stdout)
+		if len(inputs) != 2 {
+			return fmt.Errorf("usage: pgworkbench report compare [--raw] <baseline-run-dir> <candidate-run-dir>")
+		}
+		if raw {
+			return runreport.RenderComparisonWithOptions(root, inputs[0], inputs[1], runreport.ComparisonOptions{
+				BaselineLabel:  inputs[0],
+				CandidateLabel: inputs[1],
+			}, os.Stdout)
+		}
+		return runreport.RenderComparison(root, inputs[0], inputs[1], os.Stdout)
 	case "summary":
 		outPath, inputs, err := parseOutputArgs(args[1:])
 		if err != nil {

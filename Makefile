@@ -117,8 +117,8 @@ help:
 	@printf '  %-24s %s\n' 'make experiment-history' 'Compare run history with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-history-shell' 'Compare run history with shell script'
 	@printf '  %-24s %s\n' 'make experiment-repeat' 'Run EXPERIMENT_SPEC repeatedly'
-	@printf '  %-24s %s\n' 'make experiment-compare' 'Compare BASELINE_RUN and CANDIDATE_RUN'
-	@printf '  %-24s %s\n' 'make experiment-compare-go' 'Compare runs with Go CLI'
+	@printf '  %-24s %s\n' 'make experiment-compare' 'Compare runs with Go CLI'
+	@printf '  %-24s %s\n' 'make experiment-compare-shell' 'Compare runs with shell script'
 	@printf '  %-24s %s\n' 'make matrix-list' 'List experiment matrix specs'
 	@printf '  %-24s %s\n' 'make matrix-show' 'Show MATRIX_SPEC'
 	@printf '  %-24s %s\n' 'make matrix-plan' 'Preview MATRIX_SPEC combinations'
@@ -458,6 +458,12 @@ experiment-repeat:
 experiment-compare:
 	@test -n "$(BASELINE_RUN)" || { echo 'Usage: make experiment-compare BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
 	@test -n "$(CANDIDATE_RUN)" || { echo 'Usage: make experiment-compare BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report compare --raw "$(BASELINE_RUN)" "$(CANDIDATE_RUN)"
+
+.PHONY: experiment-compare-shell
+experiment-compare-shell:
+	@test -n "$(BASELINE_RUN)" || { echo 'Usage: make experiment-compare-shell BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
+	@test -n "$(CANDIDATE_RUN)" || { echo 'Usage: make experiment-compare-shell BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
 	./scripts/compare_runs.sh "$(BASELINE_RUN)" "$(CANDIDATE_RUN)"
 
 .PHONY: experiment-compare-go

@@ -87,6 +87,20 @@ t1,db,20,220,30,40,45
 			t.Fatalf("rendered output missing %q:\n%s", want, rendered)
 		}
 	}
+
+	var raw bytes.Buffer
+	if err := RenderComparisonWithOptions(root, "base", "candidate", ComparisonOptions{
+		BaselineLabel:  "runs/base",
+		CandidateLabel: "runs/candidate",
+	}, &raw); err != nil {
+		t.Fatal(err)
+	}
+
+	rawRendered := raw.String()
+	want := "| Run dir | `runs/base` | `runs/candidate` |"
+	if !strings.Contains(rawRendered, want) {
+		t.Fatalf("raw rendered output missing %q:\n%s", want, rawRendered)
+	}
 }
 
 func writeFile(t *testing.T, path string, content string) {

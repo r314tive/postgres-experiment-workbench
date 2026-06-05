@@ -135,7 +135,16 @@ func RenderRun(root string, input string, w io.Writer) error {
 	return nil
 }
 
+type ComparisonOptions struct {
+	BaselineLabel  string
+	CandidateLabel string
+}
+
 func RenderComparison(root string, baselineInput string, candidateInput string, w io.Writer) error {
+	return RenderComparisonWithOptions(root, baselineInput, candidateInput, ComparisonOptions{}, w)
+}
+
+func RenderComparisonWithOptions(root string, baselineInput string, candidateInput string, options ComparisonOptions, w io.Writer) error {
 	baselineDir, err := runartifact.ResolveRunDir(root, baselineInput)
 	if err != nil {
 		return err
@@ -154,11 +163,20 @@ func RenderComparison(root string, baselineInput string, candidateInput string, 
 		return err
 	}
 
+	baselineLabel := baselineDir
+	if options.BaselineLabel != "" {
+		baselineLabel = options.BaselineLabel
+	}
+	candidateLabel := candidateDir
+	if options.CandidateLabel != "" {
+		candidateLabel = options.CandidateLabel
+	}
+
 	fmt.Fprintln(w, "# Run Comparison")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "| Field | Baseline | Candidate |")
 	fmt.Fprintln(w, "| --- | --- | --- |")
-	fmt.Fprintf(w, "| Run dir | `%s` | `%s` |\n", baselineDir, candidateDir)
+	fmt.Fprintf(w, "| Run dir | `%s` | `%s` |\n", baselineLabel, candidateLabel)
 	fmt.Fprintf(w, "| Status | `%s` | `%s` |\n", baselineVerdict.Value("status", "missing"), candidateVerdict.Value("status", "missing"))
 	fmt.Fprintf(w, "| Message | `%s` | `%s` |\n", baselineVerdict.Value("message", ""), candidateVerdict.Value("message", ""))
 

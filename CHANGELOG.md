@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.17 - 2026-06-05
+
+Changed platform behavior:
+
+- Moved the run comparison Make target to Go `--raw` output while keeping an
+  explicit shell compatibility target.
+
 ## v0.1.16 - 2026-06-05
 
 Changed platform behavior:
