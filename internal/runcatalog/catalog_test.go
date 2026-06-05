@@ -39,6 +39,21 @@ func TestListRuns(t *testing.T) {
 	}
 }
 
+func TestListWithOptions(t *testing.T) {
+	root := t.TempDir()
+	writeRun(t, root, "run-a", "2026-01-01T00:00:00Z", "passed", 2)
+	writeRun(t, root, "run-b", "2026-01-01T00:01:00Z", "failed", 1)
+	writeRun(t, root, "run-c", "2026-01-01T00:02:00Z", "passed", 1)
+
+	summaries, err := ListWithOptions(root, ListOptions{Status: "passed", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 || summaries[0].RunID != "run-c" {
+		t.Fatalf("unexpected filtered summaries: %#v", summaries)
+	}
+}
+
 func TestShowRun(t *testing.T) {
 	root := t.TempDir()
 	writeRun(t, root, "run-a", "2026-01-01T00:00:00Z", "passed", 2)

@@ -165,6 +165,7 @@ make experiment-run EXPERIMENT_SPEC=pgbouncer-smoke
 make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
 make experiment-run EXPERIMENT_SPEC=temp-spill
 make run-list
+make run-list RUN_STATUS=failed RUN_LIMIT=20
 make run-show RUN_DIR=runs/<run-id>
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
@@ -300,6 +301,7 @@ go run ./cmd/pgworkbench profile validate
 go run ./cmd/pgworkbench experiment plan smoke
 go run ./cmd/pgworkbench scan failures logs generated
 go run ./cmd/pgworkbench run list
+go run ./cmd/pgworkbench run list --status failed --limit 20
 go run ./cmd/pgworkbench run show runs/<run-id>
 go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b

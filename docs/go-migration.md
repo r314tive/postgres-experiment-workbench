@@ -53,6 +53,7 @@ go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>
 go run ./cmd/pgworkbench report history runs/repeats/a runs/repeats/b
 go run ./cmd/pgworkbench run list
 go run ./cmd/pgworkbench run list --json
+go run ./cmd/pgworkbench run list --status failed --limit 20
 go run ./cmd/pgworkbench run show runs/<run-id>
 go run ./cmd/pgworkbench run show --json runs/<run-id>
 go run ./cmd/pgworkbench run verify runs/<run-id>
@@ -77,6 +78,7 @@ Run manifest and verdict writing now uses Go by default. The explicit
 available; `auto` remains a compatibility alias for Go.
 Run directory integrity checks are covered by `pgworkbench run verify`.
 Run artifact discovery and summaries are covered by `pgworkbench run list|show`.
+Run list supports status filtering and output limits for large local archives.
 Env spec contracts can be rendered with `pgworkbench spec reference` and
 `pgworkbench spec schema`.
 Profile catalog Make targets now default to the Go CLI while the shell script

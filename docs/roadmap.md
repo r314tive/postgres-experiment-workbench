@@ -48,7 +48,7 @@ Already started:
   previews.
 - `pgworkbench scan failures`.
 - `pgworkbench report run|compare|summary|history`.
-- `pgworkbench run list|show`.
+- `pgworkbench run list|show`, including status filters and limits.
 - `pgworkbench run verify|write-manifest|write-verdict`.
 - experiment runner state writer defaulted to Go with explicit shell
   compatibility mode.

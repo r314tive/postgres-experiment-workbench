@@ -134,7 +134,7 @@ func usage() {
   pgworkbench report compare [--raw] <baseline-run-dir> <candidate-run-dir>
   pgworkbench report summary [--output output.md] <series-dir|run-dir> [run-dir...]
   pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]
-  pgworkbench run list [--json] [path...]
+  pgworkbench run list [--json] [--status status] [--limit n] [path...]
   pgworkbench run show [--json] <run-dir-or-id>
   pgworkbench run verify <run-dir-or-id>
   pgworkbench run write-manifest --run-dir <run-dir>
@@ -269,6 +269,42 @@ func parseJSONOptionArgs(args []string) (bool, []string, error) {
 		}
 	}
 	return jsonOutput, inputs, nil
+}
+
+func parseRunListArgs(args []string) (bool, runcatalog.ListOptions, error) {
+	jsonOutput := false
+	options := runcatalog.ListOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			jsonOutput = true
+		case "--status":
+			if i+1 >= len(args) {
+				return false, options, fmt.Errorf("--status requires a value")
+			}
+			options.Status = args[i+1]
+			i++
+		case "--limit":
+			if i+1 >= len(args) {
+				return false, options, fmt.Errorf("--limit requires a value")
+			}
+			limit, err := strconv.Atoi(args[i+1])
+			if err != nil || limit <= 0 {
+				return false, options, fmt.Errorf("--limit must be a positive integer")
+			}
+			options.Limit = limit
+			i++
+		case "--":
+			options.Inputs = append(options.Inputs, args[i+1:]...)
+			return jsonOutput, options, nil
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return false, options, fmt.Errorf("unknown option: %s", args[i])
+			}
+			options.Inputs = append(options.Inputs, args[i])
+		}
+	}
+	return jsonOutput, options, nil
 }
 
 func runWorkload(root string, catalog speccatalog.Catalog, args []string) error {
@@ -714,11 +750,11 @@ func runState(root string, args []string) error {
 
 	switch args[0] {
 	case "list":
-		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
+		jsonOutput, options, err := parseRunListArgs(args[1:])
 		if err != nil {
 			return err
 		}
-		summaries, err := runcatalog.List(root, inputs)
+		summaries, err := runcatalog.ListWithOptions(root, options)
 		if err != nil {
 			return err
 		}

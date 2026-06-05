@@ -27,6 +27,9 @@ BASELINE_RUN ?=
 CANDIDATE_RUN ?=
 RUN_DIR ?=
 RUN_INPUTS ?=
+RUN_STATUS ?=
+RUN_LIMIT ?=
+RUN_LIST_ARGS = $(if $(RUN_STATUS),--status $(RUN_STATUS),) $(if $(RUN_LIMIT),--limit $(RUN_LIMIT),) $(RUN_INPUTS)
 QUICKSTART_RUN_ID ?= quickstart-$(shell date -u +%Y%m%d_%H%M%S)
 SPEC_KIND ?= workload
 SPEC_ID ?=
@@ -394,11 +397,11 @@ experiment-run:
 
 .PHONY: run-list
 run-list:
-	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run list $(RUN_INPUTS)
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run list $(RUN_LIST_ARGS)
 
 .PHONY: run-list-json
 run-list-json:
-	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run list --json $(RUN_INPUTS)
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run list --json $(RUN_LIST_ARGS)
 
 .PHONY: run-show
 run-show:

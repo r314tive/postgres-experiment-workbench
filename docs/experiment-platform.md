@@ -51,10 +51,11 @@ consistency, exit-code fields, and metrics sample presence.
 
 ```bash
 make run-list
+make run-list RUN_STATUS=failed RUN_LIMIT=20
 make run-list-json
 make run-show RUN_DIR=runs/<run-id>
 make run-show-json RUN_DIR=runs/<run-id>
-go run ./cmd/pgworkbench run list --json
+go run ./cmd/pgworkbench run list --json --status failed --limit 20
 go run ./cmd/pgworkbench run show runs/<run-id>
 ```
 

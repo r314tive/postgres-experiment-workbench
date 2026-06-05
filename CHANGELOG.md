@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.20 - 2026-06-05
+
+Added platform features:
+
+- Added `--status` and `--limit` filters to `pgworkbench run list` plus Make
+  variables for filtered run catalog views.
+
 ## v0.1.19 - 2026-06-05
 
 Added platform features:

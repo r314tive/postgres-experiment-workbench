@@ -35,7 +35,18 @@ type Summary struct {
 	ScanExit     string `json:"scan_exit"`
 }
 
+type ListOptions struct {
+	Inputs []string
+	Status string
+	Limit  int
+}
+
 func List(root string, inputs []string) ([]Summary, error) {
+	return ListWithOptions(root, ListOptions{Inputs: inputs})
+}
+
+func ListWithOptions(root string, options ListOptions) ([]Summary, error) {
+	inputs := options.Inputs
 	if len(inputs) == 0 {
 		inputs = []string{"runs"}
 	}
@@ -76,6 +87,18 @@ func List(root string, inputs []string) ([]Summary, error) {
 		summaries = append(summaries, summary)
 	}
 	sortSummaries(summaries)
+	if options.Status != "" {
+		filtered := summaries[:0]
+		for _, summary := range summaries {
+			if strings.EqualFold(summary.Status, options.Status) {
+				filtered = append(filtered, summary)
+			}
+		}
+		summaries = filtered
+	}
+	if options.Limit > 0 && len(summaries) > options.Limit {
+		summaries = summaries[:options.Limit]
+	}
 	return summaries, nil
 }
 
