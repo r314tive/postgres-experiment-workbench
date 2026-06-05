@@ -187,11 +187,11 @@ doctor:
 
 .PHONY: topology-list
 topology-list:
-	./scripts/topology.sh list
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology list --raw
 
 .PHONY: topology-show
 topology-show:
-	./scripts/topology.sh show "$(TOPOLOGY)"
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology show --raw "$(TOPOLOGY)"
 
 .PHONY: topology-inspect
 topology-inspect:
@@ -290,11 +290,11 @@ metrics-sample: docker-up
 
 .PHONY: diagnostics-list
 diagnostics-list:
-	./scripts/run_diagnostic.sh list
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench diagnostics list
 
 .PHONY: diagnostics-show
 diagnostics-show:
-	./scripts/run_diagnostic.sh show "$(DIAGNOSTIC)"
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench diagnostics show "$(DIAGNOSTIC)"
 
 .PHONY: diagnostics-run
 diagnostics-run: docker-up
@@ -350,11 +350,11 @@ dataset-load: docker-up
 
 .PHONY: experiment-list
 experiment-list:
-	./scripts/run_experiment.sh list
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment list --raw
 
 .PHONY: experiment-show
 experiment-show:
-	./scripts/run_experiment.sh show "$(EXPERIMENT_SPEC)"
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment show --raw "$(EXPERIMENT_SPEC)"
 
 .PHONY: experiment-plan
 experiment-plan:
@@ -445,11 +445,11 @@ experiment-compare-go:
 
 .PHONY: matrix-list
 matrix-list:
-	./scripts/run_experiment_matrix.sh list
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix list --raw
 
 .PHONY: matrix-show
 matrix-show:
-	./scripts/run_experiment_matrix.sh show "$(MATRIX_SPEC)"
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix show --raw "$(MATRIX_SPEC)"
 
 .PHONY: matrix-plan
 matrix-plan:
@@ -638,10 +638,18 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile plan smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile plan --json smoke >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench diagnostics list >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench diagnostics show activity >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench patchset validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source plan pg-source/check >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology list --raw >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology show --raw single >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology inspect single >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix plan --json smoke >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment list --raw >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment show --raw smoke >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix list --raw >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix show --raw smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload list --raw >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload show --raw pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload validate >/dev/null

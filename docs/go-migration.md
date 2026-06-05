@@ -28,6 +28,8 @@ go run ./cmd/pgworkbench dataset show synthetic/items
 go run ./cmd/pgworkbench dataset validate
 go run ./cmd/pgworkbench dataset plan synthetic/items
 go run ./cmd/pgworkbench dataset plan --json synthetic/items
+go run ./cmd/pgworkbench diagnostics list
+go run ./cmd/pgworkbench diagnostics show activity
 go run ./cmd/pgworkbench patchset list
 go run ./cmd/pgworkbench patchset show chaos/master
 go run ./cmd/pgworkbench patchset validate
@@ -72,6 +74,10 @@ Profile catalog Make targets now default to the Go CLI while the shell script
 remains available as a compatibility path.
 Workload and dataset catalog Make targets now default to Go `--raw` output,
 which preserves the shell adapter list/show output shape.
+Experiment, matrix, and topology catalog Make targets use the same Go `--raw`
+compatibility path.
+Diagnostic catalog Make targets now use Go for list/show while diagnostic
+execution remains shell/`psql`.
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.
 Use `pgworkbench experiment plan --expanded` to embed topology, dataset,

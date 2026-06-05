@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/r314tive/postgres-experiment-workbench/internal/datasetplan"
+	"github.com/r314tive/postgres-experiment-workbench/internal/diagnosticcatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/doctor"
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
@@ -60,6 +61,8 @@ func run(args []string) error {
 		return runDoctor(root, args[1:])
 	case "dataset":
 		return runDataset(root, speccatalog.New(root), args[1:])
+	case "diagnostics":
+		return runDiagnostics(root, args[1:])
 	case "patchset":
 		return runPatchset(patchsetcatalog.New(root), args[1:])
 	case "profile":
@@ -73,7 +76,7 @@ func run(args []string) error {
 	case "source":
 		return runSource(root, args[1:])
 	case "topology":
-		return runTopology(root, args[1:])
+		return runTopology(root, speccatalog.New(root), args[1:])
 	case "scan":
 		return runScan(root, args[1:])
 	case "report":
@@ -95,6 +98,8 @@ func usage() {
   pgworkbench dataset show [--raw] <dataset>
   pgworkbench dataset validate [dataset...]
   pgworkbench dataset plan [--json] <dataset>
+  pgworkbench diagnostics list
+  pgworkbench diagnostics show <diagnostic>
   pgworkbench patchset list
   pgworkbench patchset show <patchset>
   pgworkbench patchset validate [patchset...]
@@ -106,8 +111,14 @@ func usage() {
   pgworkbench workload show [--raw] <workload>
   pgworkbench workload validate [workload...]
   pgworkbench workload plan [--json] <workload>
+  pgworkbench experiment list [--raw]
+  pgworkbench experiment show [--raw] <experiment-spec>
   pgworkbench experiment plan [--json] [--expanded] <experiment-spec>
+  pgworkbench matrix list [--raw]
+  pgworkbench matrix show [--raw] <matrix-spec>
   pgworkbench matrix plan [--json] <matrix-spec>
+  pgworkbench topology list [--raw]
+  pgworkbench topology show [--raw] <topology>
   pgworkbench topology inspect <topology>
   pgworkbench topology ps <topology>
   pgworkbench source plan [workload-spec]
@@ -300,6 +311,40 @@ func runDataset(root string, catalog speccatalog.Catalog, args []string) error {
 	}
 }
 
+func runDiagnostics(root string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("diagnostics action is required")
+	}
+	catalog := diagnosticcatalog.New(root)
+
+	switch args[0] {
+	case "list":
+		if len(args) != 1 {
+			return fmt.Errorf("usage: pgworkbench diagnostics list")
+		}
+		diagnostics, err := catalog.List()
+		if err != nil {
+			return err
+		}
+		for _, diagnostic := range diagnostics {
+			fmt.Println(diagnostic)
+		}
+		return nil
+	case "show":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: pgworkbench diagnostics show <diagnostic>")
+		}
+		content, err := catalog.Show(args[1])
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(content)
+		return err
+	default:
+		return fmt.Errorf("unsupported diagnostics action: %s", args[0])
+	}
+}
+
 func runPatchset(catalog patchsetcatalog.Catalog, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("patchset action is required")
@@ -474,7 +519,7 @@ func runExperiment(root string, catalog speccatalog.Catalog, args []string) erro
 		}
 		return experimentplan.Render(os.Stdout, plan)
 	default:
-		return fmt.Errorf("unsupported experiment action: %s", args[0])
+		return runKindCatalog("experiment", catalog, args)
 	}
 }
 
@@ -503,7 +548,7 @@ func runMatrix(catalog speccatalog.Catalog, args []string) error {
 		}
 		return matrixplan.Render(os.Stdout, plan)
 	default:
-		return fmt.Errorf("unsupported matrix action: %s", args[0])
+		return runKindCatalog("matrix", catalog, args)
 	}
 }
 
@@ -549,7 +594,7 @@ func runSource(root string, args []string) error {
 	}
 }
 
-func runTopology(root string, args []string) error {
+func runTopology(root string, catalog speccatalog.Catalog, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("topology action is required")
 	}
@@ -578,7 +623,7 @@ func runTopology(root string, args []string) error {
 		}
 		return topologyinspect.RenderRuntime(os.Stdout, status)
 	default:
-		return fmt.Errorf("unsupported topology action: %s", args[0])
+		return runKindCatalog("topology", catalog, args)
 	}
 }
 

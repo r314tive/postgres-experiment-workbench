@@ -57,6 +57,9 @@ Already started:
   available.
 - Make workload and dataset catalog targets default to Go raw output with shell
   compatibility still available.
+- Make experiment, matrix, and topology catalog targets default to Go raw
+  output with shell compatibility still available.
+- `pgworkbench diagnostics list|show`; diagnostic execution stays in shell.
 - `pgworkbench matrix plan`.
 - `pgworkbench spec list|show|reference|schema|validate`.
 - `pgworkbench topology inspect|ps`.

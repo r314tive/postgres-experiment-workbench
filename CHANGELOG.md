@@ -4,6 +4,15 @@
 
 No changes yet.
 
+## v0.1.14 - 2026-06-05
+
+Changed platform behavior:
+
+- Moved experiment, matrix, and topology catalog Make targets to Go raw output
+  while preserving shell-compatible list/show output.
+- Moved diagnostic catalog Make targets to the Go CLI while keeping diagnostic
+  execution in shell.
+
 ## v0.1.13 - 2026-06-05
 
 Changed platform behavior:
