@@ -13,10 +13,10 @@ import (
 )
 
 type Result struct {
-	RunDir string
-	Output string
-	Files  int
-	Bytes  int64
+	RunDir string `json:"run_dir"`
+	Output string `json:"output"`
+	Files  int    `json:"files"`
+	Bytes  int64  `json:"bytes"`
 }
 
 func Create(root string, input string, output string) (Result, error) {

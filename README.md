@@ -166,6 +166,7 @@ make run-list
 make run-list RUN_STATUS=failed RUN_LIMIT=20
 make run-show RUN_DIR=runs/<run-id>
 make run-bundle RUN_DIR=runs/<run-id> RUN_BUNDLE_OUT=generated/run.tar.gz
+make run-bundle-json RUN_DIR=runs/<run-id> RUN_BUNDLE_OUT=generated/run.tar.gz
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 make experiment-summary SUMMARY_INPUT=runs/repeats/<repeat-id>
@@ -302,6 +303,7 @@ go run ./cmd/pgworkbench run list
 go run ./cmd/pgworkbench run list --status failed --limit 20
 go run ./cmd/pgworkbench run show runs/<run-id>
 go run ./cmd/pgworkbench run bundle runs/<run-id> generated/run.tar.gz
+go run ./cmd/pgworkbench run bundle --json runs/<run-id> generated/run.tar.gz
 go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b
 go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>

@@ -123,6 +123,7 @@ help:
 	@printf '  %-24s %s\n' 'make run-show' 'Show RUN_DIR artifact summary'
 	@printf '  %-24s %s\n' 'make run-show-json' 'Show RUN_DIR artifact summary as JSON'
 	@printf '  %-24s %s\n' 'make run-bundle' 'Bundle RUN_DIR artifact into tar.gz'
+	@printf '  %-24s %s\n' 'make run-bundle-json' 'Bundle RUN_DIR artifact and print JSON metadata'
 	@printf '  %-24s %s\n' 'make experiment-verify' 'Verify RUN_DIR artifact integrity'
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-report-shell' 'Render Markdown report with shell script'
@@ -432,6 +433,15 @@ run-bundle:
 		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run bundle "$(RUN_DIR)" "$(RUN_BUNDLE_OUT)"; \
 	else \
 		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run bundle "$(RUN_DIR)"; \
+	fi
+
+.PHONY: run-bundle-json
+run-bundle-json:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make run-bundle-json RUN_DIR=runs/<run-id> [RUN_BUNDLE_OUT=generated/run.tar.gz]' >&2; exit 2; }
+	@if [[ -n "$(RUN_BUNDLE_OUT)" ]]; then \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run bundle --json "$(RUN_DIR)" "$(RUN_BUNDLE_OUT)"; \
+	else \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run bundle --json "$(RUN_DIR)"; \
 	fi
 
 .PHONY: experiment-report

@@ -3,10 +3,12 @@ package runbundle
 import (
 	"archive/tar"
 	"compress/gzip"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +25,15 @@ func TestCreateBundle(t *testing.T) {
 	}
 	if result.Files != 2 || result.Bytes == 0 || result.Output != output {
 		t.Fatalf("unexpected result: %#v", result)
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"run_dir"`, `"output"`, `"files"`, `"bytes"`} {
+		if !strings.Contains(string(payload), want) {
+			t.Fatalf("JSON payload missing %q: %s", want, payload)
+		}
 	}
 
 	names := readTarNames(t, output)

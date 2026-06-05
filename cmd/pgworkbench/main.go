@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -137,7 +138,7 @@ func usage() {
   pgworkbench report history [--output output.md] <series-dir|run-dir> [series-dir|run-dir...]
   pgworkbench run list [--json] [--status status] [--limit n] [path...]
   pgworkbench run show [--json] <run-dir-or-id>
-  pgworkbench run bundle <run-dir-or-id> [output.tar.gz]
+  pgworkbench run bundle [--json] <run-dir-or-id> [output.tar.gz]
   pgworkbench run verify <run-dir-or-id>
   pgworkbench run write-manifest --run-dir <run-dir>
   pgworkbench run write-verdict --run-dir <run-dir> --status <status> --message <message> [--finished-at <time>]
@@ -799,16 +800,25 @@ func runState(root string, args []string) error {
 		}
 		return runcatalog.RenderShow(os.Stdout, summary)
 	case "bundle":
-		if len(args) < 2 || len(args) > 3 {
-			return fmt.Errorf("usage: pgworkbench run bundle <run-dir-or-id> [output.tar.gz]")
-		}
-		output := ""
-		if len(args) == 3 {
-			output = args[2]
-		}
-		result, err := runbundle.Create(root, args[1], output)
+		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
 		if err != nil {
 			return err
+		}
+		if len(inputs) < 1 || len(inputs) > 2 {
+			return fmt.Errorf("usage: pgworkbench run bundle [--json] <run-dir-or-id> [output.tar.gz]")
+		}
+		output := ""
+		if len(inputs) == 2 {
+			output = inputs[1]
+		}
+		result, err := runbundle.Create(root, inputs[0], output)
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			encoder := json.NewEncoder(os.Stdout)
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(result)
 		}
 		fmt.Printf("Wrote bundle: %s files=%d bytes=%d\n", result.Output, result.Files, result.Bytes)
 		return nil

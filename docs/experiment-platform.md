@@ -56,14 +56,17 @@ make run-list-json
 make run-show RUN_DIR=runs/<run-id>
 make run-show-json RUN_DIR=runs/<run-id>
 make run-bundle RUN_DIR=runs/<run-id> RUN_BUNDLE_OUT=generated/run.tar.gz
+make run-bundle-json RUN_DIR=runs/<run-id> RUN_BUNDLE_OUT=generated/run.tar.gz
 go run ./cmd/pgworkbench run list --json --status failed --limit 20
 go run ./cmd/pgworkbench run show runs/<run-id>
 go run ./cmd/pgworkbench run bundle runs/<run-id> generated/run.tar.gz
+go run ./cmd/pgworkbench run bundle --json runs/<run-id> generated/run.tar.gz
 ```
 
 Run catalog commands summarize local run artifacts without starting Docker or
 connecting to PostgreSQL. Run bundles are gzip-compressed tar archives with
-relative paths rooted at the run id.
+relative paths rooted at the run id, and JSON bundle output reports the archive
+path, file count, and uncompressed byte count.
 
 ## Compare
 

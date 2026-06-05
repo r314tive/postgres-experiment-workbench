@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.24 - 2026-06-05
+
+Added platform features:
+
+- Added JSON metadata output for run artifact bundles through
+  `pgworkbench run bundle --json` and `make run-bundle-json`.
+
 ## v0.1.23 - 2026-06-05
 
 Changed platform interface:
