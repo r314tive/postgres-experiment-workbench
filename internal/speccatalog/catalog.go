@@ -33,15 +33,17 @@ var Kinds = []Kind{
 	{Name: "topology", Root: "topologies"},
 	{Name: "dataset", Root: "datasets"},
 	{Name: "utility-test", Root: "utility-tests"},
+	{Name: "utility-suite", Root: "utility-suites"},
 }
 
 var kindRoots = map[string]string{
-	"workload":     "workloads",
-	"experiment":   "experiments",
-	"matrix":       "matrices",
-	"topology":     "topologies",
-	"dataset":      "datasets",
-	"utility-test": "utility-tests",
+	"workload":      "workloads",
+	"experiment":    "experiments",
+	"matrix":        "matrices",
+	"topology":      "topologies",
+	"dataset":       "datasets",
+	"utility-test":  "utility-tests",
+	"utility-suite": "utility-suites",
 }
 
 func New(root string) Catalog {
@@ -226,6 +228,8 @@ func (c Catalog) validateSpec(spec Spec) []error {
 		return c.validateDataset(spec)
 	case "utility-test":
 		return c.validateUtilityTest(spec)
+	case "utility-suite":
+		return c.validateUtilitySuite(spec)
 	default:
 		return []error{fmt.Errorf("unsupported spec kind: %s", spec.Kind)}
 	}
@@ -445,6 +449,35 @@ func (c Catalog) validateUtilityTest(spec Spec) []error {
 	}
 	if metrics := spec.Values["UTILITY_TEST_METRICS"]; metrics != "" && !isDynamic(metrics) && !oneOf(metrics, "0", "1") {
 		errs = append(errs, specError(spec, "UTILITY_TEST_METRICS must be 0 or 1: %s", metrics))
+	}
+	return errs
+}
+
+func (c Catalog) validateUtilitySuite(spec Spec) []error {
+	var errs []error
+	requireValue(&errs, spec, "UTILITY_SUITE_NAME")
+
+	for _, test := range splitWords(requireValue(&errs, spec, "UTILITY_SUITE_TESTS")) {
+		if !isDynamic(test) && !c.specExists("utility-test", test) {
+			errs = append(errs, specError(spec, "utility-test spec not found: %s", test))
+		}
+	}
+
+	for _, profileSize := range splitWords(valueOr(spec.Values["UTILITY_SUITE_PROFILE_SIZES"], "small")) {
+		if !isDynamic(profileSize) && !oneOf(profileSize, "small", "medium", "large") {
+			errs = append(errs, specError(spec, "unsupported UTILITY_SUITE_PROFILE_SIZE: %s", profileSize))
+		}
+	}
+
+	repeats := valueOr(spec.Values["UTILITY_SUITE_REPEATS"], "1")
+	if !isDynamic(repeats) && !positiveInt(repeats) {
+		errs = append(errs, specError(spec, "UTILITY_SUITE_REPEATS must be a positive integer: %s", repeats))
+	}
+	if stopOnFail := spec.Values["UTILITY_SUITE_STOP_ON_FAIL"]; stopOnFail != "" && !isDynamic(stopOnFail) && !oneOf(stopOnFail, "0", "1") {
+		errs = append(errs, specError(spec, "UTILITY_SUITE_STOP_ON_FAIL must be 0 or 1: %s", stopOnFail))
+	}
+	if snapshot := spec.Values["UTILITY_SUITE_SNAPSHOT"]; snapshot != "" && !isDynamic(snapshot) && !oneOf(snapshot, "0", "1") {
+		errs = append(errs, specError(spec, "UTILITY_SUITE_SNAPSHOT must be 0 or 1: %s", snapshot))
 	}
 	return errs
 }

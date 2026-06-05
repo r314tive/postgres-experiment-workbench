@@ -56,6 +56,22 @@ UTILITY_TEST_SCAN_PATHS="logs/utility generated/tool-output"
 Expected files are converted into non-empty file assertions. SQL and shell
 assertions are passed through to the experiment runner.
 
+Batch utility tests with utility-suite specs:
+
+```bash
+make utility-suite-list
+make utility-suite-show UTILITY_SUITE=native-dump
+make utility-suite-plan UTILITY_SUITE=native-dump
+make utility-suite-plan-json UTILITY_SUITE=native-dump
+make utility-suite-run UTILITY_SUITE=native-dump
+make utility-suite-run-json UTILITY_SUITE=native-dump
+```
+
+Suites expand utility tests across profile sizes and repeat counts, write
+`runs.tsv`, `summary.md`, and driver logs under
+`runs/utility-suites/<suite-run-id>/`, and keep individual utility-test
+artifacts under normal `runs/<run-id>/` directories.
+
 ## Dump And Restore
 
 Preview native PostgreSQL utility scenarios:
@@ -66,6 +82,7 @@ make utility-plan UTILITY_TEST_SPEC=pg-restore/smoke
 make utility-plan UTILITY_TEST_SPEC=pg-dumpall/smoke
 make utility-plan-expanded UTILITY_TEST_SPEC=pg-dumpall/wal-pressure
 make utility-run UTILITY_TEST_SPEC=pg-dump/smoke
+make utility-suite-plan UTILITY_SUITE=native-dump
 ```
 
 Run `pg_dump` while WAL pressure is active:

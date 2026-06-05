@@ -4,6 +4,14 @@
 
 No changes yet.
 
+## v0.1.31 - 2026-06-05
+
+Added platform features:
+
+- Added `utility-suites/**/*.env` specs, `pgworkbench utility-suite`
+  catalog/plan/run commands, Make targets, JSON output, suite summaries, and
+  starter native dump suite definitions.
+
 ## v0.1.30 - 2026-06-05
 
 Added platform features:

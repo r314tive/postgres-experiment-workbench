@@ -425,6 +425,79 @@
       "title": "topology env spec",
       "type": "object"
     },
+    "utility-suite": {
+      "$comment": "Suite runs delegate each entry to `pgworkbench utility run`, so per-test artifacts still live under `runs/<run-id>/`.",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "description": "Utility suite specs live under `utility-suites/**/*.env` and batch utility-test specs across profile sizes and repeats.",
+      "properties": {
+        "UTILITY_SUITE_NAME": {
+          "description": "Human-readable utility suite name.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "UTILITY_SUITE_PROFILE_SIZES": {
+          "default": "small",
+          "description": "Space-separated profile sizes passed through `PROFILE_SIZE`.",
+          "enum": [
+            "small",
+            "medium",
+            "large"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_SUITE_REPEATS": {
+          "default": "1",
+          "description": "Repeat count per utility-test/profile-size combination.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_SUITE_RUN_DIR": {
+          "default": "runs/utility-suites/<id>",
+          "description": "Explicit utility suite artifact directory.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_SUITE_RUN_ID": {
+          "default": "generated",
+          "description": "Explicit utility suite run id.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_SUITE_SNAPSHOT": {
+          "default": "1",
+          "description": "Snapshot toggle passed through as `UTILITY_TEST_SNAPSHOT`.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_SUITE_STOP_ON_FAIL": {
+          "default": "0",
+          "description": "Stop suite execution after the first failed utility test run.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_SUITE_TESTS": {
+          "description": "Space-separated utility-test specs.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        }
+      },
+      "required": [
+        "UTILITY_SUITE_NAME",
+        "UTILITY_SUITE_TESTS"
+      ],
+      "title": "utility-suite env spec",
+      "type": "object"
+    },
     "utility-test": {
       "$comment": "Use utility tests for pg_dump, pg_restore, pg_upgrade, external backup tools, data checkers, fuzzers, and other PostgreSQL-adjacent utilities. Values containing `$` are treated as dynamic by the validator and are not path-checked.",
       "$schema": "https://json-schema.org/draft/2020-12/schema",

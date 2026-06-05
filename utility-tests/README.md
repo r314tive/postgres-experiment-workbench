@@ -20,6 +20,7 @@ Specs live under `utility-tests/**/*.env`. They are dry-run planning contracts;
 the foreground utility action is still a normal workload spec under
 `workloads/`. The run command translates the utility-test spec into an ignored
 temporary experiment spec and writes normal experiment artifacts under `runs/`.
+Batch scenarios live under `utility-suites/`.
 
 Useful result-contract fields:
 

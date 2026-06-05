@@ -12,6 +12,7 @@ WORKLOAD_SQL ?= 10_run.sql
 WORKLOAD ?= wait-xacts
 WORKLOAD_SPEC ?= workloads/sql/smoke-run.env
 UTILITY_TEST_SPEC ?= pg-dump/smoke
+UTILITY_SUITE ?= native-dump
 EXPERIMENT_SPEC ?= smoke
 EXPERIMENT_REPEAT_COUNT ?= 3
 EXPERIMENT_REPEAT_ID ?=
@@ -165,6 +166,12 @@ help:
 	@printf '  %-24s %s\n' 'make utility-plan-expanded' 'Render expanded UTILITY_TEST_SPEC plan'
 	@printf '  %-24s %s\n' 'make utility-run' 'Run UTILITY_TEST_SPEC through experiment runner'
 	@printf '  %-24s %s\n' 'make utility-run-json' 'Run UTILITY_TEST_SPEC and print JSON result'
+	@printf '  %-24s %s\n' 'make utility-suite-list' 'List utility suite specs'
+	@printf '  %-24s %s\n' 'make utility-suite-show' 'Show UTILITY_SUITE'
+	@printf '  %-24s %s\n' 'make utility-suite-plan' 'Render UTILITY_SUITE batch plan'
+	@printf '  %-24s %s\n' 'make utility-suite-plan-json' 'Render UTILITY_SUITE batch plan as JSON'
+	@printf '  %-24s %s\n' 'make utility-suite-run' 'Run UTILITY_SUITE through utility runner'
+	@printf '  %-24s %s\n' 'make utility-suite-run-json' 'Run UTILITY_SUITE and print JSON result'
 	@printf '  %-24s %s\n' 'make workload-start' 'Run profile SQL in the background'
 	@printf '  %-24s %s\n' 'make workload-start-spec' 'Run WORKLOAD_SPEC in the background'
 	@printf '  %-24s %s\n' 'make workload-start-sql' 'Run SQL=path in the background'
@@ -658,6 +665,34 @@ utility-run:
 utility-run-json:
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility run --json "$(UTILITY_TEST_SPEC)"
 
+.PHONY: utility-suite-list
+utility-suite-list:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite list --raw
+
+.PHONY: utility-suite-show
+utility-suite-show:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite show --raw "$(UTILITY_SUITE)"
+
+.PHONY: utility-suite-validate
+utility-suite-validate:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite validate
+
+.PHONY: utility-suite-plan
+utility-suite-plan:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite plan "$(UTILITY_SUITE)"
+
+.PHONY: utility-suite-plan-json
+utility-suite-plan-json:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite plan --json "$(UTILITY_SUITE)"
+
+.PHONY: utility-suite-run
+utility-suite-run:
+	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite run "$(UTILITY_SUITE)"
+
+.PHONY: utility-suite-run-json
+utility-suite-run-json:
+	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite run --json "$(UTILITY_SUITE)"
+
 .PHONY: scan-artifacts
 scan-artifacts:
 	./scripts/scan_pg_failures.sh $(SCAN_PATHS)
@@ -825,6 +860,11 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility plan pg-dump/smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility plan --json pg-dump/smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility plan --expanded pg-dump/smoke >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite list --raw >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite show --raw native-dump >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite plan native-dump >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite plan --json native-dump >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset list --raw >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset show --raw synthetic/items >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset validate >/dev/null

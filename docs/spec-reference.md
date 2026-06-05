@@ -158,3 +158,20 @@ Utility test specs live under `utility-tests/**/*.env` and describe a reusable P
 
 - Use utility tests for pg_dump, pg_restore, pg_upgrade, external backup tools, data checkers, fuzzers, and other PostgreSQL-adjacent utilities.
 - Values containing `$` are treated as dynamic by the validator and are not path-checked.
+
+## utility-suite
+
+Utility suite specs live under `utility-suites/**/*.env` and batch utility-test specs across profile sizes and repeats.
+
+| Key | Requirement | Default | Allowed | Description |
+| --- | --- | --- | --- | --- |
+| `UTILITY_SUITE_NAME` | required | - | - | Human-readable utility suite name. |
+| `UTILITY_SUITE_TESTS` | required | - | - | Space-separated utility-test specs. |
+| `UTILITY_SUITE_PROFILE_SIZES` | optional | small | small, medium, large | Space-separated profile sizes passed through `PROFILE_SIZE`. |
+| `UTILITY_SUITE_REPEATS` | optional | 1 | positive integer | Repeat count per utility-test/profile-size combination. |
+| `UTILITY_SUITE_STOP_ON_FAIL` | optional | 0 | 0, 1 | Stop suite execution after the first failed utility test run. |
+| `UTILITY_SUITE_SNAPSHOT` | optional | 1 | 0, 1 | Snapshot toggle passed through as `UTILITY_TEST_SNAPSHOT`. |
+| `UTILITY_SUITE_RUN_ID` | optional | generated | - | Explicit utility suite run id. |
+| `UTILITY_SUITE_RUN_DIR` | optional | runs/utility-suites/<id> | - | Explicit utility suite artifact directory. |
+
+- Suite runs delegate each entry to `pgworkbench utility run`, so per-test artifacts still live under `runs/<run-id>/`.

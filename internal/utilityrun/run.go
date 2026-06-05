@@ -27,6 +27,7 @@ type Env func(string) string
 type Options struct {
 	Stdout     io.Writer
 	Stderr     io.Writer
+	Env        []string
 	Now        func() time.Time
 	Getenv     Env
 	RunCommand CommandRunner
@@ -63,7 +64,7 @@ func Run(root string, catalog speccatalog.Catalog, input string, options Options
 		runID = fmt.Sprintf("utility-%s-%s", sanitizeID(plan.Spec.ID), started.Format("20060102_150405"))
 	}
 
-	experimentSpec, err := writeExperimentSpec(root, plan, runID, started)
+	experimentSpec, err := writeExperimentSpec(root, plan, runID)
 	if err != nil {
 		return Result{}, err
 	}
@@ -79,7 +80,7 @@ func Run(root string, catalog speccatalog.Catalog, input string, options Options
 		StartedAt:       started.Format(time.RFC3339),
 	}
 
-	commandResult := options.RunCommand(root, command, nil, options.Stdout, options.Stderr)
+	commandResult := options.RunCommand(root, command, options.Env, options.Stdout, options.Stderr)
 	finished := options.Now().UTC()
 	result.FinishedAt = finished.Format(time.RFC3339)
 	result.DurationMS = maxDurationMS(finished.Sub(started))
@@ -158,12 +159,12 @@ func defaultRunCommand(root string, command []string, env []string, stdout io.Wr
 	return CommandResult{ExitCode: -1, Err: err}
 }
 
-func writeExperimentSpec(root string, plan utilityplan.Plan, runID string, now time.Time) (string, error) {
+func writeExperimentSpec(root string, plan utilityplan.Plan, runID string) (string, error) {
 	dir := filepath.Join(root, ".tmp", "utility-tests")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, sanitizeID(plan.Spec.ID)+"-"+now.Format("20060102_150405")+".env")
+	path := filepath.Join(dir, sanitizeID(runID)+".env")
 
 	var out strings.Builder
 	out.WriteString("# Generated from utility-test spec. This file is ignored local runtime state.\n")

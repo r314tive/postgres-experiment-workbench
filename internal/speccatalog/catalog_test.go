@@ -20,6 +20,7 @@ func TestCatalogListShowValidate(t *testing.T) {
 	writeSpec(t, root, "matrices/smoke.env", "MATRIX_NAME=smoke\nMATRIX_EXPERIMENTS=smoke\nMATRIX_PG_CONFIGS=default\nMATRIX_PROFILE_SIZES=small\nMATRIX_REPEATS=1\n")
 	writeSpec(t, root, "datasets/synthetic/items.env", "DATASET_NAME=items\nDATASET_KIND=sql\nDATASET_SQL=sql/datasets/synthetic_items.sql\n")
 	writeSpec(t, root, "utility-tests/pg-dump/smoke.env", "UTILITY_TEST_NAME=pg_dump smoke\nUTILITY_TEST_PROFILE=smoke\nUTILITY_TEST_WORKLOAD_SPEC=sql/smoke-run\nUTILITY_TEST_METRICS=1\n")
+	writeSpec(t, root, "utility-suites/native.env", "UTILITY_SUITE_NAME=native\nUTILITY_SUITE_TESTS=pg-dump/smoke\nUTILITY_SUITE_PROFILE_SIZES=small\nUTILITY_SUITE_REPEATS=1\n")
 	writeSpec(t, root, "sql/datasets/synthetic_items.sql", "SELECT 1;\n")
 
 	catalog := New(root)
@@ -113,6 +114,23 @@ func TestCatalogValidateUtilityTestReferences(t *testing.T) {
 	}
 }
 
+func TestCatalogValidateUtilitySuiteReferences(t *testing.T) {
+	root := t.TempDir()
+	writeSpec(t, root, "workloads/utility/noop.env", "WORKLOAD_NAME=noop\nWORKLOAD_KIND=shell\nWORKLOAD_CMD='echo noop'\n")
+	writeSpec(t, root, "utility-tests/pg-dump/smoke.env", "UTILITY_TEST_NAME=pg_dump smoke\nUTILITY_TEST_WORKLOAD_SPEC=utility/noop\n")
+	writeSpec(t, root, "utility-suites/native.env", "UTILITY_SUITE_NAME=native\nUTILITY_SUITE_TESTS=pg-dump/smoke\nUTILITY_SUITE_PROFILE_SIZES=small medium\nUTILITY_SUITE_REPEATS=2\nUTILITY_SUITE_STOP_ON_FAIL=1\nUTILITY_SUITE_SNAPSHOT=0\n")
+
+	if errs := New(root).Validate("utility-suite", nil); len(errs) != 0 {
+		t.Fatalf("unexpected validation errors: %#v", errs)
+	}
+
+	writeSpec(t, root, "utility-suites/broken.env", "UTILITY_SUITE_NAME=broken\nUTILITY_SUITE_TESTS=missing\nUTILITY_SUITE_PROFILE_SIZES=huge\nUTILITY_SUITE_REPEATS=0\nUTILITY_SUITE_STOP_ON_FAIL=maybe\nUTILITY_SUITE_SNAPSHOT=maybe\n")
+	errs := New(root).Validate("utility-suite", []string{"broken"})
+	if len(errs) != 5 {
+		t.Fatalf("expected five validation errors, got %#v", errs)
+	}
+}
+
 func TestCatalogValidateExperimentStateWriter(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, "configs/default/postgresql.conf", "# default\n")
@@ -160,6 +178,8 @@ func TestRenderReference(t *testing.T) {
 		"sql, profile, pgbench",
 		"## utility-test",
 		"`UTILITY_TEST_WORKLOAD_SPEC`",
+		"## utility-suite",
+		"`UTILITY_SUITE_TESTS`",
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("reference missing %q:\n%s", want, content)
@@ -203,7 +223,7 @@ func TestRenderAllSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	defs := schema["$defs"].(map[string]interface{})
-	for _, kind := range []string{"workload", "experiment", "matrix", "topology", "dataset", "utility-test"} {
+	for _, kind := range []string{"workload", "experiment", "matrix", "topology", "dataset", "utility-test", "utility-suite"} {
 		if _, ok := defs[kind]; !ok {
 			t.Fatalf("missing $defs schema for %s", kind)
 		}

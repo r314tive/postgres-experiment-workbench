@@ -29,8 +29,8 @@ and a small number of reliable binaries/scripts.
 - Keep packaged `pgworkbench` snapshot binaries buildable for common platforms.
 - Keep the minimal quickstart transcript current.
 - Keep schema/reference docs for workload, topology, experiment, matrix,
-  dataset, and utility-test env specs generated from code and checked for
-  drift.
+  dataset, utility-test, and utility-suite env specs generated from code and
+  checked for drift.
 - Keep compatibility notes current for Docker, Compose, PostgreSQL image
   versions, and host tools.
 - Add more profile-specific diagnostic SQL where it helps interpretation.
@@ -79,6 +79,8 @@ Already started:
 - `pgworkbench dataset plan`, including JSON output.
 - `pgworkbench utility list|show|validate|plan|run`, including JSON output and
   generated experiment-run bridging.
+- `pgworkbench utility-suite list|show|validate|plan|run`, including JSON
+  output and utility-test batch summaries.
 - `make release-snapshot`.
 
 Good Go candidates:

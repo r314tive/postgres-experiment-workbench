@@ -137,6 +137,10 @@ make utility-plan-json UTILITY_TEST_SPEC=pg-dump/smoke
 make utility-plan-expanded UTILITY_TEST_SPEC=pg-dumpall/wal-pressure
 make utility-run UTILITY_TEST_SPEC=pg-dump/smoke
 make utility-run-json UTILITY_TEST_SPEC=pg-dump/smoke
+make utility-suite-list
+make utility-suite-plan UTILITY_SUITE=native-dump
+make utility-suite-plan-json UTILITY_SUITE=native-dump
+make utility-suite-run UTILITY_SUITE=native-dump
 ```
 
 Specs live under `utility-tests/**/*.env`; executable utility actions remain
@@ -146,6 +150,10 @@ through the existing experiment runner, so run artifacts still land under
 `runs/<run-id>/`. Utility tests can declare expected output files, SQL
 assertions, shell assertions, and extra failure-scan paths so tool checks have a
 stable result contract.
+
+Utility suites live under `utility-suites/**/*.env` and batch utility tests
+across profile sizes and repeats. Suite artifacts are written under
+`runs/utility-suites/<suite-run-id>/`.
 
 ## Topologies
 
@@ -221,6 +229,7 @@ make spec-schema SPEC_KIND=all
 make spec-docs-check
 make spec-list SPEC_KIND=workload
 make spec-list SPEC_KIND=utility-test
+make spec-list SPEC_KIND=utility-suite
 make spec-show SPEC_KIND=experiment SPEC_ID=smoke
 ```
 
@@ -344,6 +353,8 @@ go run ./cmd/pgworkbench spec schema all
 go run ./cmd/pgworkbench spec validate
 go run ./cmd/pgworkbench utility plan --expanded pg-dump/smoke
 go run ./cmd/pgworkbench utility run --json pg-dump/smoke
+go run ./cmd/pgworkbench utility-suite plan --json native-dump
+go run ./cmd/pgworkbench utility-suite run --json native-dump
 ```
 
 Go migration notes live in [docs/go-migration.md](docs/go-migration.md).
