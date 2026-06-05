@@ -29,6 +29,7 @@ func References(kind string) ([]KindReference, error) {
 			matrixReference(),
 			topologyReference(),
 			datasetReference(),
+			utilityTestReference(),
 		}, nil
 	}
 
@@ -43,6 +44,8 @@ func References(kind string) ([]KindReference, error) {
 		return []KindReference{topologyReference()}, nil
 	case "dataset":
 		return []KindReference{datasetReference()}, nil
+	case "utility-test":
+		return []KindReference{utilityTestReference()}, nil
 	default:
 		return nil, fmt.Errorf("unsupported spec kind: %s", kind)
 	}
@@ -219,6 +222,34 @@ func datasetReference() KindReference {
 			{"DATASET_ROWS", "optional for sql", "10000", "", "Row count variable passed to dataset SQL."},
 			{"DATASET_SEED", "optional for sql", "1", "", "Seed variable passed to dataset SQL."},
 			{"DATASET_SCALE", "optional for pgbench", "1", "", "Pgbench initialization scale."},
+		},
+	}
+}
+
+func utilityTestReference() KindReference {
+	return KindReference{
+		Kind:    "utility-test",
+		Summary: "Utility test specs live under `utility-tests/**/*.env` and describe a reusable PostgreSQL utility/tool test scenario.",
+		Fields: []FieldReference{
+			{"UTILITY_TEST_NAME", "required", "", "", "Human-readable utility test name."},
+			{"UTILITY_TEST_WORKLOAD_SPEC", "required", "", "", "Foreground workload spec that invokes the utility or external tool."},
+			{"UTILITY_TEST_PROFILE", "optional", "", "", "Profile directory under `profiles/` used to prepare database state."},
+			{"UTILITY_TEST_PROFILE_SIZE", "optional", "small", "small, medium, large", "Profile scale passed to setup SQL."},
+			{"UTILITY_TEST_PROFILE_SECONDS", "optional", "30", "", "Profile duration passed to setup/run SQL when used."},
+			{"UTILITY_TEST_DATASET_SPEC", "optional", "", "", "Dataset spec loaded before background and utility workloads."},
+			{"UTILITY_TEST_DATASET_SIZE", "optional", "small", "small, medium, large", "Dataset size passed to the dataset loader."},
+			{"UTILITY_TEST_BACKGROUND_SPECS", "optional", "", "", "Space-separated background workload specs started before the utility workload."},
+			{"UTILITY_TEST_BACKGROUND_WARMUP", "optional", "0", "", "Seconds to wait after background workloads start."},
+			{"UTILITY_TEST_BACKGROUND_WAIT", "optional", "0", "0, 1", "Wait for background workloads after the foreground utility workload."},
+			{"UTILITY_TEST_METRICS", "optional", "1", "0, 1", "Enable metrics sampling during the utility test."},
+			{"UTILITY_TEST_METRICS_INTERVAL", "optional", "1", "", "Metrics sampling interval in seconds."},
+			{"UTILITY_TEST_METRICS_DURATION", "optional", "30", "", "Metrics sampling duration in seconds."},
+			{"UTILITY_TEST_METRICS_SAMPLES", "optional", "", "", "Fixed metrics sample count; overrides duration loop."},
+			{"UTILITY_TEST_NOTES", "optional", "", "", "Short operator notes for expected evidence or caveats."},
+		},
+		Notes: []string{
+			"Use utility tests for pg_dump, pg_restore, pg_upgrade, external backup tools, data checkers, fuzzers, and other PostgreSQL-adjacent utilities.",
+			"Values containing `$` are treated as dynamic by the validator and are not path-checked.",
 		},
 	}
 }

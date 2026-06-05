@@ -9,7 +9,50 @@ Prefer `make experiment-run` when the workflow should leave a self-contained
 run directory under `runs/<run-id>/`. Use `make workload-run` for direct smoke
 checks while iterating on a specific tool adapter.
 
+Use utility-test specs when the same tool scenario needs a named, reviewable
+plan before execution. These specs live under `utility-tests/**/*.env` and
+point at ordinary workload specs for the foreground utility action:
+
+```bash
+make utility-list
+make utility-show UTILITY_TEST_SPEC=pg-dump/smoke
+make utility-plan UTILITY_TEST_SPEC=pg-dump/smoke
+make utility-plan-json UTILITY_TEST_SPEC=pg-dump/smoke
+make utility-plan-expanded UTILITY_TEST_SPEC=pg-dumpall/wal-pressure
+go run ./cmd/pgworkbench utility validate
+```
+
+The utility plan contract covers profile setup, dataset load, background
+workloads, metrics sampling, foreground utility workload, and expected evidence.
+It is intentionally generic; `pg_dump`, `pg_restore`, external backup tools,
+data checkers, fuzzers, and PostgreSQL source utilities should all fit the same
+shape.
+
+Run a utility-test through the existing experiment runner when you want a full
+`runs/<run-id>/` artifact:
+
+```bash
+make utility-run UTILITY_TEST_SPEC=pg-dump/smoke
+make utility-run-json UTILITY_TEST_SPEC=pg-dump/smoke
+UTILITY_TEST_RUN_ID=manual-pgdump make utility-run UTILITY_TEST_SPEC=pg-dump/smoke
+```
+
+`utility run` generates an ignored temporary experiment spec under `.tmp/` and
+then delegates to `scripts/run_experiment.sh`. That keeps utility tests generic
+while preserving the same snapshots, metrics, scan, manifest, verdict, report,
+and bundle workflow as experiments.
+
 ## Dump And Restore
+
+Preview native PostgreSQL utility scenarios:
+
+```bash
+make utility-plan UTILITY_TEST_SPEC=pg-dump/smoke
+make utility-plan UTILITY_TEST_SPEC=pg-restore/smoke
+make utility-plan UTILITY_TEST_SPEC=pg-dumpall/smoke
+make utility-plan-expanded UTILITY_TEST_SPEC=pg-dumpall/wal-pressure
+make utility-run UTILITY_TEST_SPEC=pg-dump/smoke
+```
 
 Run `pg_dump` while WAL pressure is active:
 

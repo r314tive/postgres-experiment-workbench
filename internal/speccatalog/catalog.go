@@ -32,14 +32,16 @@ var Kinds = []Kind{
 	{Name: "matrix", Root: "matrices"},
 	{Name: "topology", Root: "topologies"},
 	{Name: "dataset", Root: "datasets"},
+	{Name: "utility-test", Root: "utility-tests"},
 }
 
 var kindRoots = map[string]string{
-	"workload":   "workloads",
-	"experiment": "experiments",
-	"matrix":     "matrices",
-	"topology":   "topologies",
-	"dataset":    "datasets",
+	"workload":     "workloads",
+	"experiment":   "experiments",
+	"matrix":       "matrices",
+	"topology":     "topologies",
+	"dataset":      "datasets",
+	"utility-test": "utility-tests",
 }
 
 func New(root string) Catalog {
@@ -222,6 +224,8 @@ func (c Catalog) validateSpec(spec Spec) []error {
 		return c.validateTopology(spec)
 	case "dataset":
 		return c.validateDataset(spec)
+	case "utility-test":
+		return c.validateUtilityTest(spec)
 	default:
 		return []error{fmt.Errorf("unsupported spec kind: %s", spec.Kind)}
 	}
@@ -393,6 +397,48 @@ func (c Catalog) validateDataset(spec Spec) []error {
 		if profile != "" && !isDynamic(profile) && !c.dirExists("profiles", profile) {
 			errs = append(errs, specError(spec, "DATASET_PROFILE not found: %s", profile))
 		}
+	}
+	return errs
+}
+
+func (c Catalog) validateUtilityTest(spec Spec) []error {
+	var errs []error
+	requireValue(&errs, spec, "UTILITY_TEST_NAME")
+
+	workload := requireValue(&errs, spec, "UTILITY_TEST_WORKLOAD_SPEC")
+	if workload != "" && !isDynamic(workload) && !c.specExists("workload", workload) {
+		errs = append(errs, specError(spec, "workload spec not found: %s", workload))
+	}
+
+	profile := spec.Values["UTILITY_TEST_PROFILE"]
+	if profile != "" && !isDynamic(profile) && !c.dirExists("profiles", profile) {
+		errs = append(errs, specError(spec, "profile not found: %s", profile))
+	}
+	profileSize := valueOr(spec.Values["UTILITY_TEST_PROFILE_SIZE"], "small")
+	if !isDynamic(profileSize) && !oneOf(profileSize, "small", "medium", "large") {
+		errs = append(errs, specError(spec, "unsupported UTILITY_TEST_PROFILE_SIZE: %s", profileSize))
+	}
+
+	dataset := spec.Values["UTILITY_TEST_DATASET_SPEC"]
+	if dataset != "" && !isDynamic(dataset) && !c.specExists("dataset", dataset) {
+		errs = append(errs, specError(spec, "dataset spec not found: %s", dataset))
+	}
+	datasetSize := valueOr(spec.Values["UTILITY_TEST_DATASET_SIZE"], "small")
+	if !isDynamic(datasetSize) && !oneOf(datasetSize, "small", "medium", "large") {
+		errs = append(errs, specError(spec, "unsupported UTILITY_TEST_DATASET_SIZE: %s", datasetSize))
+	}
+
+	for _, background := range splitWords(spec.Values["UTILITY_TEST_BACKGROUND_SPECS"]) {
+		if !isDynamic(background) && !c.specExists("workload", background) {
+			errs = append(errs, specError(spec, "background workload spec not found: %s", background))
+		}
+	}
+
+	if wait := spec.Values["UTILITY_TEST_BACKGROUND_WAIT"]; wait != "" && !isDynamic(wait) && !oneOf(wait, "0", "1") {
+		errs = append(errs, specError(spec, "UTILITY_TEST_BACKGROUND_WAIT must be 0 or 1: %s", wait))
+	}
+	if metrics := spec.Values["UTILITY_TEST_METRICS"]; metrics != "" && !isDynamic(metrics) && !oneOf(metrics, "0", "1") {
+		errs = append(errs, specError(spec, "UTILITY_TEST_METRICS must be 0 or 1: %s", metrics))
 	}
 	return errs
 }

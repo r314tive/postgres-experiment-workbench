@@ -4,6 +4,15 @@
 
 No changes yet.
 
+## v0.1.29 - 2026-06-05
+
+Added platform features:
+
+- Added first-class `utility-tests/**/*.env` specs, `pgworkbench utility`
+  catalog/plan/run commands, Make targets, JSON/expanded planning output, a
+  bridge to the experiment runner, and native PostgreSQL utility smoke
+  scenarios.
+
 ## v0.1.28 - 2026-06-05
 
 Added platform features:

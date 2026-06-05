@@ -31,6 +31,8 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/runverify"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/topologyinspect"
+	"github.com/r314tive/postgres-experiment-workbench/internal/utilityplan"
+	"github.com/r314tive/postgres-experiment-workbench/internal/utilityrun"
 	"github.com/r314tive/postgres-experiment-workbench/internal/workloadbg"
 	"github.com/r314tive/postgres-experiment-workbench/internal/workloadplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/workloadrun"
@@ -77,6 +79,8 @@ func run(args []string) error {
 		return runProfile(root, profilecatalog.New(root), args[1:])
 	case "workload":
 		return runWorkload(root, speccatalog.New(root), args[1:])
+	case "utility":
+		return runUtility(root, speccatalog.New(root), args[1:])
 	case "experiment":
 		return runExperiment(root, speccatalog.New(root), args[1:])
 	case "matrix":
@@ -123,6 +127,11 @@ func usage() {
   pgworkbench workload plan [--json|--raw] <workload>
   pgworkbench workload run [--json] <workload> [adapter-arg...]
   pgworkbench workload bg status [--json]
+  pgworkbench utility list [--raw]
+  pgworkbench utility show [--raw] <utility-test>
+  pgworkbench utility validate [utility-test...]
+  pgworkbench utility plan [--json] [--expanded] <utility-test>
+  pgworkbench utility run [--json] <utility-test>
   pgworkbench experiment list [--raw]
   pgworkbench experiment show [--raw] <experiment-spec>
   pgworkbench experiment plan [--json] [--expanded] <experiment-spec>
@@ -147,10 +156,10 @@ func usage() {
   pgworkbench run verify [--json] <run-dir-or-id>
   pgworkbench run write-manifest --run-dir <run-dir>
   pgworkbench run write-verdict --run-dir <run-dir> --status <status> --message <message> [--finished-at <time>]
-  pgworkbench spec list <workload|experiment|matrix|topology|dataset>
+  pgworkbench spec list <workload|experiment|matrix|topology|dataset|utility-test>
   pgworkbench spec show <kind> <spec>
-  pgworkbench spec reference [workload|experiment|matrix|topology|dataset|all]
-  pgworkbench spec schema [workload|experiment|matrix|topology|dataset|all]
+  pgworkbench spec reference [workload|experiment|matrix|topology|dataset|utility-test|all]
+  pgworkbench spec schema [workload|experiment|matrix|topology|dataset|utility-test|all]
   pgworkbench spec validate [kind] [spec...]`)
 }
 
@@ -176,8 +185,12 @@ func runDoctor(root string, args []string) error {
 }
 
 func runKindCatalog(kind string, catalog speccatalog.Catalog, args []string) error {
+	return runNamedKindCatalog(kind, kind, catalog, args)
+}
+
+func runNamedKindCatalog(command string, kind string, catalog speccatalog.Catalog, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("%s action is required", kind)
+		return fmt.Errorf("%s action is required", command)
 	}
 
 	switch args[0] {
@@ -187,7 +200,7 @@ func runKindCatalog(kind string, catalog speccatalog.Catalog, args []string) err
 			return err
 		}
 		if len(inputs) != 0 {
-			return fmt.Errorf("usage: pgworkbench %s list [--raw]", kind)
+			return fmt.Errorf("usage: pgworkbench %s list [--raw]", command)
 		}
 		var specs []string
 		if raw {
@@ -208,7 +221,7 @@ func runKindCatalog(kind string, catalog speccatalog.Catalog, args []string) err
 			return err
 		}
 		if len(inputs) != 1 {
-			return fmt.Errorf("usage: pgworkbench %s show [--raw] <%s>", kind, kind)
+			return fmt.Errorf("usage: pgworkbench %s show [--raw] <%s>", command, command)
 		}
 		if raw {
 			content, err := catalog.ShowRaw(kind, inputs[0])
@@ -230,12 +243,12 @@ func runKindCatalog(kind string, catalog speccatalog.Catalog, args []string) err
 			for _, err := range errs {
 				fmt.Fprintln(os.Stderr, err)
 			}
-			return fmt.Errorf("%s catalog validation failed", kind)
+			return fmt.Errorf("%s catalog validation failed", command)
 		}
-		fmt.Printf("PASS: %s catalog\n", kind)
+		fmt.Printf("PASS: %s catalog\n", command)
 		return nil
 	default:
-		return fmt.Errorf("unsupported %s action: %s", kind, args[0])
+		return fmt.Errorf("unsupported %s action: %s", command, args[0])
 	}
 }
 
@@ -428,6 +441,80 @@ func runWorkloadBG(root string, args []string) error {
 		return workloadbg.Render(os.Stdout, status)
 	default:
 		return fmt.Errorf("unsupported background workload action: %s", args[0])
+	}
+}
+
+func runUtility(root string, catalog speccatalog.Catalog, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("utility action is required")
+	}
+
+	switch args[0] {
+	case "plan":
+		expanded := false
+		jsonOutput := false
+		inputs := args[1:]
+		for len(inputs) > 0 && strings.HasPrefix(inputs[0], "-") {
+			switch inputs[0] {
+			case "--expanded":
+				expanded = true
+			case "--json":
+				jsonOutput = true
+			default:
+				return fmt.Errorf("unknown option: %s", inputs[0])
+			}
+			inputs = inputs[1:]
+		}
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench utility plan [--json] [--expanded] <utility-test>")
+		}
+		var (
+			plan utilityplan.Plan
+			err  error
+		)
+		if expanded {
+			plan, err = utilityplan.BuildExpanded(root, catalog, inputs[0])
+		} else {
+			plan, err = utilityplan.Build(catalog, inputs[0])
+		}
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return utilityplan.RenderJSON(os.Stdout, plan)
+		}
+		return utilityplan.Render(os.Stdout, plan)
+	case "run":
+		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench utility run [--json] <utility-test>")
+		}
+		commandStdout := io.Writer(os.Stdout)
+		if jsonOutput {
+			commandStdout = os.Stderr
+		}
+		result, runErr := utilityrun.Run(root, catalog, inputs[0], utilityrun.Options{
+			Stdout: commandStdout,
+			Stderr: os.Stderr,
+		})
+		if result.UtilityTestSpec != "" {
+			if jsonOutput {
+				if err := utilityrun.RenderJSON(os.Stdout, result); err != nil {
+					return err
+				}
+			} else if err := utilityrun.Render(os.Stdout, result); err != nil {
+				return err
+			}
+		}
+		if runErr != nil {
+			return fmt.Errorf("utility run failed: %w", runErr)
+		}
+		return nil
+	default:
+		return runNamedKindCatalog("utility", "utility-test", catalog, args)
 	}
 }
 
@@ -977,7 +1064,7 @@ func runSpec(catalog speccatalog.Catalog, args []string) error {
 	switch args[0] {
 	case "list":
 		if len(args) != 2 {
-			return fmt.Errorf("usage: pgworkbench spec list <workload|experiment|matrix|topology|dataset>")
+			return fmt.Errorf("usage: pgworkbench spec list <workload|experiment|matrix|topology|dataset|utility-test>")
 		}
 		specs, err := catalog.List(args[1])
 		if err != nil {
@@ -1000,7 +1087,7 @@ func runSpec(catalog speccatalog.Catalog, args []string) error {
 	case "reference":
 		kind := "all"
 		if len(args) > 2 {
-			return fmt.Errorf("usage: pgworkbench spec reference [workload|experiment|matrix|topology|dataset|all]")
+			return fmt.Errorf("usage: pgworkbench spec reference [workload|experiment|matrix|topology|dataset|utility-test|all]")
 		}
 		if len(args) == 2 {
 			kind = args[1]
@@ -1009,7 +1096,7 @@ func runSpec(catalog speccatalog.Catalog, args []string) error {
 	case "schema":
 		kind := "all"
 		if len(args) > 2 {
-			return fmt.Errorf("usage: pgworkbench spec schema [workload|experiment|matrix|topology|dataset|all]")
+			return fmt.Errorf("usage: pgworkbench spec schema [workload|experiment|matrix|topology|dataset|utility-test|all]")
 		}
 		if len(args) == 2 {
 			kind = args[1]
