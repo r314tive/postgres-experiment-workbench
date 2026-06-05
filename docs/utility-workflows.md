@@ -65,12 +65,19 @@ make utility-suite-plan UTILITY_SUITE=native-dump
 make utility-suite-plan-json UTILITY_SUITE=native-dump
 make utility-suite-run UTILITY_SUITE=native-dump
 make utility-suite-run-json UTILITY_SUITE=native-dump
+make utility-suite-run-list
+make utility-suite-run-show UTILITY_SUITE_RUN=<suite-run-id>
+make utility-suite-run-verify UTILITY_SUITE_RUN=<suite-run-id>
+make utility-suite-run-verify-json UTILITY_SUITE_RUN=<suite-run-id>
 ```
 
 Suites expand utility tests across profile sizes and repeat counts, write
-`runs.tsv`, `summary.md`, and driver logs under
+`runs.tsv`, `result.json`, `summary.md`, and driver logs under
 `runs/utility-suites/<suite-run-id>/`, and keep individual utility-test
-artifacts under normal `runs/<run-id>/` directories.
+artifacts under normal `runs/<run-id>/` directories. `run-verify` checks the
+suite artifact structure and verifies linked experiment run artifacts when they
+exist; a failed utility test can still be a valid artifact if its evidence is
+complete.
 
 ## Dump And Restore
 
@@ -206,6 +213,9 @@ Every experiment run should be reviewable without re-running it:
 ```bash
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-verify RUN_DIR=runs/<run-id>
+make utility-suite-run-list
+make utility-suite-run-show UTILITY_SUITE_RUN=<suite-run-id>
+make utility-suite-run-verify UTILITY_SUITE_RUN=<suite-run-id>
 make scan-artifacts
 make scan-artifacts-go
 make diagnostics-run DIAGNOSTIC=activity

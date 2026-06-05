@@ -18,6 +18,8 @@ utilities, inspect evidence, and trust the result shape.
 - Keep profile metadata valid with `make profile-validate`.
 - Keep every real profile runnable at `PROFILE_SIZE=small`.
 - Keep experiment outputs self-contained under `runs/<run-id>/`.
+- Keep utility-suite outputs inspectable and verifiable under
+  `runs/utility-suites/<suite-run-id>/`.
 
 ## Release Ready
 
@@ -81,6 +83,8 @@ Already started:
   generated experiment-run bridging.
 - `pgworkbench utility-suite list|show|validate|plan|run`, including JSON
   output and utility-test batch summaries.
+- `pgworkbench utility-suite run-list|run-show|run-verify`, including JSON
+  output and linked experiment-run verification.
 - `make release-snapshot`.
 
 Good Go candidates:

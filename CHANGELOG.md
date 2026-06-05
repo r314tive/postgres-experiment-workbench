@@ -4,6 +4,14 @@
 
 No changes yet.
 
+## v0.1.32 - 2026-06-05
+
+Added platform features:
+
+- Added utility-suite run artifact discovery, display, verification, JSON
+  output, Make targets, suite `result.json` artifacts, and linked
+  experiment-run integrity checks.
+
 ## v0.1.31 - 2026-06-05
 
 Added platform features:

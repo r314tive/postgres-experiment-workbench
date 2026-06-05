@@ -34,6 +34,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/utilityplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/utilityrun"
 	"github.com/r314tive/postgres-experiment-workbench/internal/utilitysuite"
+	"github.com/r314tive/postgres-experiment-workbench/internal/utilitysuiteartifact"
 	"github.com/r314tive/postgres-experiment-workbench/internal/workloadbg"
 	"github.com/r314tive/postgres-experiment-workbench/internal/workloadplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/workloadrun"
@@ -140,6 +141,9 @@ func usage() {
   pgworkbench utility-suite validate [utility-suite...]
   pgworkbench utility-suite plan [--json] <utility-suite>
   pgworkbench utility-suite run [--json] <utility-suite>
+  pgworkbench utility-suite run-list [--json] [path...]
+  pgworkbench utility-suite run-show [--json] <suite-run-dir-or-id>
+  pgworkbench utility-suite run-verify [--json] <suite-run-dir-or-id>
   pgworkbench experiment list [--raw]
   pgworkbench experiment show [--raw] <experiment-spec>
   pgworkbench experiment plan [--json] [--expanded] <experiment-spec>
@@ -571,6 +575,58 @@ func runUtilitySuite(root string, catalog speccatalog.Catalog, args []string) er
 		}
 		if runErr != nil {
 			return fmt.Errorf("utility-suite run failed: %w", runErr)
+		}
+		return nil
+	case "run-list":
+		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		summaries, err := utilitysuiteartifact.List(root, inputs)
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return utilitysuiteartifact.RenderJSON(os.Stdout, summaries)
+		}
+		return utilitysuiteartifact.RenderList(os.Stdout, summaries)
+	case "run-show":
+		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench utility-suite run-show [--json] <suite-run-dir-or-id>")
+		}
+		summary, err := utilitysuiteartifact.Show(root, inputs[0])
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return utilitysuiteartifact.RenderJSON(os.Stdout, summary)
+		}
+		return utilitysuiteartifact.RenderShow(os.Stdout, summary)
+	case "run-verify":
+		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench utility-suite run-verify [--json] <suite-run-dir-or-id>")
+		}
+		result, err := utilitysuiteartifact.Verify(root, inputs[0])
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			if err := utilitysuiteartifact.RenderJSON(os.Stdout, result); err != nil {
+				return err
+			}
+		} else if err := utilitysuiteartifact.RenderVerify(os.Stdout, result); err != nil {
+			return err
+		}
+		if !result.IsValid() {
+			return fmt.Errorf("utility-suite run verification failed")
 		}
 		return nil
 	default:

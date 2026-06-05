@@ -67,7 +67,7 @@ func TestRunUtilitySuiteWritesSummary(t *testing.T) {
 	if len(seen) != 4 || !strings.Contains(seen[0], "pg-dump/smoke|suite-manual-pg-dump_smoke-small-r01|small|0") {
 		t.Fatalf("unexpected utility calls: %#v", seen)
 	}
-	for _, rel := range []string{"runs.tsv", "summary.md", "driver-logs/suite-manual-pg-dump_smoke-small-r01.log"} {
+	for _, rel := range []string{"runs.tsv", "summary.md", "result.json", "driver-logs/suite-manual-pg-dump_smoke-small-r01.log"} {
 		if _, err := os.Stat(filepath.Join(result.RunDir, rel)); err != nil {
 			t.Fatalf("missing suite artifact %s: %v", rel, err)
 		}

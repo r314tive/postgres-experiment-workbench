@@ -232,6 +232,9 @@ func Run(root string, catalog speccatalog.Catalog, input string, options RunOpti
 	}
 
 	result.FinishedAt = options.Now().UTC().Format(time.RFC3339)
+	if err := RenderRunJSONFile(filepath.Join(runDir, "result.json"), result); err != nil {
+		return result, err
+	}
 	if err := RenderSummary(filepath.Join(runDir, "summary.md"), result); err != nil {
 		return result, err
 	}
@@ -275,6 +278,15 @@ func RenderRunJSON(w io.Writer, result RunResult) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(result)
+}
+
+func RenderRunJSONFile(path string, result RunResult) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return RenderRunJSON(file, result)
 }
 
 func RenderSummary(path string, result RunResult) error {
