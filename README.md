@@ -341,6 +341,13 @@ logs/
 Massive-DML-specific work belongs in the separate focused repository unless a
 small generic scenario is useful here.
 
+## License
+
+This repository is source-available, not open source. All rights are reserved;
+public visibility does not grant permission to use, modify, distribute, host, or
+commercialize the code without written authorization from the copyright holder.
+See [LICENSE](LICENSE).
+
 ## Status
 
 Generic scaffold with first real profiles, workload adapters, background

@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-No changes yet.
+Changed licensing:
+
+- Replaced MIT licensing with a proprietary source-available, all-rights-
+  reserved license.
 
 ## v0.1.8 - 2026-06-05
 
