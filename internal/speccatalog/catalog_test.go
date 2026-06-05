@@ -43,6 +43,35 @@ func TestCatalogListShowValidate(t *testing.T) {
 	}
 }
 
+func TestCatalogRawListAndShowMatchShellAdapters(t *testing.T) {
+	root := t.TempDir()
+	writeSpec(t, root, "workloads/pg-source/check-world.env", "WORKLOAD_NAME=check world\nWORKLOAD_KIND=pg-source-check\n")
+	writeSpec(t, root, "workloads/pg-source/check.env", "WORKLOAD_NAME=check\nWORKLOAD_KIND=pg-source-check\n")
+
+	catalog := New(root)
+	specs, err := catalog.ListRaw("workload")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"pg-source/check-world", "pg-source/check"}
+	if len(specs) != len(want) {
+		t.Fatalf("unexpected raw specs: %#v", specs)
+	}
+	for i := range want {
+		if specs[i] != want[i] {
+			t.Fatalf("unexpected raw specs: %#v", specs)
+		}
+	}
+
+	content, err := catalog.ShowRaw("workload", "pg-source/check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "WORKLOAD_NAME=check\nWORKLOAD_KIND=pg-source-check\n" {
+		t.Fatalf("unexpected raw content:\n%s", content)
+	}
+}
+
 func TestCatalogValidateBrokenReferences(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, "experiments/broken.env", "EXPERIMENT_NAME=broken\nEXPERIMENT_TOPOLOGY=missing\nEXPERIMENT_WORKLOAD_SPEC=missing\n")

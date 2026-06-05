@@ -70,6 +70,8 @@ Env spec contracts can be rendered with `pgworkbench spec reference` and
 `pgworkbench spec schema`.
 Profile catalog Make targets now default to the Go CLI while the shell script
 remains available as a compatibility path.
+Workload and dataset catalog Make targets now default to Go `--raw` output,
+which preserves the shell adapter list/show output shape.
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.
 Use `pgworkbench experiment plan --expanded` to embed topology, dataset,

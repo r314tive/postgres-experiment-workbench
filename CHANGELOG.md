@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.13 - 2026-06-05
+
+Changed platform behavior:
+
+- Moved workload and dataset catalog Make targets to Go raw output while
+  preserving shell-compatible list/show output.
+
 ## v0.1.12 - 2026-06-05
 
 Changed platform behavior:

@@ -55,6 +55,8 @@ Already started:
 - `pgworkbench dataset list|show|validate`.
 - Make profile catalog targets default to Go with shell compatibility still
   available.
+- Make workload and dataset catalog targets default to Go raw output with shell
+  compatibility still available.
 - `pgworkbench matrix plan`.
 - `pgworkbench spec list|show|reference|schema|validate`.
 - `pgworkbench topology inspect|ps`.

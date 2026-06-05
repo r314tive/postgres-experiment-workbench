@@ -75,6 +75,39 @@ func (c Catalog) List(kind string) ([]string, error) {
 	return specs, nil
 }
 
+func (c Catalog) ListRaw(kind string) ([]string, error) {
+	root, err := c.kindRoot(kind)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".env" {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, filepath.ToSlash(rel))
+		return nil
+	}); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	sort.Strings(paths)
+	specs := make([]string, 0, len(paths))
+	for _, path := range paths {
+		specs = append(specs, strings.TrimSuffix(path, ".env"))
+	}
+	return specs, nil
+}
+
 func (c Catalog) Show(kind string, id string) (Spec, error) {
 	path, resolvedID, err := c.Resolve(kind, id)
 	if err != nil {
@@ -85,6 +118,14 @@ func (c Catalog) Show(kind string, id string) (Spec, error) {
 		return Spec{}, err
 	}
 	return Spec{Kind: kind, ID: resolvedID, Path: path, Values: values}, nil
+}
+
+func (c Catalog) ShowRaw(kind string, id string) ([]byte, error) {
+	path, _, err := c.Resolve(kind, id)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
 }
 
 func (c Catalog) Resolve(kind string, input string) (string, string, error) {

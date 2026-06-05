@@ -91,8 +91,8 @@ func usage() {
 	fmt.Println(`Usage:
   pgworkbench version
   pgworkbench doctor [--skip-docker-daemon]
-  pgworkbench dataset list
-  pgworkbench dataset show <dataset>
+  pgworkbench dataset list [--raw]
+  pgworkbench dataset show [--raw] <dataset>
   pgworkbench dataset validate [dataset...]
   pgworkbench dataset plan [--json] <dataset>
   pgworkbench patchset list
@@ -102,8 +102,8 @@ func usage() {
   pgworkbench profile show <profile>
   pgworkbench profile validate [profile...]
   pgworkbench profile plan [--json] [--size <size>] [--seconds <seconds>] <profile> [sql-file...]
-  pgworkbench workload list
-  pgworkbench workload show <workload>
+  pgworkbench workload list [--raw]
+  pgworkbench workload show [--raw] <workload>
   pgworkbench workload validate [workload...]
   pgworkbench workload plan [--json] <workload>
   pgworkbench experiment plan [--json] [--expanded] <experiment-spec>
@@ -155,7 +155,19 @@ func runKindCatalog(kind string, catalog speccatalog.Catalog, args []string) err
 
 	switch args[0] {
 	case "list":
-		specs, err := catalog.List(kind)
+		raw, inputs, err := parseRawArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if len(inputs) != 0 {
+			return fmt.Errorf("usage: pgworkbench %s list [--raw]", kind)
+		}
+		var specs []string
+		if raw {
+			specs, err = catalog.ListRaw(kind)
+		} else {
+			specs, err = catalog.List(kind)
+		}
 		if err != nil {
 			return err
 		}
@@ -164,10 +176,22 @@ func runKindCatalog(kind string, catalog speccatalog.Catalog, args []string) err
 		}
 		return nil
 	case "show":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: pgworkbench %s show <%s>", kind, kind)
+		raw, inputs, err := parseRawArgs(args[1:])
+		if err != nil {
+			return err
 		}
-		spec, err := catalog.Show(kind, args[1])
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench %s show [--raw] <%s>", kind, kind)
+		}
+		if raw {
+			content, err := catalog.ShowRaw(kind, inputs[0])
+			if err != nil {
+				return err
+			}
+			_, err = os.Stdout.Write(content)
+			return err
+		}
+		spec, err := catalog.Show(kind, inputs[0])
 		if err != nil {
 			return err
 		}
@@ -186,6 +210,26 @@ func runKindCatalog(kind string, catalog speccatalog.Catalog, args []string) err
 	default:
 		return fmt.Errorf("unsupported %s action: %s", kind, args[0])
 	}
+}
+
+func parseRawArgs(args []string) (bool, []string, error) {
+	raw := false
+	var inputs []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--raw":
+			raw = true
+		case "--":
+			inputs = append(inputs, args[i+1:]...)
+			return raw, inputs, nil
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return false, nil, fmt.Errorf("unknown option: %s", args[i])
+			}
+			inputs = append(inputs, args[i])
+		}
+	}
+	return raw, inputs, nil
 }
 
 func runWorkload(root string, catalog speccatalog.Catalog, args []string) error {
