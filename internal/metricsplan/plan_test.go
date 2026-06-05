@@ -3,6 +3,7 @@ package metricsplan
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -85,6 +86,26 @@ func TestBuildValidatesIntegers(t *testing.T) {
 		if _, err := Build("/repo", "", mapEnv(env), time.Time{}); err == nil {
 			t.Fatalf("expected validation error for env %#v", env)
 		}
+	}
+}
+
+func TestShellSamplerHeaderMatchesPlan(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("..", "..", "scripts", "sample_metrics.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := ""
+	for _, line := range strings.Split(string(content), "\n") {
+		if strings.HasPrefix(line, "HEADER=") {
+			header = strings.Trim(strings.TrimPrefix(line, "HEADER="), `"`)
+			break
+		}
+	}
+	if header == "" {
+		t.Fatal("sample_metrics.sh HEADER assignment not found")
+	}
+	if got, want := header, strings.Join(Header, ","); got != want {
+		t.Fatalf("shell sampler header drifted from Go metrics plan\nwant: %s\n got: %s", want, got)
 	}
 }
 

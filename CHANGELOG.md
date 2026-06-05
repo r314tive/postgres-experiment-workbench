@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.27 - 2026-06-05
+
+Improved release checks:
+
+- Added a Go test that keeps the shell metrics sampler CSV header synchronized
+  with the Go metrics planning contract.
+
 ## v0.1.26 - 2026-06-05
 
 Added platform features:
