@@ -59,6 +59,7 @@ go run ./cmd/pgworkbench run show --json runs/<run-id>
 go run ./cmd/pgworkbench run bundle runs/<run-id> generated/run.tar.gz
 go run ./cmd/pgworkbench run bundle --json runs/<run-id> generated/run.tar.gz
 go run ./cmd/pgworkbench run verify runs/<run-id>
+go run ./cmd/pgworkbench run verify --json runs/<run-id>
 go run ./cmd/pgworkbench run write-manifest --run-dir runs/<run-id>
 go run ./cmd/pgworkbench run write-verdict --run-dir runs/<run-id> --status passed --message 'experiment passed'
 go run ./cmd/pgworkbench spec reference all

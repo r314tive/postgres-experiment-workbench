@@ -86,6 +86,25 @@ func Render(w io.Writer, result Result) error {
 	return nil
 }
 
+func RenderJSON(w io.Writer, result Result) error {
+	issues := result.Issues
+	if issues == nil {
+		issues = []string{}
+	}
+	payload := struct {
+		Dir    string   `json:"dir"`
+		Valid  bool     `json:"valid"`
+		Issues []string `json:"issues"`
+	}{
+		Dir:    result.Dir,
+		Valid:  result.Valid(),
+		Issues: issues,
+	}
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(payload)
+}
+
 func loadEnv(result *Result, path string, label string) (runartifact.Env, bool) {
 	if !checkRequiredRegularFile(result, path, label) {
 		return runartifact.Env{}, false

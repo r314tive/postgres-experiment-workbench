@@ -63,6 +63,10 @@ CSV
 OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
   go run ./cmd/pgworkbench run verify "$RUN_DIR")"
 grep -q 'PASS: run artifact' <<< "$OUT"
+JSON_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
+  go run ./cmd/pgworkbench run verify --json "$RUN_DIR")"
+grep -q '"valid": true' <<< "$JSON_OUT"
+grep -q '"issues": \[\]' <<< "$JSON_OUT"
 
 write_run "$BROKEN_DIR" run-b
 if BROKEN_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
@@ -71,5 +75,12 @@ if BROKEN_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE=
   exit 1
 fi
 grep -q 'missing metrics.csv' <<< "$BROKEN_OUT"
+if BROKEN_JSON="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
+  go run ./cmd/pgworkbench run verify --json "$BROKEN_DIR" 2>&1)"; then
+  echo "FAIL: expected broken JSON run verification to fail" >&2
+  exit 1
+fi
+grep -q '"valid": false' <<< "$BROKEN_JSON"
+grep -q 'missing metrics.csv' <<< "$BROKEN_JSON"
 
 echo "PASS: run verification"

@@ -139,7 +139,7 @@ func usage() {
   pgworkbench run list [--json] [--status status] [--limit n] [path...]
   pgworkbench run show [--json] <run-dir-or-id>
   pgworkbench run bundle [--json] <run-dir-or-id> [output.tar.gz]
-  pgworkbench run verify <run-dir-or-id>
+  pgworkbench run verify [--json] <run-dir-or-id>
   pgworkbench run write-manifest --run-dir <run-dir>
   pgworkbench run write-verdict --run-dir <run-dir> --status <status> --message <message> [--finished-at <time>]
   pgworkbench spec list <workload|experiment|matrix|topology|dataset>
@@ -823,15 +823,25 @@ func runState(root string, args []string) error {
 		fmt.Printf("Wrote bundle: %s files=%d bytes=%d\n", result.Output, result.Files, result.Bytes)
 		return nil
 	case "verify":
-		if len(args) != 2 {
-			return fmt.Errorf("usage: pgworkbench run verify <run-dir-or-id>")
-		}
-		result, err := runverify.Verify(root, args[1])
+		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
 		if err != nil {
 			return err
 		}
-		if err := runverify.Render(os.Stdout, result); err != nil {
+		if len(inputs) != 1 {
+			return fmt.Errorf("usage: pgworkbench run verify [--json] <run-dir-or-id>")
+		}
+		result, err := runverify.Verify(root, inputs[0])
+		if err != nil {
 			return err
+		}
+		if jsonOutput {
+			if err := runverify.RenderJSON(os.Stdout, result); err != nil {
+				return err
+			}
+		} else {
+			if err := runverify.Render(os.Stdout, result); err != nil {
+				return err
+			}
 		}
 		if !result.Valid() {
 			return fmt.Errorf("run verification failed")

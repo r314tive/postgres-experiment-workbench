@@ -41,11 +41,15 @@ The JSON variants render the same dry-runs for external tools.
 
 ```bash
 make experiment-verify RUN_DIR=runs/<run-id>
+make experiment-verify-json RUN_DIR=runs/<run-id>
 go run ./cmd/pgworkbench run verify runs/<run-id>
+go run ./cmd/pgworkbench run verify --json runs/<run-id>
 ```
 
 Run verification checks required state files, env/JSON/CSV parseability, verdict
-consistency, exit-code fields, and metrics sample presence.
+consistency, exit-code fields, and metrics sample presence. JSON verification
+output is suitable for CI jobs that need structured `valid` and `issues`
+fields.
 
 ## Inspect
 

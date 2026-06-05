@@ -125,6 +125,7 @@ help:
 	@printf '  %-24s %s\n' 'make run-bundle' 'Bundle RUN_DIR artifact into tar.gz'
 	@printf '  %-24s %s\n' 'make run-bundle-json' 'Bundle RUN_DIR artifact and print JSON metadata'
 	@printf '  %-24s %s\n' 'make experiment-verify' 'Verify RUN_DIR artifact integrity'
+	@printf '  %-24s %s\n' 'make experiment-verify-json' 'Verify RUN_DIR artifact integrity as JSON'
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-report-shell' 'Render Markdown report with shell script'
 	@printf '  %-24s %s\n' 'make experiment-summary' 'Summarize runs with Go CLI'
@@ -458,6 +459,11 @@ experiment-report-shell:
 experiment-verify:
 	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-verify RUN_DIR=runs/<run-id>' >&2; exit 2; }
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run verify "$(RUN_DIR)"
+
+.PHONY: experiment-verify-json
+experiment-verify-json:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-verify-json RUN_DIR=runs/<run-id>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run verify --json "$(RUN_DIR)"
 
 .PHONY: experiment-report-go
 experiment-report-go:

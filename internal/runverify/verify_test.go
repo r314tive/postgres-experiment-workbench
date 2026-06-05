@@ -2,6 +2,7 @@ package runverify
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,21 @@ func TestVerifyValidRun(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "PASS: run artifact") {
 		t.Fatalf("unexpected render output: %s", out.String())
+	}
+	out.Reset()
+	if err := RenderJSON(&out, result); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Dir    string   `json:"dir"`
+		Valid  bool     `json:"valid"`
+		Issues []string `json:"issues"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Dir != runDir || !payload.Valid || len(payload.Issues) != 0 {
+		t.Fatalf("unexpected JSON payload: %#v", payload)
 	}
 }
 

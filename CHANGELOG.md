@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.25 - 2026-06-05
+
+Added platform features:
+
+- Added structured JSON output for run artifact verification through
+  `pgworkbench run verify --json` and `make experiment-verify-json`.
+
 ## v0.1.24 - 2026-06-05
 
 Added platform features:
