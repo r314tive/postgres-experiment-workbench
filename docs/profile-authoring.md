@@ -113,6 +113,7 @@ Use CSV sampling for short experiments and attach the output to notes or issue
 reports:
 
 ```bash
+make metrics-plan
 METRICS_DURATION=30 METRICS_INTERVAL=1 make metrics-sample
 ```
 

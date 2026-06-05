@@ -41,6 +41,8 @@ go run ./cmd/pgworkbench matrix plan --raw smoke
 go run ./cmd/pgworkbench matrix plan --json smoke
 go run ./cmd/pgworkbench topology inspect primary-replica
 go run ./cmd/pgworkbench topology ps primary-replica
+go run ./cmd/pgworkbench metrics plan
+go run ./cmd/pgworkbench metrics plan --json
 go run ./cmd/pgworkbench source plan pg-source/check
 go run ./cmd/pgworkbench source classify generated/pg-source/<run-id>
 go run ./cmd/pgworkbench scan failures logs generated
@@ -84,6 +86,8 @@ Run report, summary, and history Make targets now default to Go; shell
 compatibility targets remain available with the `-shell` suffix.
 Run comparison Make target now defaults to Go `--raw` output; the shell
 compatibility target remains available with the `-shell` suffix.
+Metrics sampler planning is available through `pgworkbench metrics plan` while
+actual sampling remains shell/`psql` driven.
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.
 Use `pgworkbench experiment plan --expanded` to embed topology, dataset,

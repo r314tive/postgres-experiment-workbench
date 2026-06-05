@@ -39,6 +39,7 @@ METRICS_INTERVAL ?= 1
 METRICS_DURATION ?= 30
 METRICS_SAMPLES ?=
 METRICS_OUT ?=
+METRICS_APPEND ?= 0
 NOISIA_DURATION ?= 60
 NOISIA_JOBS ?= 2
 GO ?= go
@@ -88,6 +89,8 @@ help:
 	@printf '  %-24s %s\n' 'make profile-run' 'Run profiles/$(PROFILE)/sql/$(WORKLOAD_SQL)'
 	@printf '  %-24s %s\n' 'make profile-reset' 'Run setup and run SQL for PROFILE'
 	@printf '  %-24s %s\n' 'make monitor' 'Show basic PostgreSQL activity/statistics'
+	@printf '  %-24s %s\n' 'make metrics-plan' 'Preview metrics sampler CSV contract'
+	@printf '  %-24s %s\n' 'make metrics-plan-json' 'Preview metrics sampler CSV contract as JSON'
 	@printf '  %-24s %s\n' 'make metrics-sample' 'Sample generic PostgreSQL metrics to CSV'
 	@printf '  %-24s %s\n' 'make diagnostics-list' 'List read-only diagnostic SQL snippets'
 	@printf '  %-24s %s\n' 'make diagnostics-show' 'Show DIAGNOSTIC SQL'
@@ -286,7 +289,15 @@ monitor: docker-up
 
 .PHONY: metrics-sample
 metrics-sample: docker-up
-	METRICS_INTERVAL="$(METRICS_INTERVAL)" METRICS_DURATION="$(METRICS_DURATION)" METRICS_SAMPLES="$(METRICS_SAMPLES)" METRICS_OUT="$(METRICS_OUT)" ./scripts/sample_metrics.sh
+	METRICS_INTERVAL="$(METRICS_INTERVAL)" METRICS_DURATION="$(METRICS_DURATION)" METRICS_SAMPLES="$(METRICS_SAMPLES)" METRICS_OUT="$(METRICS_OUT)" METRICS_APPEND="$(METRICS_APPEND)" ./scripts/sample_metrics.sh
+
+.PHONY: metrics-plan
+metrics-plan:
+	METRICS_INTERVAL="$(METRICS_INTERVAL)" METRICS_DURATION="$(METRICS_DURATION)" METRICS_SAMPLES="$(METRICS_SAMPLES)" METRICS_OUT="$(METRICS_OUT)" METRICS_APPEND="$(METRICS_APPEND)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench metrics plan
+
+.PHONY: metrics-plan-json
+metrics-plan-json:
+	METRICS_INTERVAL="$(METRICS_INTERVAL)" METRICS_DURATION="$(METRICS_DURATION)" METRICS_SAMPLES="$(METRICS_SAMPLES)" METRICS_OUT="$(METRICS_OUT)" METRICS_APPEND="$(METRICS_APPEND)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench metrics plan --json
 
 .PHONY: diagnostics-list
 diagnostics-list:
@@ -674,6 +685,8 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology list --raw >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology show --raw single >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench topology inspect single >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench metrics plan >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench metrics plan --json >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix plan --raw smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench matrix plan --json smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench experiment list --raw >/dev/null

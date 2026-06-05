@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/r314tive/postgres-experiment-workbench/internal/datasetplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/diagnosticcatalog"
@@ -15,6 +16,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/matrixplan"
+	"github.com/r314tive/postgres-experiment-workbench/internal/metricsplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/patchsetcatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourcecheck"
 	"github.com/r314tive/postgres-experiment-workbench/internal/pgsourceplan"
@@ -73,6 +75,8 @@ func run(args []string) error {
 		return runExperiment(root, speccatalog.New(root), args[1:])
 	case "matrix":
 		return runMatrix(speccatalog.New(root), args[1:])
+	case "metrics":
+		return runMetrics(root, args[1:])
 	case "source":
 		return runSource(root, args[1:])
 	case "topology":
@@ -117,6 +121,7 @@ func usage() {
   pgworkbench matrix list [--raw]
   pgworkbench matrix show [--raw] <matrix-spec>
   pgworkbench matrix plan [--json|--raw] <matrix-spec>
+  pgworkbench metrics plan [--json] [output.csv]
   pgworkbench topology list [--raw]
   pgworkbench topology show [--raw] <topology>
   pgworkbench topology inspect <topology>
@@ -563,6 +568,44 @@ func runMatrix(catalog speccatalog.Catalog, args []string) error {
 		return matrixplan.Render(os.Stdout, plan)
 	default:
 		return runKindCatalog("matrix", catalog, args)
+	}
+}
+
+func runMetrics(root string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("metrics action is required")
+	}
+
+	switch args[0] {
+	case "plan":
+		jsonOutput := false
+		inputs := args[1:]
+		for len(inputs) > 0 && strings.HasPrefix(inputs[0], "-") {
+			switch inputs[0] {
+			case "--json":
+				jsonOutput = true
+			default:
+				return fmt.Errorf("unknown option: %s", inputs[0])
+			}
+			inputs = inputs[1:]
+		}
+		if len(inputs) > 1 {
+			return fmt.Errorf("usage: pgworkbench metrics plan [--json] [output.csv]")
+		}
+		output := ""
+		if len(inputs) == 1 {
+			output = inputs[0]
+		}
+		plan, err := metricsplan.Build(root, output, os.Getenv, time.Now())
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return metricsplan.RenderJSON(os.Stdout, plan)
+		}
+		return metricsplan.Render(os.Stdout, plan)
+	default:
+		return fmt.Errorf("unsupported metrics action: %s", args[0])
 	}
 }
 

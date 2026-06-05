@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.18 - 2026-06-05
+
+Added platform features:
+
+- Added `pgworkbench metrics plan` with Markdown/JSON output for the metrics
+  sampler CSV contract.
+
 ## v0.1.17 - 2026-06-05
 
 Changed platform behavior:

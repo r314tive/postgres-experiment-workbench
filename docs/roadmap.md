@@ -68,6 +68,7 @@ Already started:
   compatibility target.
 - `pgworkbench spec list|show|reference|schema|validate`.
 - `pgworkbench topology inspect|ps`.
+- `pgworkbench metrics plan`, including JSON output.
 - `pgworkbench patchset list|show|validate`.
 - `pgworkbench source plan|classify`.
 - `pgworkbench profile plan`, including JSON output.

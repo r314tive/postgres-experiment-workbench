@@ -249,6 +249,7 @@ make workload-start-noisia WORKLOAD=wait-xacts NOISIA_DURATION=120 NOISIA_JOBS=4
 Sample broad PostgreSQL metrics to CSV:
 
 ```bash
+make metrics-plan
 METRICS_DURATION=30 METRICS_INTERVAL=1 make metrics-sample
 ```
 
