@@ -23,6 +23,8 @@ Docker PostgreSQL
 make docker-reset
 make profile-reset PROFILE=smoke PROFILE_SIZE=small
 make monitor
+make diagnostics-list
+make diagnostics-run DIAGNOSTIC=activity
 ```
 
 For the experiment-layer smoke flow:
@@ -118,6 +120,7 @@ make workload-run WORKLOAD_SPEC=topology/native-pg-upgrade
 Workload platform details live in [docs/workload-platform.md](docs/workload-platform.md).
 Utility workflow examples live in
 [docs/utility-workflows.md](docs/utility-workflows.md).
+Read-only diagnostic SQL snippets live in [docs/diagnostics.md](docs/diagnostics.md).
 
 ## Topologies
 

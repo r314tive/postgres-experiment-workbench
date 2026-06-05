@@ -134,6 +134,8 @@ make experiment-report-go RUN_DIR=runs/<run-id>
 make experiment-verify RUN_DIR=runs/<run-id>
 make scan-artifacts
 make scan-artifacts-go
+make diagnostics-run DIAGNOSTIC=activity
+make diagnostics-run DIAGNOSTIC=locks
 ```
 
 For repeated or matrix runs:

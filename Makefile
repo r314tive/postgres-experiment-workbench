@@ -22,6 +22,7 @@ DATASET_SPEC ?= synthetic/items
 DATASET_SIZE ?= small
 DATASET_SEED ?= 1
 DATASET_SCHEMA ?= dataset_synthetic
+DIAGNOSTIC ?= activity
 BASELINE_RUN ?=
 CANDIDATE_RUN ?=
 RUN_DIR ?=
@@ -87,6 +88,9 @@ help:
 	@printf '  %-24s %s\n' 'make profile-reset' 'Run setup and run SQL for PROFILE'
 	@printf '  %-24s %s\n' 'make monitor' 'Show basic PostgreSQL activity/statistics'
 	@printf '  %-24s %s\n' 'make metrics-sample' 'Sample generic PostgreSQL metrics to CSV'
+	@printf '  %-24s %s\n' 'make diagnostics-list' 'List read-only diagnostic SQL snippets'
+	@printf '  %-24s %s\n' 'make diagnostics-show' 'Show DIAGNOSTIC SQL'
+	@printf '  %-24s %s\n' 'make diagnostics-run' 'Run DIAGNOSTIC SQL against local PostgreSQL'
 	@printf '  %-24s %s\n' 'make scan-artifacts' 'Scan logs/artifacts for PG failure evidence'
 	@printf '  %-24s %s\n' 'make scan-artifacts-go' 'Scan logs/artifacts with Go CLI'
 	@printf '  %-24s %s\n' 'make privacy-scan' 'Scan public files for sensitive-looking text'
@@ -278,6 +282,18 @@ monitor: docker-up
 .PHONY: metrics-sample
 metrics-sample: docker-up
 	METRICS_INTERVAL="$(METRICS_INTERVAL)" METRICS_DURATION="$(METRICS_DURATION)" METRICS_SAMPLES="$(METRICS_SAMPLES)" METRICS_OUT="$(METRICS_OUT)" ./scripts/sample_metrics.sh
+
+.PHONY: diagnostics-list
+diagnostics-list:
+	./scripts/run_diagnostic.sh list
+
+.PHONY: diagnostics-show
+diagnostics-show:
+	./scripts/run_diagnostic.sh show "$(DIAGNOSTIC)"
+
+.PHONY: diagnostics-run
+diagnostics-run: docker-up
+	./scripts/run_diagnostic.sh run "$(DIAGNOSTIC)"
 
 .PHONY: workload-list
 workload-list:
@@ -635,6 +651,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench scan failures $(SCAN_PATHS) >/dev/null
 	./tests/profile_catalog.sh
 	./tests/patchsets.sh
+	./tests/diagnostics.sh
 	./tests/shell_portability.sh
 	./tests/scan_failures.sh
 	./tests/run_verify.sh

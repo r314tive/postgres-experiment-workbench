@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-No changes yet.
+Added platform capabilities:
+
+- Read-only PostgreSQL diagnostics SQL catalog and runner for activity, locks,
+  settings, table/index health, WAL, and replication state.
 
 ## v0.1.7 - 2026-06-04
 

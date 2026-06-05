@@ -12,6 +12,8 @@ utilities, inspect evidence, and trust the result shape.
 - Keep default commands local/disposable and guarded against accidental
   non-local PostgreSQL targets.
 - Keep `make check`, `make test`, and `make scan-artifacts` green.
+- Keep read-only diagnostic SQL snippets generic and safe for local disposable
+  targets.
 - Keep ignored local-only files out of public artifacts.
 - Keep profile metadata valid with `make profile-validate`.
 - Keep every real profile runnable at `PROFILE_SIZE=small`.
