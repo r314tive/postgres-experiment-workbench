@@ -105,7 +105,7 @@ PostgreSQL source checks, host shell commands, or arbitrary Docker images:
 ```bash
 make workload-list
 make workload-show WORKLOAD_SPEC=pgbench/tiny
-make workload-plan-go WORKLOAD_SPEC=pgbench/tiny
+make workload-plan WORKLOAD_SPEC=pgbench/tiny
 make workload-plan-json WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=compose/pg-isready
@@ -206,7 +206,7 @@ Reusable data-loading specs live under `datasets/`:
 ```bash
 make dataset-list
 make dataset-show DATASET_SPEC=synthetic/items
-make dataset-plan-go DATASET_SPEC=synthetic/items
+make dataset-plan DATASET_SPEC=synthetic/items
 make dataset-plan-json DATASET_SPEC=synthetic/items
 make dataset-load DATASET_SPEC=synthetic/items DATASET_SIZE=small
 ```

@@ -194,13 +194,33 @@ func Render(w io.Writer, plan Plan) error {
 	if _, err := fmt.Fprintln(w); err != nil {
 		return err
 	}
+	return renderSteps(w, plan.Steps)
+}
+
+func RenderRaw(w io.Writer, plan Plan) error {
+	if _, err := fmt.Fprintln(w, "# Workload Plan"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	return renderSteps(w, plan.Steps)
+}
+
+func RenderJSON(w io.Writer, plan Plan) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(plan)
+}
+
+func renderSteps(w io.Writer, steps []Step) error {
 	if _, err := fmt.Fprintln(w, "| Step | Name | Command | Notes |"); err != nil {
 		return err
 	}
 	if _, err := fmt.Fprintln(w, "| ---: | --- | --- | --- |"); err != nil {
 		return err
 	}
-	for index, step := range plan.Steps {
+	for index, step := range steps {
 		if _, err := fmt.Fprintf(
 			w,
 			"| %d | %s | `%s` | %s |\n",
@@ -213,12 +233,6 @@ func Render(w io.Writer, plan Plan) error {
 		}
 	}
 	return nil
-}
-
-func RenderJSON(w io.Writer, plan Plan) error {
-	encoder := json.NewEncoder(w)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(plan)
 }
 
 func requiresPostgres(kind string, value string) bool {

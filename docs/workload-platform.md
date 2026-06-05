@@ -37,7 +37,7 @@ queries, and idle transactions. See the upstream project:
 Preview a workload without running its adapter:
 
 ```bash
-make workload-plan-go WORKLOAD_SPEC=pgbench/tiny
+make workload-plan WORKLOAD_SPEC=pgbench/tiny
 make workload-plan-json WORKLOAD_SPEC=pgbench/tiny
 ```
 

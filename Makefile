@@ -105,9 +105,10 @@ help:
 	@printf '  %-24s %s\n' 'make privacy-scan' 'Scan public files for sensitive-looking text'
 	@printf '  %-24s %s\n' 'make dataset-list' 'List dataset specs'
 	@printf '  %-24s %s\n' 'make dataset-show' 'Show DATASET_SPEC'
+	@printf '  %-24s %s\n' 'make dataset-plan' 'Preview DATASET_SPEC load plan'
 	@printf '  %-24s %s\n' 'make dataset-list-go' 'List dataset specs with Go CLI'
 	@printf '  %-24s %s\n' 'make dataset-show-go' 'Show DATASET_SPEC with Go CLI'
-	@printf '  %-24s %s\n' 'make dataset-plan-go' 'Preview DATASET_SPEC load plan'
+	@printf '  %-24s %s\n' 'make dataset-plan-go' 'Preview DATASET_SPEC load plan with Go CLI'
 	@printf '  %-24s %s\n' 'make dataset-plan-json' 'Preview DATASET_SPEC load plan as JSON'
 	@printf '  %-24s %s\n' 'make dataset-load' 'Load DATASET_SPEC'
 	@printf '  %-24s %s\n' 'make experiment-list' 'List experiment specs'
@@ -146,9 +147,10 @@ help:
 	@printf '  %-24s %s\n' 'make spec-validate' 'Validate env specs with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-list' 'List workload specs'
 	@printf '  %-24s %s\n' 'make workload-show' 'Show WORKLOAD_SPEC'
+	@printf '  %-24s %s\n' 'make workload-plan' 'Preview WORKLOAD_SPEC execution plan'
 	@printf '  %-24s %s\n' 'make workload-list-go' 'List workload specs with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-show-go' 'Show WORKLOAD_SPEC with Go CLI'
-	@printf '  %-24s %s\n' 'make workload-plan-go' 'Preview WORKLOAD_SPEC execution plan'
+	@printf '  %-24s %s\n' 'make workload-plan-go' 'Preview WORKLOAD_SPEC execution plan with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-plan-json' 'Preview WORKLOAD_SPEC execution plan as JSON'
 	@printf '  %-24s %s\n' 'make workload-run' 'Run WORKLOAD_SPEC'
 	@printf '  %-24s %s\n' 'make workload-start' 'Run profile SQL in the background'
@@ -333,6 +335,10 @@ workload-list-go:
 workload-show-go:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload show "$(WORKLOAD_SPEC)"
 
+.PHONY: workload-plan
+workload-plan:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan --raw "$(WORKLOAD_SPEC)"
+
 .PHONY: workload-plan-go
 workload-plan-go:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan "$(WORKLOAD_SPEC)"
@@ -352,6 +358,10 @@ dataset-list-go:
 .PHONY: dataset-show-go
 dataset-show-go:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset show "$(DATASET_SPEC)"
+
+.PHONY: dataset-plan
+dataset-plan:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset plan --raw "$(DATASET_SPEC)"
 
 .PHONY: dataset-plan-go
 dataset-plan-go:
@@ -734,11 +744,13 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload show --raw pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan pgbench/tiny >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan --raw pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan --json pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset list --raw >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset show --raw synthetic/items >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset plan synthetic/items >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset plan --raw synthetic/items >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset plan --json synthetic/items >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench spec reference all >/dev/null

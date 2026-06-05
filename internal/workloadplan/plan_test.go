@@ -93,6 +93,18 @@ func TestRenderShellPlan(t *testing.T) {
 		}
 	}
 	out.Reset()
+	if err := RenderRaw(&out, plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# Workload Plan", "| 1 | Run shell command |", "bash -lc"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("raw plan missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "Workbench logging") {
+		t.Fatalf("raw plan should omit summary metadata:\n%s", out.String())
+	}
+	out.Reset()
 	if err := RenderJSON(&out, plan); err != nil {
 		t.Fatal(err)
 	}

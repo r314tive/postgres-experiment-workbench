@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.23 - 2026-06-05
+
+Changed platform interface:
+
+- Added default `make workload-plan` and `make dataset-plan` targets while
+  keeping the explicit `*-go` compatibility targets.
+
 ## v0.1.22 - 2026-06-05
 
 Changed documentation:

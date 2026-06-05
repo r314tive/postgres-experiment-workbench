@@ -103,7 +103,7 @@ func usage() {
   pgworkbench dataset list [--raw]
   pgworkbench dataset show [--raw] <dataset>
   pgworkbench dataset validate [dataset...]
-  pgworkbench dataset plan [--json] <dataset>
+  pgworkbench dataset plan [--json|--raw] <dataset>
   pgworkbench diagnostics list
   pgworkbench diagnostics show <diagnostic>
   pgworkbench patchset list
@@ -116,7 +116,7 @@ func usage() {
   pgworkbench workload list [--raw]
   pgworkbench workload show [--raw] <workload>
   pgworkbench workload validate [workload...]
-  pgworkbench workload plan [--json] <workload>
+  pgworkbench workload plan [--json|--raw] <workload>
   pgworkbench experiment list [--raw]
   pgworkbench experiment show [--raw] <experiment-spec>
   pgworkbench experiment plan [--json] [--expanded] <experiment-spec>
@@ -317,18 +317,24 @@ func runWorkload(root string, catalog speccatalog.Catalog, args []string) error 
 	switch args[0] {
 	case "plan":
 		jsonOutput := false
+		rawOutput := false
 		inputs := args[1:]
 		for len(inputs) > 0 && strings.HasPrefix(inputs[0], "-") {
 			switch inputs[0] {
 			case "--json":
 				jsonOutput = true
+			case "--raw":
+				rawOutput = true
 			default:
 				return fmt.Errorf("unknown option: %s", inputs[0])
 			}
 			inputs = inputs[1:]
 		}
 		if len(inputs) != 1 {
-			return fmt.Errorf("usage: pgworkbench workload plan [--json] <workload>")
+			return fmt.Errorf("usage: pgworkbench workload plan [--json|--raw] <workload>")
+		}
+		if jsonOutput && rawOutput {
+			return fmt.Errorf("--json and --raw cannot be used together")
 		}
 		plan, err := workloadplan.Build(root, catalog, inputs[0])
 		if err != nil {
@@ -336,6 +342,9 @@ func runWorkload(root string, catalog speccatalog.Catalog, args []string) error 
 		}
 		if jsonOutput {
 			return workloadplan.RenderJSON(os.Stdout, plan)
+		}
+		if rawOutput {
+			return workloadplan.RenderRaw(os.Stdout, plan)
 		}
 		return workloadplan.Render(os.Stdout, plan)
 	default:
@@ -351,18 +360,24 @@ func runDataset(root string, catalog speccatalog.Catalog, args []string) error {
 	switch args[0] {
 	case "plan":
 		jsonOutput := false
+		rawOutput := false
 		inputs := args[1:]
 		for len(inputs) > 0 && strings.HasPrefix(inputs[0], "-") {
 			switch inputs[0] {
 			case "--json":
 				jsonOutput = true
+			case "--raw":
+				rawOutput = true
 			default:
 				return fmt.Errorf("unknown option: %s", inputs[0])
 			}
 			inputs = inputs[1:]
 		}
 		if len(inputs) != 1 {
-			return fmt.Errorf("usage: pgworkbench dataset plan [--json] <dataset>")
+			return fmt.Errorf("usage: pgworkbench dataset plan [--json|--raw] <dataset>")
+		}
+		if jsonOutput && rawOutput {
+			return fmt.Errorf("--json and --raw cannot be used together")
 		}
 		plan, err := datasetplan.Build(root, catalog, inputs[0])
 		if err != nil {
@@ -370,6 +385,9 @@ func runDataset(root string, catalog speccatalog.Catalog, args []string) error {
 		}
 		if jsonOutput {
 			return datasetplan.RenderJSON(os.Stdout, plan)
+		}
+		if rawOutput {
+			return datasetplan.RenderRaw(os.Stdout, plan)
 		}
 		return datasetplan.Render(os.Stdout, plan)
 	default:
