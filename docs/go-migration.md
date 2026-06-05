@@ -56,8 +56,8 @@ make release-snapshot
 ```
 
 The shell scripts remain the compatibility layer for now. `make check` runs the
-Go profile validator, profile SQL planner, and Go failure scanner alongside the
-existing shell tests.
+Go profile catalog commands, profile SQL planner, and Go failure scanner
+alongside the existing shell tests.
 Run reporting, comparison, summary, and history now have Go equivalents through
 `pgworkbench report`. Env spec listing, display, and validation are covered by
 `pgworkbench spec`. When a Go command matches shell behavior and is covered by
@@ -68,6 +68,8 @@ available; `auto` remains a compatibility alias for Go.
 Run directory integrity checks are covered by `pgworkbench run verify`.
 Env spec contracts can be rendered with `pgworkbench spec reference` and
 `pgworkbench spec schema`.
+Profile catalog Make targets now default to the Go CLI while the shell script
+remains available as a compatibility path.
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.
 Use `pgworkbench experiment plan --expanded` to embed topology, dataset,

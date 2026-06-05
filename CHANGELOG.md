@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.12 - 2026-06-05
+
+Changed platform behavior:
+
+- Moved profile catalog Make targets to the Go CLI while keeping the shell
+  compatibility script.
+
 ## v0.1.11 - 2026-06-05
 
 Added platform capabilities:

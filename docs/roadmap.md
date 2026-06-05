@@ -53,6 +53,8 @@ Already started:
   compatibility mode.
 - `pgworkbench workload list|show|validate`.
 - `pgworkbench dataset list|show|validate`.
+- Make profile catalog targets default to Go with shell compatibility still
+  available.
 - `pgworkbench matrix plan`.
 - `pgworkbench spec list|show|reference|schema|validate`.
 - `pgworkbench topology inspect|ps`.
