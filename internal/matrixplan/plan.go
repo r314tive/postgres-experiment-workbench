@@ -105,6 +105,34 @@ func Render(w io.Writer, plan Plan) error {
 	return nil
 }
 
+func RenderRaw(w io.Writer, plan Plan) error {
+	if _, err := fmt.Fprintln(w, "# Experiment Matrix Plan"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "| Experiment | PG config | Profile size | Repeat |"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, "| --- | --- | --- | ---: |"); err != nil {
+		return err
+	}
+	for _, run := range plan.Runs {
+		if _, err := fmt.Fprintf(
+			w,
+			"| `%s` | `%s` | `%s` | `%d` |\n",
+			tableCell(run.Experiment),
+			tableCell(run.PGConfig),
+			tableCell(run.ProfileSize),
+			run.Repeat,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func RenderJSON(w io.Writer, plan Plan) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")

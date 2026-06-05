@@ -71,6 +71,28 @@ func TestRenderMatrixPlan(t *testing.T) {
 	}
 }
 
+func TestRenderMatrixPlanRaw(t *testing.T) {
+	plan := Plan{
+		Spec:      "smoke",
+		Name:      "smoke matrix",
+		TotalRuns: 1,
+		Runs: []PlanEntry{{
+			Experiment:  "smoke",
+			PGConfig:    "default",
+			ProfileSize: "small",
+			Repeat:      1,
+		}},
+	}
+	var out bytes.Buffer
+	if err := RenderRaw(&out, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := "# Experiment Matrix Plan\n\n| Experiment | PG config | Profile size | Repeat |\n| --- | --- | --- | ---: |\n| `smoke` | `default` | `small` | `1` |\n"
+	if out.String() != want {
+		t.Fatalf("unexpected raw plan:\n%s", out.String())
+	}
+}
+
 func TestRenderMatrixPlanJSON(t *testing.T) {
 	plan := Plan{
 		Spec:      "smoke",

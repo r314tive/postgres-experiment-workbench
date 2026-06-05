@@ -37,6 +37,7 @@ go run ./cmd/pgworkbench experiment plan smoke
 go run ./cmd/pgworkbench experiment plan --json smoke
 go run ./cmd/pgworkbench experiment plan --expanded smoke
 go run ./cmd/pgworkbench experiment plan --json --expanded smoke
+go run ./cmd/pgworkbench matrix plan --raw smoke
 go run ./cmd/pgworkbench matrix plan --json smoke
 go run ./cmd/pgworkbench topology inspect primary-replica
 go run ./cmd/pgworkbench topology ps primary-replica
@@ -84,7 +85,8 @@ Use `pgworkbench experiment plan --expanded` to embed topology, dataset,
 foreground workload, and background workload previews in the same dry run.
 Use `--json` with either mode for machine-readable dry-run output.
 Matrix specs can be preflighted as Markdown or JSON with
-`pgworkbench matrix plan`.
+`pgworkbench matrix plan`; use `--raw` to preserve the shell matrix plan output
+shape.
 Workload and dataset specs can be listed, shown, and validated with
 `pgworkbench workload` and `pgworkbench dataset`.
 Workload specs can be preflighted as execution plans with

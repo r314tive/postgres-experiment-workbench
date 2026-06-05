@@ -116,7 +116,7 @@ func usage() {
   pgworkbench experiment plan [--json] [--expanded] <experiment-spec>
   pgworkbench matrix list [--raw]
   pgworkbench matrix show [--raw] <matrix-spec>
-  pgworkbench matrix plan [--json] <matrix-spec>
+  pgworkbench matrix plan [--json|--raw] <matrix-spec>
   pgworkbench topology list [--raw]
   pgworkbench topology show [--raw] <topology>
   pgworkbench topology inspect <topology>
@@ -531,13 +531,24 @@ func runMatrix(catalog speccatalog.Catalog, args []string) error {
 	switch args[0] {
 	case "plan":
 		jsonOutput := false
+		rawOutput := false
 		inputs := args[1:]
-		if len(inputs) > 0 && inputs[0] == "--json" {
-			jsonOutput = true
+		for len(inputs) > 0 && strings.HasPrefix(inputs[0], "-") {
+			switch inputs[0] {
+			case "--json":
+				jsonOutput = true
+			case "--raw":
+				rawOutput = true
+			default:
+				return fmt.Errorf("unknown option: %s", inputs[0])
+			}
 			inputs = inputs[1:]
 		}
 		if len(inputs) != 1 {
-			return fmt.Errorf("usage: pgworkbench matrix plan [--json] <matrix-spec>")
+			return fmt.Errorf("usage: pgworkbench matrix plan [--json|--raw] <matrix-spec>")
+		}
+		if jsonOutput && rawOutput {
+			return fmt.Errorf("--json and --raw cannot be used together")
 		}
 		plan, err := matrixplan.Build(catalog, inputs[0])
 		if err != nil {
@@ -545,6 +556,9 @@ func runMatrix(catalog speccatalog.Catalog, args []string) error {
 		}
 		if jsonOutput {
 			return matrixplan.RenderJSON(os.Stdout, plan)
+		}
+		if rawOutput {
+			return matrixplan.RenderRaw(os.Stdout, plan)
 		}
 		return matrixplan.Render(os.Stdout, plan)
 	default:

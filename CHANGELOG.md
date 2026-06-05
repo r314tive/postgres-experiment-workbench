@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.15 - 2026-06-05
+
+Changed platform behavior:
+
+- Moved `make matrix-plan` to Go raw output while preserving shell-compatible
+  Markdown.
+
 ## v0.1.14 - 2026-06-05
 
 Changed platform behavior:
