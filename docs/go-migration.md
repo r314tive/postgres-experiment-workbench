@@ -46,6 +46,8 @@ go run ./cmd/pgworkbench metrics plan
 go run ./cmd/pgworkbench metrics plan --json
 go run ./cmd/pgworkbench source plan pg-source/check
 go run ./cmd/pgworkbench source classify generated/pg-source/<run-id>
+go run ./cmd/pgworkbench workload run pgbench/tiny
+go run ./cmd/pgworkbench workload run --json pgbench/tiny
 go run ./cmd/pgworkbench scan failures logs generated
 go run ./cmd/pgworkbench report run runs/<run-id>
 go run ./cmd/pgworkbench report compare runs/a runs/b

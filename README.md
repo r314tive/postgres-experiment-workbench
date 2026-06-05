@@ -108,6 +108,7 @@ make workload-show WORKLOAD_SPEC=pgbench/tiny
 make workload-plan WORKLOAD_SPEC=pgbench/tiny
 make workload-plan-json WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=pgbench/tiny
+make workload-run-json WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=compose/pg-isready
 make source-plan SOURCE_WORKLOAD_SPEC=pg-source/check
 PG_SOURCE_ACTION=plan make workload-run WORKLOAD_SPEC=pg-source/check

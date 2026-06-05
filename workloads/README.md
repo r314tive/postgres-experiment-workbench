@@ -14,17 +14,22 @@ make workload-list-go
 make workload-show WORKLOAD_SPEC=pgbench/tiny
 make workload-show-go WORKLOAD_SPEC=pgbench/tiny
 make workload-run WORKLOAD_SPEC=pgbench/tiny
+make workload-run-json WORKLOAD_SPEC=pgbench/tiny
+make workload-run-shell WORKLOAD_SPEC=pgbench/tiny
 ```
 
 The Go catalog commands can validate the workload spec set without running any
-workload:
+workload, and the Go run wrapper returns a structured result around the trusted
+shell adapter runtime:
 
 ```bash
 go run ./cmd/pgworkbench workload validate
+go run ./cmd/pgworkbench workload run --json pgbench/tiny
 ```
 
 Specs live under `workloads/**/*.env`. They are trusted local shell env files
-loaded by `scripts/run_workload.sh`.
+loaded by `scripts/run_workload.sh`; `pgworkbench workload run` intentionally
+wraps that same adapter path.
 
 ## Adapter Kinds
 

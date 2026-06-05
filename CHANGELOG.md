@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.28 - 2026-06-05
+
+Added platform features:
+
+- Added `pgworkbench workload run` with structured workload execution results,
+  plus `make workload-run-json` and a `workload-run-shell` compatibility target.
+
 ## v0.1.27 - 2026-06-05
 
 Improved release checks:

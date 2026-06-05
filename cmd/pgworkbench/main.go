@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -32,6 +33,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/topologyinspect"
 	"github.com/r314tive/postgres-experiment-workbench/internal/workloadbg"
 	"github.com/r314tive/postgres-experiment-workbench/internal/workloadplan"
+	"github.com/r314tive/postgres-experiment-workbench/internal/workloadrun"
 )
 
 var version = "dev"
@@ -119,6 +121,7 @@ func usage() {
   pgworkbench workload show [--raw] <workload>
   pgworkbench workload validate [workload...]
   pgworkbench workload plan [--json|--raw] <workload>
+  pgworkbench workload run [--json] <workload> [adapter-arg...]
   pgworkbench workload bg status [--json]
   pgworkbench experiment list [--raw]
   pgworkbench experiment show [--raw] <experiment-spec>
@@ -352,9 +355,57 @@ func runWorkload(root string, catalog speccatalog.Catalog, args []string) error 
 			return workloadplan.RenderRaw(os.Stdout, plan)
 		}
 		return workloadplan.Render(os.Stdout, plan)
+	case "run":
+		jsonOutput, spec, adapterArgs, err := parseWorkloadRunArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		commandStdout := io.Writer(os.Stdout)
+		if jsonOutput {
+			commandStdout = os.Stderr
+		}
+		result, runErr := workloadrun.Run(root, catalog, spec, workloadrun.Options{
+			AdapterArgs: adapterArgs,
+			Stdout:      commandStdout,
+			Stderr:      os.Stderr,
+		})
+		if result.WorkloadSpec != "" {
+			if jsonOutput {
+				if err := workloadrun.RenderJSON(os.Stdout, result); err != nil {
+					return err
+				}
+			} else if err := workloadrun.Render(os.Stdout, result); err != nil {
+				return err
+			}
+		}
+		if runErr != nil {
+			return fmt.Errorf("workload run failed: %w", runErr)
+		}
+		return nil
 	default:
 		return runKindCatalog("workload", catalog, args)
 	}
+}
+
+func parseWorkloadRunArgs(args []string) (bool, string, []string, error) {
+	jsonOutput := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			jsonOutput = true
+		case "--":
+			if i+1 >= len(args) {
+				return false, "", nil, fmt.Errorf("usage: pgworkbench workload run [--json] <workload> [adapter-arg...]")
+			}
+			return jsonOutput, args[i+1], append([]string(nil), args[i+2:]...), nil
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return false, "", nil, fmt.Errorf("unknown option: %s", args[i])
+			}
+			return jsonOutput, args[i], append([]string(nil), args[i+1:]...), nil
+		}
+	}
+	return false, "", nil, fmt.Errorf("usage: pgworkbench workload run [--json] <workload> [adapter-arg...]")
 }
 
 func runWorkloadBG(root string, args []string) error {

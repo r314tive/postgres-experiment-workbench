@@ -23,6 +23,7 @@ Run direct utility workloads against the current local database:
 ```bash
 make profile-reset PROFILE=smoke PROFILE_SIZE=small
 make workload-run WORKLOAD_SPEC=utility/pg-dump-smoke
+make workload-run-json WORKLOAD_SPEC=utility/pg-dump-smoke
 make workload-run WORKLOAD_SPEC=utility/pg-restore-smoke
 make workload-run WORKLOAD_SPEC=utility/pg-dumpall
 ```

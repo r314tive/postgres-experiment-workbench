@@ -154,7 +154,9 @@ help:
 	@printf '  %-24s %s\n' 'make workload-show-go' 'Show WORKLOAD_SPEC with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-plan-go' 'Preview WORKLOAD_SPEC execution plan with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-plan-json' 'Preview WORKLOAD_SPEC execution plan as JSON'
-	@printf '  %-24s %s\n' 'make workload-run' 'Run WORKLOAD_SPEC'
+	@printf '  %-24s %s\n' 'make workload-run' 'Run WORKLOAD_SPEC with Go result contract'
+	@printf '  %-24s %s\n' 'make workload-run-json' 'Run WORKLOAD_SPEC and print JSON result'
+	@printf '  %-24s %s\n' 'make workload-run-shell' 'Run WORKLOAD_SPEC with shell runner'
 	@printf '  %-24s %s\n' 'make workload-start' 'Run profile SQL in the background'
 	@printf '  %-24s %s\n' 'make workload-start-spec' 'Run WORKLOAD_SPEC in the background'
 	@printf '  %-24s %s\n' 'make workload-start-sql' 'Run SQL=path in the background'
@@ -606,6 +608,14 @@ workload-show:
 
 .PHONY: workload-run
 workload-run:
+	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload run "$(WORKLOAD_SPEC)"
+
+.PHONY: workload-run-json
+workload-run-json:
+	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload run --json "$(WORKLOAD_SPEC)"
+
+.PHONY: workload-run-shell
+workload-run-shell:
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" ./scripts/run_workload.sh run "$(WORKLOAD_SPEC)"
 
 .PHONY: scan-artifacts
@@ -768,6 +778,7 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan --raw pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan --json pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload bg status --json >/dev/null
+	PG_UPGRADE_ACTION=plan WORKLOAD_RUN_LOG=0 GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload run topology/native-pg-upgrade >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset list --raw >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset show --raw synthetic/items >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset validate >/dev/null

@@ -48,6 +48,7 @@ For a utility installed on the host:
 ```bash
 make profile-reset PROFILE=smoke
 make workload-run WORKLOAD_SPEC=shell/pg-dump-smoke
+make workload-run-json WORKLOAD_SPEC=shell/pg-dump-smoke
 ```
 
 For a utility distributed as a container image:
@@ -72,6 +73,12 @@ For load generation with built-in PostgreSQL tooling:
 ```bash
 PGBENCH_TIME=30 PGBENCH_CLIENTS=8 make workload-run WORKLOAD_SPEC=pgbench/tiny
 ```
+
+`make workload-run` uses the Go wrapper and prints a structured run summary
+after the existing adapter output. Use `make workload-run-json` when an
+external harness needs `workload_spec`, `workload_kind`, timing, exit code,
+status, and log path as JSON. `make workload-run-shell` keeps the direct shell
+runtime available for compatibility checks.
 
 For failure-injection pressure:
 
