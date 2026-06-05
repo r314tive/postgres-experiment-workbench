@@ -343,10 +343,8 @@ small generic scenario is useful here.
 
 ## License
 
-This repository is source-available, not open source. All rights are reserved;
-public visibility does not grant permission to use, modify, distribute, host, or
-commercialize the code without written authorization from the copyright holder.
-See [LICENSE](LICENSE).
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) and
+[NOTICE](NOTICE).
 
 ## Status
 

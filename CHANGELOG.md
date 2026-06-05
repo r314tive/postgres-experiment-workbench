@@ -4,6 +4,12 @@
 
 No changes yet.
 
+## v0.1.10 - 2026-06-05
+
+Changed licensing:
+
+- Replaced the proprietary source-available license with Apache License 2.0.
+
 ## v0.1.9 - 2026-06-05
 
 Changed licensing:
