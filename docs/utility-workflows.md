@@ -130,7 +130,6 @@ Every experiment run should be reviewable without re-running it:
 
 ```bash
 make experiment-report RUN_DIR=runs/<run-id>
-make experiment-report-go RUN_DIR=runs/<run-id>
 make experiment-verify RUN_DIR=runs/<run-id>
 make scan-artifacts
 make scan-artifacts-go

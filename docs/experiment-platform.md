@@ -151,7 +151,6 @@ produce evidence for every attempted iteration. Set
 ```bash
 make matrix-list
 make matrix-plan MATRIX_SPEC=smoke
-make matrix-plan-go MATRIX_SPEC=smoke
 make matrix-plan-json MATRIX_SPEC=smoke
 make matrix-run MATRIX_SPEC=smoke
 ```

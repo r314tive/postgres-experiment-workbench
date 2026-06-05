@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.22 - 2026-06-05
+
+Changed documentation:
+
+- Refreshed public examples to prefer current default Make targets where Go is
+  already the default implementation.
+
 ## v0.1.21 - 2026-06-05
 
 Added platform features:

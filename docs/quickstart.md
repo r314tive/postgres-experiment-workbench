@@ -68,7 +68,7 @@ The quickstart target runs these checks after the experiment finishes:
 
 ```bash
 make experiment-verify RUN_DIR=runs/<run-id>
-make experiment-report-go RUN_DIR=runs/<run-id>
+make experiment-report RUN_DIR=runs/<run-id>
 ```
 
 Review the generated files:
