@@ -143,6 +143,7 @@ make utility-suite-plan-json UTILITY_SUITE=native-dump
 make utility-suite-run UTILITY_SUITE=native-dump
 make utility-suite-run-list
 make utility-suite-run-show UTILITY_SUITE_RUN=<suite-run-id>
+make utility-suite-run-bundle UTILITY_SUITE_RUN=<suite-run-id> UTILITY_SUITE_BUNDLE_OUT=generated/suite.tar.gz
 make utility-suite-run-verify UTILITY_SUITE_RUN=<suite-run-id>
 ```
 
@@ -158,7 +159,8 @@ Utility suites live under `utility-suites/**/*.env` and batch utility tests
 across profile sizes and repeats. Suite artifacts are written under
 `runs/utility-suites/<suite-run-id>/` with `runs.tsv`, `result.json`,
 `summary.md`, driver logs, and links back to individual experiment run
-artifacts.
+artifacts. Suite bundles archive both the suite artifact and linked experiment
+runs for portable review.
 
 ## Topologies
 

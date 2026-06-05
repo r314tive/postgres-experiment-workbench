@@ -67,6 +67,8 @@ make utility-suite-run UTILITY_SUITE=native-dump
 make utility-suite-run-json UTILITY_SUITE=native-dump
 make utility-suite-run-list
 make utility-suite-run-show UTILITY_SUITE_RUN=<suite-run-id>
+make utility-suite-run-bundle UTILITY_SUITE_RUN=<suite-run-id> UTILITY_SUITE_BUNDLE_OUT=generated/suite.tar.gz
+make utility-suite-run-bundle-json UTILITY_SUITE_RUN=<suite-run-id> UTILITY_SUITE_BUNDLE_OUT=generated/suite.tar.gz
 make utility-suite-run-verify UTILITY_SUITE_RUN=<suite-run-id>
 make utility-suite-run-verify-json UTILITY_SUITE_RUN=<suite-run-id>
 ```
@@ -77,7 +79,9 @@ Suites expand utility tests across profile sizes and repeat counts, write
 artifacts under normal `runs/<run-id>/` directories. `run-verify` checks the
 suite artifact structure and verifies linked experiment run artifacts when they
 exist; a failed utility test can still be a valid artifact if its evidence is
-complete.
+complete. `run-bundle` writes a tar.gz containing the suite artifact under
+`utility-suites/<suite-run-id>/` and linked experiment artifacts under
+`runs/<run-id>/`.
 
 ## Dump And Restore
 
@@ -215,6 +219,7 @@ make experiment-report RUN_DIR=runs/<run-id>
 make experiment-verify RUN_DIR=runs/<run-id>
 make utility-suite-run-list
 make utility-suite-run-show UTILITY_SUITE_RUN=<suite-run-id>
+make utility-suite-run-bundle UTILITY_SUITE_RUN=<suite-run-id> UTILITY_SUITE_BUNDLE_OUT=generated/suite.tar.gz
 make utility-suite-run-verify UTILITY_SUITE_RUN=<suite-run-id>
 make scan-artifacts
 make scan-artifacts-go

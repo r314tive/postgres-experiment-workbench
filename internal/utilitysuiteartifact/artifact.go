@@ -1,6 +1,8 @@
 package utilitysuiteartifact
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -51,6 +53,16 @@ type VerifyResult struct {
 	Summary Summary  `json:"summary"`
 	Valid   bool     `json:"valid"`
 	Issues  []string `json:"issues"`
+}
+
+type BundleResult struct {
+	SuiteRunDir       string   `json:"suite_run_dir"`
+	SuiteRunID        string   `json:"suite_run_id"`
+	Output            string   `json:"output"`
+	Files             int      `json:"files"`
+	Bytes             int64    `json:"bytes"`
+	LinkedRuns        []string `json:"linked_runs"`
+	MissingLinkedRuns []string `json:"missing_linked_runs"`
 }
 
 func (r VerifyResult) IsValid() bool {
@@ -150,6 +162,90 @@ func Verify(root string, input string) (VerifyResult, error) {
 	result.Valid = result.IsValid()
 	if result.Issues == nil {
 		result.Issues = []string{}
+	}
+	return result, nil
+}
+
+func CreateBundle(root string, input string, output string) (BundleResult, error) {
+	suiteDir, err := resolveSuiteRunDir(root, input)
+	if err != nil {
+		return BundleResult{}, err
+	}
+	entries, err := readEntries(filepath.Join(suiteDir, "runs.tsv"))
+	if err != nil {
+		return BundleResult{}, err
+	}
+
+	if output == "" {
+		output = suiteDir + ".tar.gz"
+	} else if !filepath.IsAbs(output) {
+		output = filepath.Join(root, output)
+	}
+	output, err = filepath.Abs(output)
+	if err != nil {
+		return BundleResult{}, err
+	}
+
+	result := BundleResult{
+		SuiteRunDir: suiteDir,
+		SuiteRunID:  filepath.Base(suiteDir),
+		Output:      output,
+	}
+
+	includedDirs := []string{suiteDir}
+	seenRuns := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.RunDir == "" {
+			continue
+		}
+		runDir := resolveRootPath(root, entry.RunDir)
+		info, err := os.Stat(runDir)
+		if err != nil || !info.IsDir() || !runartifact.IsRunDir(runDir) {
+			result.MissingLinkedRuns = append(result.MissingLinkedRuns, entry.RunDir)
+			continue
+		}
+		abs, err := filepath.Abs(runDir)
+		if err != nil {
+			return BundleResult{}, err
+		}
+		if _, ok := seenRuns[abs]; ok {
+			continue
+		}
+		seenRuns[abs] = struct{}{}
+		includedDirs = append(includedDirs, abs)
+		result.LinkedRuns = append(result.LinkedRuns, displayPath(root, abs))
+	}
+	sort.Strings(result.LinkedRuns)
+	sort.Strings(result.MissingLinkedRuns)
+
+	for _, dir := range includedDirs {
+		if isSubpath(dir, output) {
+			return BundleResult{}, fmt.Errorf("bundle output must not be inside an included artifact directory: %s", output)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return BundleResult{}, err
+	}
+
+	file, err := os.Create(output)
+	if err != nil {
+		return BundleResult{}, err
+	}
+	defer file.Close()
+
+	gzipWriter := gzip.NewWriter(file)
+	defer gzipWriter.Close()
+	tarWriter := tar.NewWriter(gzipWriter)
+	defer tarWriter.Close()
+
+	if err := addDirToTar(tarWriter, suiteDir, filepath.ToSlash(filepath.Join("utility-suites", filepath.Base(suiteDir))), &result); err != nil {
+		return BundleResult{}, err
+	}
+	for _, dir := range includedDirs[1:] {
+		name := filepath.ToSlash(filepath.Join("runs", filepath.Base(dir)))
+		if err := addDirToTar(tarWriter, dir, name, &result); err != nil {
+			return BundleResult{}, err
+		}
 	}
 	return result, nil
 }
@@ -285,6 +381,19 @@ func RenderVerify(w io.Writer, result VerifyResult) error {
 		}
 	}
 	return nil
+}
+
+func RenderBundle(w io.Writer, result BundleResult) error {
+	_, err := fmt.Fprintf(
+		w,
+		"Wrote utility suite bundle: %s files=%d bytes=%d linked_runs=%d missing_linked_runs=%d\n",
+		result.Output,
+		result.Files,
+		result.Bytes,
+		len(result.LinkedRuns),
+		len(result.MissingLinkedRuns),
+	)
+	return err
 }
 
 func RenderJSON(w io.Writer, value any) error {
@@ -749,6 +858,59 @@ func resolveSuitePath(root string, suiteDir string, value string) string {
 		return filepath.Clean(rootCandidate)
 	}
 	return filepath.Clean(candidate)
+}
+
+func addDirToTar(tarWriter *tar.Writer, dir string, archivePrefix string, result *BundleResult) error {
+	return filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		header, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		header.Name = filepath.ToSlash(filepath.Join(archivePrefix, rel))
+		if err := tarWriter.WriteHeader(header); err != nil {
+			return err
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		written, copyErr := io.Copy(tarWriter, file)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		result.Files++
+		result.Bytes += written
+		return nil
+	})
+}
+
+func isSubpath(parent string, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
 }
 
 func fileExists(path string) bool {

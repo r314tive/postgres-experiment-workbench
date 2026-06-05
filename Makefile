@@ -15,6 +15,7 @@ UTILITY_TEST_SPEC ?= pg-dump/smoke
 UTILITY_SUITE ?= native-dump
 UTILITY_SUITE_RUN ?=
 UTILITY_SUITE_RUN_INPUTS ?=
+UTILITY_SUITE_BUNDLE_OUT ?=
 EXPERIMENT_SPEC ?= smoke
 EXPERIMENT_REPEAT_COUNT ?= 3
 EXPERIMENT_REPEAT_ID ?=
@@ -178,6 +179,8 @@ help:
 	@printf '  %-24s %s\n' 'make utility-suite-run-list-json' 'List utility suite run artifacts as JSON'
 	@printf '  %-24s %s\n' 'make utility-suite-run-show' 'Show UTILITY_SUITE_RUN artifact summary'
 	@printf '  %-24s %s\n' 'make utility-suite-run-show-json' 'Show UTILITY_SUITE_RUN artifact summary as JSON'
+	@printf '  %-24s %s\n' 'make utility-suite-run-bundle' 'Bundle UTILITY_SUITE_RUN artifact into tar.gz'
+	@printf '  %-24s %s\n' 'make utility-suite-run-bundle-json' 'Bundle UTILITY_SUITE_RUN artifact and print JSON metadata'
 	@printf '  %-24s %s\n' 'make utility-suite-run-verify' 'Verify UTILITY_SUITE_RUN artifact integrity'
 	@printf '  %-24s %s\n' 'make utility-suite-run-verify-json' 'Verify UTILITY_SUITE_RUN artifact integrity as JSON'
 	@printf '  %-24s %s\n' 'make workload-start' 'Run profile SQL in the background'
@@ -718,6 +721,24 @@ utility-suite-run-show:
 utility-suite-run-show-json:
 	@test -n "$(UTILITY_SUITE_RUN)" || { echo 'Usage: make utility-suite-run-show-json UTILITY_SUITE_RUN=<suite-run-dir-or-id>' >&2; exit 2; }
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite run-show --json "$(UTILITY_SUITE_RUN)"
+
+.PHONY: utility-suite-run-bundle
+utility-suite-run-bundle:
+	@test -n "$(UTILITY_SUITE_RUN)" || { echo 'Usage: make utility-suite-run-bundle UTILITY_SUITE_RUN=<suite-run-dir-or-id> [UTILITY_SUITE_BUNDLE_OUT=generated/suite.tar.gz]' >&2; exit 2; }
+	@if [[ -n "$(UTILITY_SUITE_BUNDLE_OUT)" ]]; then \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite run-bundle "$(UTILITY_SUITE_RUN)" "$(UTILITY_SUITE_BUNDLE_OUT)"; \
+	else \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite run-bundle "$(UTILITY_SUITE_RUN)"; \
+	fi
+
+.PHONY: utility-suite-run-bundle-json
+utility-suite-run-bundle-json:
+	@test -n "$(UTILITY_SUITE_RUN)" || { echo 'Usage: make utility-suite-run-bundle-json UTILITY_SUITE_RUN=<suite-run-dir-or-id> [UTILITY_SUITE_BUNDLE_OUT=generated/suite.tar.gz]' >&2; exit 2; }
+	@if [[ -n "$(UTILITY_SUITE_BUNDLE_OUT)" ]]; then \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite run-bundle --json "$(UTILITY_SUITE_RUN)" "$(UTILITY_SUITE_BUNDLE_OUT)"; \
+	else \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite run-bundle --json "$(UTILITY_SUITE_RUN)"; \
+	fi
 
 .PHONY: utility-suite-run-verify
 utility-suite-run-verify:

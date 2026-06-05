@@ -143,6 +143,7 @@ func usage() {
   pgworkbench utility-suite run [--json] <utility-suite>
   pgworkbench utility-suite run-list [--json] [path...]
   pgworkbench utility-suite run-show [--json] <suite-run-dir-or-id>
+  pgworkbench utility-suite run-bundle [--json] <suite-run-dir-or-id> [output.tar.gz]
   pgworkbench utility-suite run-verify [--json] <suite-run-dir-or-id>
   pgworkbench experiment list [--raw]
   pgworkbench experiment show [--raw] <experiment-spec>
@@ -606,6 +607,26 @@ func runUtilitySuite(root string, catalog speccatalog.Catalog, args []string) er
 			return utilitysuiteartifact.RenderJSON(os.Stdout, summary)
 		}
 		return utilitysuiteartifact.RenderShow(os.Stdout, summary)
+	case "run-bundle":
+		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		if len(inputs) < 1 || len(inputs) > 2 {
+			return fmt.Errorf("usage: pgworkbench utility-suite run-bundle [--json] <suite-run-dir-or-id> [output.tar.gz]")
+		}
+		output := ""
+		if len(inputs) == 2 {
+			output = inputs[1]
+		}
+		result, err := utilitysuiteartifact.CreateBundle(root, inputs[0], output)
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			return utilitysuiteartifact.RenderJSON(os.Stdout, result)
+		}
+		return utilitysuiteartifact.RenderBundle(os.Stdout, result)
 	case "run-verify":
 		jsonOutput, inputs, err := parseJSONOptionArgs(args[1:])
 		if err != nil {

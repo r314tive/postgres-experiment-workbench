@@ -50,6 +50,8 @@ go run ./cmd/pgworkbench workload run pgbench/tiny
 go run ./cmd/pgworkbench workload run --json pgbench/tiny
 go run ./cmd/pgworkbench utility-suite run-list
 go run ./cmd/pgworkbench utility-suite run-show runs/utility-suites/<suite-run-id>
+go run ./cmd/pgworkbench utility-suite run-bundle runs/utility-suites/<suite-run-id> generated/suite.tar.gz
+go run ./cmd/pgworkbench utility-suite run-bundle --json runs/utility-suites/<suite-run-id> generated/suite.tar.gz
 go run ./cmd/pgworkbench utility-suite run-verify runs/utility-suites/<suite-run-id>
 go run ./cmd/pgworkbench utility-suite run-verify --json runs/utility-suites/<suite-run-id>
 go run ./cmd/pgworkbench scan failures logs generated
@@ -91,7 +93,7 @@ Run artifact discovery and summaries are covered by `pgworkbench run list|show`.
 Run list supports status filtering and output limits for large local archives.
 Run artifact bundles are covered by `pgworkbench run bundle`.
 Utility-suite artifact discovery and integrity checks are covered by
-`pgworkbench utility-suite run-list|run-show|run-verify`.
+`pgworkbench utility-suite run-list|run-show|run-bundle|run-verify`.
 Env spec contracts can be rendered with `pgworkbench spec reference` and
 `pgworkbench spec schema`.
 Profile catalog Make targets now default to the Go CLI while the shell script

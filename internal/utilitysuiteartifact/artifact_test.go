@@ -1,9 +1,13 @@
 package utilitysuiteartifact
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +85,35 @@ func TestUtilitySuiteArtifactListShowVerify(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "PASS: utility suite artifact") {
 		t.Fatalf("unexpected verify render: %s", out.String())
+	}
+
+	output := filepath.Join(root, "generated", "suite-a.tar.gz")
+	bundle, err := CreateBundle(root, "suite-a", output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Output != output || len(bundle.LinkedRuns) != 2 || len(bundle.MissingLinkedRuns) != 0 || bundle.Files == 0 || bundle.Bytes == 0 {
+		t.Fatalf("unexpected bundle result: %#v", bundle)
+	}
+	out.Reset()
+	if err := RenderBundle(&out, bundle); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Wrote utility suite bundle") {
+		t.Fatalf("unexpected bundle render: %s", out.String())
+	}
+
+	names := readTarNames(t, output)
+	for _, want := range []string{
+		"utility-suites/suite-a/result.json",
+		"utility-suites/suite-a/runs.tsv",
+		"utility-suites/suite-a/summary.md",
+		"runs/suite-a-pg-dump_smoke-small-r01/manifest.env",
+		"runs/suite-a-pg-restore_smoke-small-r01/verdict.json",
+	} {
+		if !hasTarName(names, want) {
+			t.Fatalf("missing tar entry %q in %#v", want, names)
+		}
 	}
 }
 
@@ -177,6 +210,45 @@ func writeFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func readTarNames(t *testing.T, path string) []string {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gzipReader.Close()
+
+	reader := tar.NewReader(gzipReader)
+	var names []string
+	for {
+		header, err := reader.Next()
+		if err != nil {
+			if err != io.EOF {
+				t.Fatal(err)
+			}
+			break
+		}
+		names = append(names, header.Name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func hasTarName(names []string, want string) bool {
+	for _, name := range names {
+		if name == want {
+			return true
+		}
+	}
+	return false
 }
 
 func hasIssue(result VerifyResult, issue string) bool {

@@ -85,6 +85,8 @@ Already started:
   output and utility-test batch summaries.
 - `pgworkbench utility-suite run-list|run-show|run-verify`, including JSON
   output and linked experiment-run verification.
+- `pgworkbench utility-suite run-bundle`, including JSON output and portable
+  suite plus linked experiment-run archives.
 - `make release-snapshot`.
 
 Good Go candidates:

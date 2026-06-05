@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.33 - 2026-06-05
+
+Added platform features:
+
+- Added utility-suite run artifact bundles with Markdown/JSON CLI output,
+  Make targets, linked experiment-run inclusion, and tar.gz evidence archives.
+
 ## v0.1.32 - 2026-06-05
 
 Added platform features:
