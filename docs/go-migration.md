@@ -79,6 +79,8 @@ Experiment, matrix, and topology catalog Make targets use the same Go `--raw`
 compatibility path.
 Diagnostic catalog Make targets now use Go for list/show while diagnostic
 execution remains shell/`psql`.
+Run report, summary, and history Make targets now default to Go; shell
+compatibility targets remain available with the `-shell` suffix.
 Experiment specs can be preflighted as execution plans with
 `pgworkbench experiment plan`.
 Use `pgworkbench experiment plan --expanded` to embed topology, dataset,

@@ -4,6 +4,13 @@
 
 No changes yet.
 
+## v0.1.16 - 2026-06-05
+
+Changed platform behavior:
+
+- Moved run report, summary, and history Make targets to Go defaults while
+  keeping explicit shell compatibility targets.
+
 ## v0.1.15 - 2026-06-05
 
 Changed platform behavior:

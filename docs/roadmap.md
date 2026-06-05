@@ -62,6 +62,8 @@ Already started:
 - `pgworkbench diagnostics list|show`; diagnostic execution stays in shell.
 - `pgworkbench matrix plan`.
 - Make `matrix-plan` default to Go raw output with shell-compatible Markdown.
+- Make run report, summary, and history targets default to Go with explicit
+  shell compatibility targets.
 - `pgworkbench spec list|show|reference|schema|validate`.
 - `pgworkbench topology inspect|ps`.
 - `pgworkbench patchset list|show|validate`.

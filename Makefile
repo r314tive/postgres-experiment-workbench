@@ -110,12 +110,12 @@ help:
 	@printf '  %-24s %s\n' 'make experiment-plan-expanded-json' 'Render expanded EXPERIMENT_SPEC plan as JSON'
 	@printf '  %-24s %s\n' 'make experiment-run' 'Run EXPERIMENT_SPEC into runs/<run-id>'
 	@printf '  %-24s %s\n' 'make experiment-verify' 'Verify RUN_DIR artifact integrity'
-	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report for RUN_DIR'
-	@printf '  %-24s %s\n' 'make experiment-report-go' 'Render Markdown report with Go CLI'
-	@printf '  %-24s %s\n' 'make experiment-summary' 'Summarize a repeat/matrix/run series'
-	@printf '  %-24s %s\n' 'make experiment-summary-go' 'Summarize runs with Go CLI'
-	@printf '  %-24s %s\n' 'make experiment-history' 'Compare repeat/matrix/run series history'
-	@printf '  %-24s %s\n' 'make experiment-history-go' 'Compare run history with Go CLI'
+	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report with Go CLI'
+	@printf '  %-24s %s\n' 'make experiment-report-shell' 'Render Markdown report with shell script'
+	@printf '  %-24s %s\n' 'make experiment-summary' 'Summarize runs with Go CLI'
+	@printf '  %-24s %s\n' 'make experiment-summary-shell' 'Summarize runs with shell script'
+	@printf '  %-24s %s\n' 'make experiment-history' 'Compare run history with Go CLI'
+	@printf '  %-24s %s\n' 'make experiment-history-shell' 'Compare run history with shell script'
 	@printf '  %-24s %s\n' 'make experiment-repeat' 'Run EXPERIMENT_SPEC repeatedly'
 	@printf '  %-24s %s\n' 'make experiment-compare' 'Compare BASELINE_RUN and CANDIDATE_RUN'
 	@printf '  %-24s %s\n' 'make experiment-compare-go' 'Compare runs with Go CLI'
@@ -379,6 +379,11 @@ experiment-run:
 .PHONY: experiment-report
 experiment-report:
 	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-report RUN_DIR=runs/<run-id>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report run "$(RUN_DIR)"
+
+.PHONY: experiment-report-shell
+experiment-report-shell:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-report-shell RUN_DIR=runs/<run-id>' >&2; exit 2; }
 	./scripts/report_run.sh "$(RUN_DIR)"
 
 .PHONY: experiment-verify
@@ -394,6 +399,15 @@ experiment-report-go:
 .PHONY: experiment-summary
 experiment-summary:
 	@test -n "$(SUMMARY_INPUT)" || { echo 'Usage: make experiment-summary SUMMARY_INPUT=runs/repeats/<id>' >&2; exit 2; }
+	@if [[ -n "$(SUMMARY_OUT)" ]]; then \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report summary --output "$(SUMMARY_OUT)" "$(SUMMARY_INPUT)"; \
+	else \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report summary "$(SUMMARY_INPUT)"; \
+	fi
+
+.PHONY: experiment-summary-shell
+experiment-summary-shell:
+	@test -n "$(SUMMARY_INPUT)" || { echo 'Usage: make experiment-summary-shell SUMMARY_INPUT=runs/repeats/<id>' >&2; exit 2; }
 	@if [[ -n "$(SUMMARY_OUT)" ]]; then \
 		./scripts/summarize_runs.sh --output "$(SUMMARY_OUT)" "$(SUMMARY_INPUT)"; \
 	else \
@@ -412,6 +426,15 @@ experiment-summary-go:
 .PHONY: experiment-history
 experiment-history:
 	@test -n "$(HISTORY_INPUTS)" || { echo 'Usage: make experiment-history HISTORY_INPUTS="runs/repeats/a runs/repeats/b"' >&2; exit 2; }
+	@if [[ -n "$(HISTORY_OUT)" ]]; then \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report history --output "$(HISTORY_OUT)" $(HISTORY_INPUTS); \
+	else \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report history $(HISTORY_INPUTS); \
+	fi
+
+.PHONY: experiment-history-shell
+experiment-history-shell:
+	@test -n "$(HISTORY_INPUTS)" || { echo 'Usage: make experiment-history-shell HISTORY_INPUTS="runs/repeats/a runs/repeats/b"' >&2; exit 2; }
 	@if [[ -n "$(HISTORY_OUT)" ]]; then \
 		./scripts/compare_run_history.sh --output "$(HISTORY_OUT)" $(HISTORY_INPUTS); \
 	else \
