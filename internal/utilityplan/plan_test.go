@@ -31,6 +31,10 @@ func TestBuildUtilityPlanExpanded(t *testing.T) {
 		"UTILITY_TEST_WORKLOAD_SPEC=utility/smoke",
 		"UTILITY_TEST_METRICS=1",
 		"UTILITY_TEST_METRICS_SAMPLES=3",
+		"UTILITY_TEST_EXPECT_FILES=logs/utility/out.sql",
+		"UTILITY_TEST_ASSERT_SQL=SELECT 1;",
+		"UTILITY_TEST_ASSERT_SHELL=test -s logs/utility/out.sql",
+		"UTILITY_TEST_SCAN_PATHS=logs/utility",
 		"UTILITY_TEST_NOTES=review logs",
 		"",
 	}, "\n"))
@@ -43,7 +47,7 @@ func TestBuildUtilityPlanExpanded(t *testing.T) {
 	if plan.Fields["workload"] != "utility/smoke" {
 		t.Fatalf("unexpected fields: %#v", plan.Fields)
 	}
-	if len(plan.Phases) != 7 {
+	if len(plan.Phases) != 9 {
 		t.Fatalf("unexpected phases: %#v", plan.Phases)
 	}
 	if len(plan.Previews) != 3 {
@@ -55,7 +59,7 @@ func TestBuildUtilityPlanExpanded(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := rendered.String()
-	for _, want := range []string{"# Utility Test Plan", "utility workload", "Embedded Previews", "review logs"} {
+	for _, want := range []string{"# Utility Test Plan", "utility workload", "assertions", "logs/utility/out.sql", "failure scan", "Embedded Previews", "review logs"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("rendered plan missing %q:\n%s", want, content)
 		}

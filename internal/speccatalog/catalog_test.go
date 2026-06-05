@@ -98,17 +98,18 @@ func TestCatalogValidateUtilityTestReferences(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, "profiles/smoke/profile.env", "PROFILE_NAME=smoke\nPROFILE_DESCRIPTION=Smoke\n")
 	writeSpec(t, root, "profiles/smoke/sql/10_run.sql", "SELECT 1;\n")
+	writeSpec(t, root, "sql/assertions/smoke.sql", "SELECT 1;\n")
 	writeSpec(t, root, "workloads/sql/smoke-run.env", "WORKLOAD_NAME=smoke\nWORKLOAD_KIND=profile-sql\nPROFILE=smoke\nWORKLOAD_SQL=10_run.sql\n")
-	writeSpec(t, root, "utility-tests/pg-dump/smoke.env", "UTILITY_TEST_NAME=pg_dump smoke\nUTILITY_TEST_PROFILE=smoke\nUTILITY_TEST_WORKLOAD_SPEC=sql/smoke-run\nUTILITY_TEST_BACKGROUND_SPECS=sql/smoke-run\nUTILITY_TEST_METRICS=1\n")
+	writeSpec(t, root, "utility-tests/pg-dump/smoke.env", "UTILITY_TEST_NAME=pg_dump smoke\nUTILITY_TEST_PROFILE=smoke\nUTILITY_TEST_WORKLOAD_SPEC=sql/smoke-run\nUTILITY_TEST_BACKGROUND_SPECS=sql/smoke-run\nUTILITY_TEST_ASSERT_SQL_FILES=sql/assertions/smoke.sql\nUTILITY_TEST_METRICS=1\n")
 
 	if errs := New(root).Validate("utility-test", nil); len(errs) != 0 {
 		t.Fatalf("unexpected validation errors: %#v", errs)
 	}
 
-	writeSpec(t, root, "utility-tests/broken.env", "UTILITY_TEST_NAME=broken\nUTILITY_TEST_PROFILE=missing\nUTILITY_TEST_WORKLOAD_SPEC=missing\nUTILITY_TEST_BACKGROUND_SPECS=also-missing\nUTILITY_TEST_METRICS=maybe\n")
+	writeSpec(t, root, "utility-tests/broken.env", "UTILITY_TEST_NAME=broken\nUTILITY_TEST_PROFILE=missing\nUTILITY_TEST_WORKLOAD_SPEC=missing\nUTILITY_TEST_BACKGROUND_SPECS=also-missing\nUTILITY_TEST_ASSERT_SQL_FILES=missing.sql\nUTILITY_TEST_METRICS=maybe\n")
 	errs := New(root).Validate("utility-test", []string{"broken"})
-	if len(errs) != 4 {
-		t.Fatalf("expected four validation errors, got %#v", errs)
+	if len(errs) != 5 {
+		t.Fatalf("expected five validation errors, got %#v", errs)
 	}
 }
 

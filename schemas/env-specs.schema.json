@@ -431,6 +431,21 @@
       "additionalProperties": true,
       "description": "Utility test specs live under `utility-tests/**/*.env` and describe a reusable PostgreSQL utility/tool test scenario.",
       "properties": {
+        "UTILITY_TEST_ASSERT_SHELL": {
+          "description": "Host shell assertion run after the utility workload.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_TEST_ASSERT_SQL": {
+          "description": "Inline SQL assertion run after the utility workload.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_TEST_ASSERT_SQL_FILES": {
+          "description": "Space-separated SQL assertion files run after the utility workload.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
         "UTILITY_TEST_BACKGROUND_SPECS": {
           "description": "Space-separated background workload specs started before the utility workload.",
           "type": "string",
@@ -465,6 +480,11 @@
         },
         "UTILITY_TEST_DATASET_SPEC": {
           "description": "Dataset spec loaded before background and utility workloads.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_TEST_EXPECT_FILES": {
+          "description": "Space-separated output files that must exist and be non-empty after the utility workload.",
           "type": "string",
           "x-workbench-requirement": "optional"
         },
@@ -524,6 +544,12 @@
             "medium",
             "large"
           ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_TEST_SCAN_PATHS": {
+          "default": "run directory",
+          "description": "Extra paths scanned for failure evidence.",
           "type": "string",
           "x-workbench-requirement": "optional"
         },

@@ -434,6 +434,12 @@ func (c Catalog) validateUtilityTest(spec Spec) []error {
 		}
 	}
 
+	for _, sqlPath := range splitWords(spec.Values["UTILITY_TEST_ASSERT_SQL_FILES"]) {
+		if !isDynamic(sqlPath) && !c.pathExists(sqlPath) {
+			errs = append(errs, specError(spec, "assert SQL file not found: %s", sqlPath))
+		}
+	}
+
 	if wait := spec.Values["UTILITY_TEST_BACKGROUND_WAIT"]; wait != "" && !isDynamic(wait) && !oneOf(wait, "0", "1") {
 		errs = append(errs, specError(spec, "UTILITY_TEST_BACKGROUND_WAIT must be 0 or 1: %s", wait))
 	}

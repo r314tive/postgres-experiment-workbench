@@ -23,6 +23,10 @@ func TestRunUtilityTestGeneratesExperimentSpec(t *testing.T) {
 		"UTILITY_TEST_BACKGROUND_WARMUP=2",
 		"UTILITY_TEST_METRICS=1",
 		"UTILITY_TEST_METRICS_SAMPLES=\"${METRICS_SAMPLES:-2}\"",
+		"UTILITY_TEST_EXPECT_FILES=logs/utility/out.sql",
+		"UTILITY_TEST_ASSERT_SQL=SELECT 1;",
+		"UTILITY_TEST_ASSERT_SHELL=echo ok",
+		"UTILITY_TEST_SCAN_PATHS=logs/utility",
 		"",
 	}, "\n"))
 
@@ -59,6 +63,9 @@ func TestRunUtilityTestGeneratesExperimentSpec(t *testing.T) {
 		`EXPERIMENT_PROFILE_SIZE="${PROFILE_SIZE:-small}"`,
 		"EXPERIMENT_WORKLOAD_SPEC='utility/smoke'",
 		`EXPERIMENT_METRICS_SAMPLES="${METRICS_SAMPLES:-2}"`,
+		"EXPERIMENT_ASSERT_SQL='SELECT 1;'",
+		`EXPERIMENT_ASSERT_SHELL="echo ok; test -s \"$REPO_DIR/logs/utility/out.sql\""`,
+		"EXPERIMENT_SCAN_PATHS='logs/utility'",
 		`EXPERIMENT_SNAPSHOT="${UTILITY_TEST_SNAPSHOT:-1}"`,
 	} {
 		if !strings.Contains(text, want) {

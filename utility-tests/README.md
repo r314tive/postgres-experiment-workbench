@@ -20,3 +20,13 @@ Specs live under `utility-tests/**/*.env`. They are dry-run planning contracts;
 the foreground utility action is still a normal workload spec under
 `workloads/`. The run command translates the utility-test spec into an ignored
 temporary experiment spec and writes normal experiment artifacts under `runs/`.
+
+Useful result-contract fields:
+
+```text
+UTILITY_TEST_EXPECT_FILES
+UTILITY_TEST_ASSERT_SQL_FILES
+UTILITY_TEST_ASSERT_SQL
+UTILITY_TEST_ASSERT_SHELL
+UTILITY_TEST_SCAN_PATHS
+```

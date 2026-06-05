@@ -23,9 +23,10 @@ go run ./cmd/pgworkbench utility validate
 ```
 
 The utility plan contract covers profile setup, dataset load, background
-workloads, metrics sampling, foreground utility workload, and expected evidence.
-It is intentionally generic; `pg_dump`, `pg_restore`, external backup tools,
-data checkers, fuzzers, and PostgreSQL source utilities should all fit the same
+workloads, metrics sampling, foreground utility workload, expected output files,
+SQL assertions, shell assertions, extra failure-scan paths, and evidence. It is
+intentionally generic; `pg_dump`, `pg_restore`, external backup tools, data
+checkers, fuzzers, and PostgreSQL source utilities should all fit the same
 shape.
 
 Run a utility-test through the existing experiment runner when you want a full
@@ -41,6 +42,19 @@ UTILITY_TEST_RUN_ID=manual-pgdump make utility-run UTILITY_TEST_SPEC=pg-dump/smo
 then delegates to `scripts/run_experiment.sh`. That keeps utility tests generic
 while preserving the same snapshots, metrics, scan, manifest, verdict, report,
 and bundle workflow as experiments.
+
+Declare result checks directly in the utility-test spec:
+
+```bash
+UTILITY_TEST_EXPECT_FILES="logs/utility/pg-dump-smoke.sql"
+UTILITY_TEST_ASSERT_SQL="SELECT count(*) > 0 FROM restore_check.items;"
+UTILITY_TEST_ASSERT_SQL_FILES="sql/assertions/after_restore.sql"
+UTILITY_TEST_ASSERT_SHELL='test -s "$REPO_DIR/logs/utility/custom.log"'
+UTILITY_TEST_SCAN_PATHS="logs/utility generated/tool-output"
+```
+
+Expected files are converted into non-empty file assertions. SQL and shell
+assertions are passed through to the experiment runner.
 
 ## Dump And Restore
 

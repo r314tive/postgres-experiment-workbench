@@ -4,6 +4,14 @@
 
 No changes yet.
 
+## v0.1.30 - 2026-06-05
+
+Added platform features:
+
+- Added utility-test result contracts for expected output files, SQL
+  assertions, shell assertions, and extra failure-scan paths, and mapped them
+  into generated experiment runs.
+
 ## v0.1.29 - 2026-06-05
 
 Added platform features:

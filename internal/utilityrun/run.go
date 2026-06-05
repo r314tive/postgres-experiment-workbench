@@ -183,6 +183,10 @@ func writeExperimentSpec(root string, plan utilityplan.Plan, runID string, now t
 	writeEnv(&out, "EXPERIMENT_METRICS_INTERVAL", plan.Fields["metrics_interval"])
 	writeEnv(&out, "EXPERIMENT_METRICS_DURATION", plan.Fields["metrics_duration"])
 	writeEnv(&out, "EXPERIMENT_METRICS_SAMPLES", plan.Fields["metrics_samples"])
+	writeEnv(&out, "EXPERIMENT_ASSERT_SQL_FILES", plan.Fields["assert_sql_files"])
+	writeEnv(&out, "EXPERIMENT_ASSERT_SQL", plan.Fields["assert_sql"])
+	writeEnv(&out, "EXPERIMENT_ASSERT_SHELL", combinedAssertShell(plan.Fields))
+	writeEnv(&out, "EXPERIMENT_SCAN_PATHS", plan.Fields["scan_paths"])
 	writeEnv(&out, "EXPERIMENT_SNAPSHOT", "${UTILITY_TEST_SNAPSHOT:-1}")
 
 	if err := os.WriteFile(path, []byte(out.String()), 0o644); err != nil {
@@ -205,6 +209,28 @@ func shellValue(value string) string {
 	if strings.Contains(value, "$") {
 		return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`").Replace(value) + `"`
 	}
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func combinedAssertShell(fields map[string]string) string {
+	var parts []string
+	if fields["assert_shell"] != "" {
+		parts = append(parts, fields["assert_shell"])
+	}
+	for _, path := range strings.Fields(fields["expect_files"]) {
+		parts = append(parts, "test -s "+shellPath(path))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func shellPath(path string) string {
+	if filepath.IsAbs(path) || strings.Contains(path, "$") {
+		return shellQuote(path)
+	}
+	return `"$REPO_DIR/` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`").Replace(path) + `"`
+}
+
+func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 

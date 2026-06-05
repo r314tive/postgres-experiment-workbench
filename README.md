@@ -143,7 +143,9 @@ Specs live under `utility-tests/**/*.env`; executable utility actions remain
 normal workload specs under `workloads/`. `utility run` translates the
 utility-test spec into a temporary experiment spec under `.tmp/` and executes it
 through the existing experiment runner, so run artifacts still land under
-`runs/<run-id>/`.
+`runs/<run-id>/`. Utility tests can declare expected output files, SQL
+assertions, shell assertions, and extra failure-scan paths so tool checks have a
+stable result contract.
 
 ## Topologies
 

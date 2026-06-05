@@ -245,6 +245,11 @@ func utilityTestReference() KindReference {
 			{"UTILITY_TEST_METRICS_INTERVAL", "optional", "1", "", "Metrics sampling interval in seconds."},
 			{"UTILITY_TEST_METRICS_DURATION", "optional", "30", "", "Metrics sampling duration in seconds."},
 			{"UTILITY_TEST_METRICS_SAMPLES", "optional", "", "", "Fixed metrics sample count; overrides duration loop."},
+			{"UTILITY_TEST_EXPECT_FILES", "optional", "", "", "Space-separated output files that must exist and be non-empty after the utility workload."},
+			{"UTILITY_TEST_ASSERT_SQL_FILES", "optional", "", "", "Space-separated SQL assertion files run after the utility workload."},
+			{"UTILITY_TEST_ASSERT_SQL", "optional", "", "", "Inline SQL assertion run after the utility workload."},
+			{"UTILITY_TEST_ASSERT_SHELL", "optional", "", "", "Host shell assertion run after the utility workload."},
+			{"UTILITY_TEST_SCAN_PATHS", "optional", "run directory", "", "Extra paths scanned for failure evidence."},
 			{"UTILITY_TEST_NOTES", "optional", "", "", "Short operator notes for expected evidence or caveats."},
 		},
 		Notes: []string{
