@@ -8,8 +8,9 @@ manifest_value() {
   local key="$2"
   local value
   value="$(awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }' "$manifest_file")"
-  if [[ "$value" == '"*"' ]]; then
+  if (( ${#value} >= 2 )) && [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
     value="${value:1:${#value}-2}"
+    value="$(printf '%b' "$value")"
   fi
   printf '%s' "$value"
 }
