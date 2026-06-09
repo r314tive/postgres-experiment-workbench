@@ -100,7 +100,7 @@ func TestBuildPgbenchPlanSplitsExtraArgs(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("extra args were not split into tokens: %#v", command)
+	t.Fatalf("extra args were not split into argument list: %#v", command)
 }
 
 func TestRenderShellPlan(t *testing.T) {
