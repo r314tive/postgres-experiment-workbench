@@ -4,6 +4,14 @@
 
 No changes yet.
 
+## v0.1.36 - 2026-06-09
+
+Fixed test infrastructure reliability:
+
+- Fixed experiment manifest parsing in [tests/experiments.sh] to correctly handle
+  quoted `manifest.env` values (e.g. `profile="constraints"`) written by
+  the Go state writer.
+
 ## v0.1.33 - 2026-06-05
 
 Added platform features:
