@@ -112,7 +112,7 @@ func Build(root string, catalog speccatalog.Catalog, id string) (Plan, error) {
 			command = append(command, "-b", mode)
 		}
 		if extra := values["PGBENCH_EXTRA_ARGS"]; extra != "" {
-			command = append(command, extra)
+			command = append(command, strings.Fields(extra)...)
 		}
 		command = append(command, "${POSTGRES_DB:-pg_experiment_workbench}")
 		plan.Steps = append(plan.Steps, Step{Name: "Run pgbench", Command: command})

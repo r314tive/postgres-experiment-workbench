@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -87,23 +88,23 @@ func WriteManifest(runDir string, manifest Manifest) error {
 		return err
 	}
 	path := filepath.Join(runDir, "manifest.env")
-	content := fmt.Sprintf(
-		"run_id=%s\nstarted_at=%s\nexperiment_spec=%s\nexperiment_spec_id=%s\nexperiment_name=%s\nexperiment_topology=%s\nexperiment_pg_config=%s\nprofile=%s\ndataset_spec=%s\nprofile_size=%s\nworkload_spec=%s\nbackground_specs=%s\nrun_dir=%s\n",
-		manifest.RunID,
-		manifest.StartedAt,
-		manifest.ExperimentSpec,
-		manifest.ExperimentSpecID,
-		manifest.ExperimentName,
-		manifest.ExperimentTopology,
-		manifest.ExperimentPGConfig,
-		manifest.Profile,
-		manifest.DatasetSpec,
-		manifest.ProfileSize,
-		manifest.WorkloadSpec,
-		manifest.BackgroundSpecs,
-		manifest.RunDir,
-	)
-	return os.WriteFile(path, []byte(content), 0o644)
+	manifestLines := []string{
+		"run_id=" + quoteEnvValue(manifest.RunID),
+		"started_at=" + quoteEnvValue(manifest.StartedAt),
+		"experiment_spec=" + quoteEnvValue(manifest.ExperimentSpec),
+		"experiment_spec_id=" + quoteEnvValue(manifest.ExperimentSpecID),
+		"experiment_name=" + quoteEnvValue(manifest.ExperimentName),
+		"experiment_topology=" + quoteEnvValue(manifest.ExperimentTopology),
+		"experiment_pg_config=" + quoteEnvValue(manifest.ExperimentPGConfig),
+		"profile=" + quoteEnvValue(manifest.Profile),
+		"dataset_spec=" + quoteEnvValue(manifest.DatasetSpec),
+		"profile_size=" + quoteEnvValue(manifest.ProfileSize),
+		"workload_spec=" + quoteEnvValue(manifest.WorkloadSpec),
+		"background_specs=" + quoteEnvValue(manifest.BackgroundSpecs),
+		"run_dir=" + quoteEnvValue(manifest.RunDir),
+	}
+	content := strings.Join(manifestLines, "\n") + "\n"
+	return writeEnvFile(path, content)
 }
 
 func WriteVerdict(runDir string, verdict Verdict) error {
@@ -118,16 +119,15 @@ func WriteVerdict(runDir string, verdict Verdict) error {
 		return err
 	}
 
-	envContent := fmt.Sprintf(
-		"status=%s\nmessage=%s\nfinished_at=%s\nworkload_exit=%d\nassert_exit=%d\nscan_exit=%d\n",
-		verdict.Status,
-		verdict.Message,
-		verdict.FinishedAt,
-		verdict.WorkloadExit,
-		verdict.AssertExit,
-		verdict.ScanExit,
-	)
-	if err := os.WriteFile(filepath.Join(runDir, "verdict.env"), []byte(envContent), 0o644); err != nil {
+	verdictLines := []string{
+		"status=" + quoteEnvValue(verdict.Status),
+		"message=" + quoteEnvValue(verdict.Message),
+		"finished_at=" + quoteEnvValue(verdict.FinishedAt),
+		"workload_exit=" + quoteEnvValue(fmt.Sprintf("%d", verdict.WorkloadExit)),
+		"assert_exit=" + quoteEnvValue(fmt.Sprintf("%d", verdict.AssertExit)),
+		"scan_exit=" + quoteEnvValue(fmt.Sprintf("%d", verdict.ScanExit)),
+	}
+	if err := writeEnvFile(filepath.Join(runDir, "verdict.env"), strings.Join(verdictLines, "\n")+"\n"); err != nil {
 		return err
 	}
 
@@ -137,6 +137,37 @@ func WriteVerdict(runDir string, verdict Verdict) error {
 	}
 	jsonBytes = append(jsonBytes, '\n')
 	return os.WriteFile(filepath.Join(runDir, "verdict.json"), jsonBytes, 0o644)
+}
+
+func writeEnvFile(path string, content string) error {
+	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+func quoteEnvValue(value string) string {
+	var out strings.Builder
+	out.WriteByte('"')
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '"':
+			out.WriteString("\\\"")
+		case '\\':
+			out.WriteString("\\\\")
+		case '`':
+			out.WriteString("\\`")
+		case '$':
+			out.WriteString("\\$")
+		case '\n':
+			out.WriteString("\\n")
+		case '\r':
+			out.WriteString("\\r")
+		case '\t':
+			out.WriteString("\\t")
+		default:
+			out.WriteByte(value[i])
+		}
+	}
+	out.WriteByte('"')
+	return out.String()
 }
 
 func valueOr(value string, fallback string) string {

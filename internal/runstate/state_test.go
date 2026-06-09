@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/r314tive/postgres-experiment-workbench/internal/envfile"
 )
 
 func TestWriteManifest(t *testing.T) {
@@ -26,10 +28,18 @@ func TestWriteManifest(t *testing.T) {
 	if err := WriteManifest(runDir, ManifestFromEnv(mapGetter(env))); err != nil {
 		t.Fatal(err)
 	}
-	content := readFile(t, filepath.Join(runDir, "manifest.env"))
-	for _, want := range []string{"run_id=run-a", "experiment_spec_id=smoke", "workload_spec=sql/smoke-run"} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("manifest missing %q:\n%s", want, content)
+	manifest, err := envfile.Parse(filepath.Join(runDir, "manifest.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants := map[string]string{
+		"run_id":             "run-a",
+		"experiment_spec_id": "smoke",
+		"workload_spec":      "sql/smoke-run",
+	}
+	for key, want := range wants {
+		if got := manifest[key]; got != want {
+			t.Fatalf("manifest[%q] = %q, want %q", key, got, want)
 		}
 	}
 }
@@ -44,9 +54,12 @@ func TestWriteManifestUsesOutputDirWhenEnvRunDirIsMissing(t *testing.T) {
 	if err := WriteManifest(runDir, ManifestFromEnv(mapGetter(env))); err != nil {
 		t.Fatal(err)
 	}
-	content := readFile(t, filepath.Join(runDir, "manifest.env"))
-	if !strings.Contains(content, "run_dir="+runDir) {
-		t.Fatalf("manifest did not use output dir:\n%s", content)
+	manifest, err := envfile.Parse(filepath.Join(runDir, "manifest.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := manifest["run_dir"]; got != runDir {
+		t.Fatalf("manifest run_dir = %q, want %q", got, runDir)
 	}
 }
 
@@ -67,9 +80,15 @@ func TestWriteVerdict(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	envContent := readFile(t, filepath.Join(runDir, "verdict.env"))
-	if !strings.Contains(envContent, "status=passed") || !strings.Contains(envContent, "message=experiment passed") {
-		t.Fatalf("unexpected verdict.env:\n%s", envContent)
+	verdictEnv, err := envfile.Parse(filepath.Join(runDir, "verdict.env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := verdictEnv["status"]; got != "passed" {
+		t.Fatalf("verdict_env status=%q, want passed", got)
+	}
+	if got := verdictEnv["message"]; got != "experiment passed" {
+		t.Fatalf("verdict_env message=%q, want 'experiment passed'", got)
 	}
 	jsonContent := readFile(t, filepath.Join(runDir, "verdict.json"))
 	for _, want := range []string{`"status": "passed"`, `"experiment_spec": "smoke"`, `"scan_exit": 0`} {

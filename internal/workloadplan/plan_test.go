@@ -66,6 +66,43 @@ func TestBuildPgbenchPlan(t *testing.T) {
 	}
 }
 
+func TestBuildPgbenchPlanSplitsExtraArgs(t *testing.T) {
+	root := t.TempDir()
+	writeWorkloadFile(t, root, "workloads/pgbench/tiny_extra.env", strings.Join([]string{
+		`WORKLOAD_NAME="tiny pgbench extra args"`,
+		`WORKLOAD_KIND="pgbench"`,
+		`PGBENCH_INIT="0"`,
+		`PGBENCH_CLIENTS="3"`,
+		`PGBENCH_THREADS="2"`,
+		`PGBENCH_TIME="5"`,
+		`PGBENCH_EXTRA_ARGS="--progress-tuple=true -v 2"`,
+		"",
+	}, "\n"))
+
+	plan, err := Build(root, speccatalog.New(root), "pgbench/tiny_extra")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 1 {
+		t.Fatalf("expected only run step, got %#v", plan.Steps)
+	}
+	command := plan.Steps[0].Command
+	wants := []string{"--progress-tuple=true", "-v", "2"}
+	for i := 0; i+len(wants) <= len(command); i++ {
+		matched := true
+		for j, want := range wants {
+			if command[i+j] != want {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return
+		}
+	}
+	t.Fatalf("extra args were not split into tokens: %#v", command)
+}
+
 func TestRenderShellPlan(t *testing.T) {
 	root := t.TempDir()
 	writeWorkloadFile(t, root, "workloads/topology/pgbouncer-smoke.env", strings.Join([]string{

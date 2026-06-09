@@ -26,6 +26,7 @@ Implemented topologies:
   pgbouncer            PostgreSQL plus PgBouncer pooler.
   multi-version-upgrade
                        Old and new PostgreSQL versions for upgrade testing.
+  source-tree          Alias for single-node PostgreSQL runtime.
 USAGE
 }
 
@@ -107,7 +108,7 @@ resolve_topology_spec() {
 require_topology() {
   local topology="$1"
   case "$topology" in
-    single|primary-replica|logical-replication|pgbouncer|multi-version-upgrade)
+    single|primary-replica|logical-replication|pgbouncer|multi-version-upgrade|source-tree)
       ;;
     *)
       echo "Unsupported topology: $topology" >&2
@@ -298,6 +299,9 @@ up_topology() {
   require_topology "$topology"
 
   case "$topology" in
+    source-tree)
+      up_primary
+      ;;
     single)
       up_primary
       ;;
@@ -325,6 +329,10 @@ reset_topology() {
   require_topology "$topology"
 
   case "$topology" in
+    source-tree)
+      compose_down "" -v
+      up_primary
+      ;;
     single)
       compose_down "" -v
       up_primary
@@ -353,6 +361,9 @@ down_topology() {
   require_topology "$topology"
 
   case "$topology" in
+    source-tree)
+      compose_down ""
+      ;;
     single)
       compose_down ""
       ;;
@@ -376,6 +387,9 @@ status_topology() {
   require_topology "$topology"
 
   case "$topology" in
+    source-tree)
+      "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" ps postgres
+      ;;
     single)
       "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" ps postgres
       ;;
@@ -453,6 +467,9 @@ wait_topology() {
   require_topology "$topology"
 
   case "$topology" in
+    source-tree)
+      wait_primary
+      ;;
     single)
       wait_primary
       ;;

@@ -18,6 +18,7 @@ var topologyProfiles = map[string][]string{
 	"logical-replication":   {"logical"},
 	"pgbouncer":             {"pgbouncer"},
 	"multi-version-upgrade": {"upgrade"},
+	"source-tree":           nil,
 }
 
 type Options struct {
@@ -46,7 +47,21 @@ func Inspect(root string, topology string, options Options) (Inspection, error) 
 
 	spec, err := speccatalog.New(root).Show("topology", topology)
 	if err != nil {
-		return Inspection{}, err
+		if topology != "source-tree" {
+			return Inspection{}, err
+		}
+		_, specErr := os.Stat(filepath.Join(root, "topologies", topology+".env"))
+		if !os.IsNotExist(specErr) {
+			return Inspection{}, err
+		}
+		spec = speccatalog.Spec{
+			Kind: "topology",
+			ID:   topology,
+			Values: map[string]string{
+				"TOPOLOGY_NAME":        "source-tree",
+				"TOPOLOGY_DESCRIPTION": "Source-tree topology.",
+			},
+		}
 	}
 
 	envFile, envValues, err := loadRepoEnv(root, options.Env)

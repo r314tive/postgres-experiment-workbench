@@ -66,6 +66,12 @@ func unquoteDouble(value string) string {
 		switch next {
 		case '"', '\\', '$', '`':
 			out.WriteByte(next)
+		case 'n':
+			out.WriteByte('\n')
+		case 'r':
+			out.WriteByte('\r')
+		case 't':
+			out.WriteByte('\t')
 		default:
 			out.WriteByte('\\')
 			out.WriteByte(next)

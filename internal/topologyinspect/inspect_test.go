@@ -35,6 +35,28 @@ func TestInspectSingleTopology(t *testing.T) {
 	}
 }
 
+func TestInspectSourceTreeTopologyWithoutSpecFile(t *testing.T) {
+	root := t.TempDir()
+	writeTopologyFile(t, root, ".env.example", "COMPOSE=docker compose\n")
+
+	inspection, err := Inspect(root, "source-tree", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Name != "source-tree" {
+		t.Fatalf("unexpected topology name: %#v", inspection.Name)
+	}
+	if strings.Join(inspection.Services, " ") != "postgres" {
+		t.Fatalf("unexpected services: %#v", inspection.Services)
+	}
+	if len(inspection.Profiles) != 0 {
+		t.Fatalf("unexpected profiles: %#v", inspection.Profiles)
+	}
+	if !strings.Contains(strings.Join(inspection.UpCommand, " "), "up -d postgres") {
+		t.Fatalf("unexpected up command: %#v", inspection.UpCommand)
+	}
+}
+
 func TestInspectPgbouncerResolvesEnvDefaults(t *testing.T) {
 	root := t.TempDir()
 	writeTopologyFile(t, root, ".env.example", "COMPOSE=docker compose\nPGBOUNCER_PORT=56432\n")
