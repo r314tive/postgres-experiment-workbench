@@ -30,6 +30,15 @@ make experiment-run EXPERIMENT_SPEC=constraints-validation
 make experiment-run EXPERIMENT_SPEC=jsonb-indexing
 make experiment-run EXPERIMENT_SPEC=logical-ddl
 make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
+make experiment-run EXPERIMENT_SPEC=massive-dml/generated-batched-update
+make experiment-run EXPERIMENT_SPEC=massive-dml/generated-batched-delete
+make experiment-run EXPERIMENT_SPEC=massive-dml/procedure-update
+make experiment-run EXPERIMENT_SPEC=massive-dml/queue-update
+make experiment-run EXPERIMENT_SPEC=massive-dml/procedure-delete
+make experiment-run EXPERIMENT_SPEC=massive-dml/transaction-caveats
+make experiment-run EXPERIMENT_SPEC=massive-dml/offline-bulk-load-indexed
+make experiment-run EXPERIMENT_SPEC=massive-dml/offline-bulk-load-index-after
+make experiment-run EXPERIMENT_SPEC=massive-dml/partition-drop-vs-delete
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-repeat EXPERIMENT_SPEC=smoke EXPERIMENT_REPEAT_COUNT=3
 make experiment-history HISTORY_INPUTS='runs/repeats/a runs/repeats/b'
@@ -67,4 +76,6 @@ profiles, profile sizes, and repeat counts:
 ```bash
 make matrix-plan MATRIX_SPEC=smoke
 make matrix-run MATRIX_SPEC=smoke
+make matrix-plan MATRIX_SPEC=massive-dml-comparison
+make matrix-plan MATRIX_SPEC=massive-dml-strategy
 ```

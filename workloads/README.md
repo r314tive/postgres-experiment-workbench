@@ -75,6 +75,11 @@ PGPASSWORD
 DATABASE_URL
 ```
 
+Domain profiles may also write evidence into the active experiment's
+`artifacts/` directory. Massive-DML generated workloads preserve exact SQL,
+metadata, and final statistics; its bulk-load and partition-removal workloads
+preserve domain timing, WAL, row-count, and relation-size measurements.
+
 ## Boundaries
 
 The runner is intentionally permissive. Use it for disposable local

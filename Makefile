@@ -880,7 +880,7 @@ release-snapshot:
 
 .PHONY: check
 check:
-	bash -n scripts/*.sh tests/*.sh
+	bash -n scripts/*.sh tests/*.sh profiles/*/scripts/*.sh
 	git diff --check
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test ./...
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile list >/dev/null
@@ -962,6 +962,7 @@ test: docker-up
 	./tests/scan_failures.sh
 	./tests/topologies.sh
 	./tests/experiments.sh
+	./tests/massive_dml.sh
 	./tests/report_runs.sh
 	./tests/summarize_runs.sh
 	./tests/compare_runs.sh

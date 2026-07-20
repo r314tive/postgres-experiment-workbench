@@ -46,6 +46,7 @@ make profile-reset PROFILE=indexes PROFILE_SIZE=small
 make profile-reset PROFILE=wal-pressure PROFILE_SIZE=small
 make profile-reset PROFILE=partitioning PROFILE_SIZE=small
 make profile-reset PROFILE=temp-spill PROFILE_SIZE=small
+make profile-reset PROFILE=massive-dml PROFILE_SIZE=small
 ```
 
 Open psql:
@@ -203,6 +204,15 @@ make experiment-run EXPERIMENT_SPEC=logical-ddl
 make experiment-run EXPERIMENT_SPEC=pgbouncer-smoke
 make experiment-run EXPERIMENT_SPEC=multi-version-upgrade-smoke
 make experiment-run EXPERIMENT_SPEC=temp-spill
+make experiment-run EXPERIMENT_SPEC=massive-dml/generated-batched-update
+make experiment-run EXPERIMENT_SPEC=massive-dml/generated-batched-delete
+make experiment-run EXPERIMENT_SPEC=massive-dml/procedure-update
+make experiment-run EXPERIMENT_SPEC=massive-dml/queue-update
+make experiment-run EXPERIMENT_SPEC=massive-dml/procedure-delete
+make experiment-run EXPERIMENT_SPEC=massive-dml/transaction-caveats
+make experiment-run EXPERIMENT_SPEC=massive-dml/offline-bulk-load-indexed
+make experiment-run EXPERIMENT_SPEC=massive-dml/offline-bulk-load-index-after
+make experiment-run EXPERIMENT_SPEC=massive-dml/partition-drop-vs-delete
 make run-list
 make run-list RUN_STATUS=failed RUN_LIMIT=20
 make run-show RUN_DIR=runs/<run-id>

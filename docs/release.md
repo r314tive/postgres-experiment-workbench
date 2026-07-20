@@ -1,53 +1,51 @@
 # Release
 
 Release artifacts are built from the Go CLI and written under ignored
-`generated/release/`.
+`generated/release/`. Release notes live in [../CHANGELOG.md](../CHANGELOG.md),
+and the active milestone is described in [roadmap.md](roadmap.md).
 
-Release notes live in [../CHANGELOG.md](../CHANGELOG.md).
+## v0.1.37 candidate
 
-Build a local snapshot:
-
-```bash
-make release-snapshot
-```
-
-Override version metadata:
+The massive-DML consolidation is ready for a candidate commit only after this
+local sequence succeeds:
 
 ```bash
-make release-snapshot VERSION=0.1.0
-```
+make check
+make test
 
-The snapshot target builds `pgworkbench` archives for common Linux and macOS
-platforms and writes a `pgworkbench-<version>-SHA256SUMS.txt` checksum file.
-Default CI keeps using source-based checks.
+MATRIX_PROFILE_SIZES=medium MATRIX_REPEATS=3 \
+  make matrix-run MATRIX_SPEC=massive-dml-strategy
 
-GitHub Actions also has a `release-snapshot` workflow. It runs on `v*` tags or
-manual dispatch, builds the same archives, and uploads them as workflow
-artifacts. On tag pushes it also creates or updates the matching GitHub Release
-and attaches the archives plus checksum file.
-
-## Versioning
-
-Use `0.x` versions while the public contracts are still settling. For the first
-public MVP tag, prefer `v0.1.0` after:
-
-- local `make release-check` is green;
-- GitHub `check` is green on the tag candidate commit;
-- `make release-snapshot VERSION=0.1.0` builds all configured archives;
-- the generated SHA256SUMS file lists every release archive;
-- GitHub `release-snapshot` is green for the candidate version;
-- tracked env spec docs/schema pass `make spec-docs-check`;
-- [../CHANGELOG.md](../CHANGELOG.md) describes user-visible changes.
-
-## Pre-Release Gate
-
-Run the local release gate before tagging:
-
-```bash
 make release-check
+make release-snapshot VERSION=0.1.37
 ```
 
-The gate runs:
+Verify every matrix row and release archive:
+
+```bash
+make experiment-summary SUMMARY_INPUT=runs/matrices/<matrix-run-id>
+make scan-artifacts
+make privacy-scan
+cd generated/release && shasum -a 256 -c pgworkbench-0.1.37-SHA256SUMS.txt
+```
+
+The release snapshot target builds `pgworkbench` archives for supported Linux
+and macOS platforms and writes a checksum file listing every archive.
+
+## Candidate to release
+
+1. Commit and push the candidate changes.
+2. Require the GitHub `check` workflow to pass on that exact commit.
+3. Add a dated `v0.1.37` changelog heading and tag the exact green commit.
+4. Push the tag and require the GitHub `release-snapshot` workflow to pass.
+5. Verify that the GitHub Release contains every archive and its checksum file.
+6. Pin external documentation to the tag before redirecting or archiving the
+   standalone massive-DML repository.
+
+Do not tag from an uncommitted worktree, and do not archive the standalone lab
+before the pinned workbench release is reachable.
+
+## What `make release-check` covers
 
 - `make doctor`
 - `make check`
@@ -58,12 +56,12 @@ The gate runs:
 - `make pgworkbench`
 - `make privacy-scan`
 
-When Docker daemon access is intentionally unavailable, the doctor command can
-be run in no-daemon mode:
+When Docker daemon access is intentionally unavailable, use
+`make doctor DOCTOR_FLAGS=--skip-docker-daemon` only for prerequisite triage. A
+tag still waits for a full Docker-backed local gate or a green GitHub `check`.
 
-```bash
-make doctor DOCTOR_FLAGS=--skip-docker-daemon
-```
+## Versioning
 
-Use the no-daemon mode only for prerequisite triage. A release tag should still
-wait for a full Docker-backed local gate or a green GitHub `check` workflow.
+Use `0.x` versions while public contracts are settling. Every version bump must
+have a changelog entry, green spec-doc drift checks, a successful local release
+snapshot, complete checksums, and green tag workflows.

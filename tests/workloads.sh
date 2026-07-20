@@ -8,6 +8,14 @@ GO_MOD_CACHE="${GO_MOD_CACHE:-$REPO_DIR/.tmp/go-mod-cache}"
 
 WORKLOAD_LIST="$("$REPO_DIR/scripts/run_workload.sh" list)"
 grep -q '^pgbench/tiny$' <<< "$WORKLOAD_LIST"
+grep -q '^massive-dml/generated-update$' <<< "$WORKLOAD_LIST"
+grep -q '^massive-dml/generated-delete$' <<< "$WORKLOAD_LIST"
+grep -q '^massive-dml/procedure-update$' <<< "$WORKLOAD_LIST"
+grep -q '^massive-dml/queue-update$' <<< "$WORKLOAD_LIST"
+grep -q '^massive-dml/procedure-delete$' <<< "$WORKLOAD_LIST"
+grep -q '^massive-dml/transaction-caveats$' <<< "$WORKLOAD_LIST"
+grep -q '^massive-dml/bulk-load$' <<< "$WORKLOAD_LIST"
+grep -q '^massive-dml/partition-remove$' <<< "$WORKLOAD_LIST"
 
 GO_WORKLOAD_LIST="$(
   cd "$REPO_DIR"
@@ -36,6 +44,24 @@ GO_SHELL_WORKLOAD_PLAN="$(
   GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload plan topology/pgbouncer-smoke
 )"
 grep -q 'bash -lc' <<< "$GO_SHELL_WORKLOAD_PLAN"
+
+GO_MASSIVE_DML_PLAN="$(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload plan massive-dml/generated-update
+)"
+grep -q 'run_generated.sh' <<< "$GO_MASSIVE_DML_PLAN"
+
+GO_MASSIVE_DML_BULK_PLAN="$(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload plan massive-dml/bulk-load
+)"
+grep -q 'run_bulk_load.sh' <<< "$GO_MASSIVE_DML_BULK_PLAN"
+
+GO_MASSIVE_DML_PARTITION_PLAN="$(
+  cd "$REPO_DIR"
+  GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload plan massive-dml/partition-remove
+)"
+grep -q 'run_partition_remove.sh' <<< "$GO_MASSIVE_DML_PARTITION_PLAN"
 
 (
   cd "$REPO_DIR"

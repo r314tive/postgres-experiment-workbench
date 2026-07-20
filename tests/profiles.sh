@@ -13,6 +13,7 @@ PROFILES=(
   partitioning
   temp-spill
   connection-pressure
+  massive-dml
 )
 
 for profile in "${PROFILES[@]}"; do

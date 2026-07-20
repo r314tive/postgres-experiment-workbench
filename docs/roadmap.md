@@ -1,116 +1,85 @@
 # Roadmap
 
-This project should stay a generic PostgreSQL experiment platform.
+The `v0.1.37` milestone consolidates the standalone massive-DML lab
+into the workbench and leave the repository in a release-candidate state. The
+platform remains generic; domain SQL, assertions, evidence, and guidance stay
+under the `massive-dml` profile.
 
-## MVP Ready
+## v0.1.37 release-candidate scope
 
-MVP means a user can clone the repo, run local experiments, test external
-utilities, inspect evidence, and trust the result shape.
+### Implemented
 
-- Keep `smoke` as the tiny platform verification profile.
-- Keep `pgworkbench doctor` useful for prerequisite checks.
-- Keep default commands local/disposable and guarded against accidental
-  non-local PostgreSQL targets.
-- Keep `make check`, `make test`, and `make scan-artifacts` green.
-- Keep read-only diagnostic SQL snippets generic and safe for local disposable
-  targets.
-- Keep ignored local-only files out of public artifacts.
-- Keep profile metadata valid with `make profile-validate`.
+- Preserve standalone behavior for generated committed UPDATE/DELETE batches,
+  procedure-controlled batches, the queue alternative, and transaction-control
+  caveats.
+- Preserve the exact generated SQL, parameters, logs, final statistics,
+  assertions, metrics, snapshots, and verdict for every run.
+- Add physical-strategy experiments for offline bulk load with indexes present,
+  offline bulk load with secondary indexes built afterward, and partition
+  detach/drop versus row DELETE.
+- Keep Compose, PostgreSQL lifecycle, logging, metrics, snapshots, reports,
+  comparison, and optional noisia pressure in the workbench platform.
+- Cover the profile catalog, workload and experiment plans, matrices, runtime
+  assertions, generated artifacts, and run verification in automated tests.
+
+### Release-candidate evidence
+
+- `make check` must pass.
+- The standalone lab's Docker-backed tests and the migrated workbench parity
+  experiments must both pass before the standalone repository is redirected.
+- `make test` and `make release-check` must pass with Docker available.
+- `massive-dml-strategy` must pass at `medium` size with three repeats, producing
+  matrix summaries plus per-run bulk/partition measurements.
+- `make release-snapshot VERSION=0.1.37` must produce archives and a complete
+  checksum file.
+- The changelog, profile README, demo flow, and release procedure must describe
+  commands that were exercised on the candidate tree.
+
+### Deliberately outside the candidate tree
+
+These steps change public history or external systems and happen only after the
+candidate commit and CI are green:
+
+1. Commit and push the candidate; require the GitHub `check` workflow to pass.
+2. Tag and push `v0.1.37`; verify the GitHub release snapshot and attached
+   checksums.
+3. Update Confluence and demo materials to the pinned `v0.1.37` profile path.
+4. Tag the final standalone version, replace the beginning of its README with a
+   move notice, and link the workbench profile and release.
+5. Archive the standalone GitHub repository without deleting it.
+
+The old repository stays active until steps 1-3 succeed. Archive is the final
+operation, not the migration mechanism.
+
+## Demo contract
+
+The primary demo shows a decision, not a preferred batch size:
+
+1. Use generated committed batches when online row-level changes are required.
+2. Compare indexed load with index-after load for an offline bulk load.
+3. Compare row DELETE with partition detach/drop when retention boundaries align.
+4. Use repeated matrix evidence before drawing performance conclusions.
+5. Treat live stop/resume as a manual generated-first scenario inside the same
+   profile.
+
+## After v0.1.37
+
+- Add rebuild/swap only when a concrete availability and cutover contract is
+  defined.
+- Add an application-job example only when external side effects and retry
+  semantics are part of the experiment.
+- Extract a reusable dataset spec only if another profile needs the same shape;
+  the current synthetic schema remains profile-local.
+- Move more shell glue to Go only after a stable structured contract exists.
+
+## Platform invariants
+
+- Keep local/disposable defaults and guards against accidental non-local
+  PostgreSQL targets.
 - Keep every real profile runnable at `PROFILE_SIZE=small`.
-- Keep experiment outputs self-contained under `runs/<run-id>/`.
-- Keep utility-suite outputs inspectable and verifiable under
-  `runs/utility-suites/<suite-run-id>/`.
-
-## Release Ready
-
-Release means the repo has stable public contracts, documented extension points,
-and a small number of reliable binaries/scripts.
-
-- Add release notes and versioned tags once MVP checks are stable.
-- Keep `make release-check` green before tags.
-- Keep packaged `pgworkbench` snapshot binaries buildable for common platforms.
-- Keep the minimal quickstart transcript current.
-- Keep schema/reference docs for workload, topology, experiment, matrix,
-  dataset, utility-test, and utility-suite env specs generated from code and
-  checked for drift.
-- Keep compatibility notes current for Docker, Compose, PostgreSQL image
-  versions, and host tools.
-- Add more profile-specific diagnostic SQL where it helps interpretation.
-- Keep utility-test workflows documented for dump/restore, PgBouncer,
-  source-check plan, and upgrade paths.
-
-## Go Migration
-
-Use Go where deterministic parsing, validation, reporting, or packaging matters.
-Keep shell where it is only glue around Docker Compose, `psql`, or host tools.
-
-Already started:
-
-- `pgworkbench profile list|show|validate`.
-- `pgworkbench experiment plan`, including JSON output and expanded dry-run
-  previews.
-- `pgworkbench scan failures`.
-- `pgworkbench report run|compare|summary|history`.
-- `pgworkbench run list|show`, including status filters and limits.
-- `pgworkbench run bundle`.
-- `pgworkbench run verify|write-manifest|write-verdict`.
-- experiment runner state writer defaulted to Go with explicit shell
-  compatibility mode.
-- `pgworkbench workload list|show|validate`.
-- `pgworkbench dataset list|show|validate`.
-- Make profile catalog targets default to Go with shell compatibility still
-  available.
-- Make workload and dataset catalog targets default to Go raw output with shell
-  compatibility still available.
-- Make experiment, matrix, and topology catalog targets default to Go raw
-  output with shell compatibility still available.
-- `pgworkbench diagnostics list|show`; diagnostic execution stays in shell.
-- `pgworkbench matrix plan`.
-- Make `matrix-plan` default to Go raw output with shell-compatible Markdown.
-- Make run report, summary, and history targets default to Go with explicit
-  shell compatibility targets.
-- Make run comparison default to Go raw output with explicit shell
-  compatibility target.
-- `pgworkbench spec list|show|reference|schema|validate`.
-- `pgworkbench topology inspect|ps`.
-- `pgworkbench metrics plan`, including JSON output.
-- `pgworkbench patchset list|show|validate`.
-- `pgworkbench source plan|classify`.
-- `pgworkbench profile plan`, including JSON output.
-- `pgworkbench workload plan`, including JSON output.
-- `pgworkbench dataset plan`, including JSON output.
-- `pgworkbench utility list|show|validate|plan|run`, including JSON output and
-  generated experiment-run bridging.
-- `pgworkbench utility-suite list|show|validate|plan|run`, including JSON
-  output and utility-test batch summaries.
-- `pgworkbench utility-suite run-list|run-show|run-verify`, including JSON
-  output and linked experiment-run verification.
-- `pgworkbench utility-suite run-bundle`, including JSON output and portable
-  suite plus linked experiment-run archives.
-- `make release-snapshot`.
-
-Good Go candidates:
-
-- Move the remaining shell-only execution/report glue only when a stable
-  structured contract already exists.
-
-Keep in shell for now:
-
-- Docker Compose lifecycle adapters;
-- `psql` wrappers;
-- one-shot workload command execution;
-- intentionally flexible host-tool adapters.
-
-Migration rule: introduce Go commands in parallel, test them against existing
-shell behavior, then switch Make targets only after compatibility is proven.
-
-## Candidate Profiles
-
-No named MVP candidate profile is pending. Next profile additions should come
-from concrete utility, topology, or PostgreSQL behavior gaps found during real
-runs.
-
-## Boundary
-
-Do not turn the platform README into a PostgreSQL textbook. Keep experiments
-profile-local and keep the root project focused on reusable mechanics.
+- Keep experiment evidence self-contained under `runs/<run-id>/` and free of
+  ignored local-only or sensitive material.
+- Keep `make check`, Docker-backed tests, artifact scans, privacy scans, and
+  release snapshots green before every tag.
+- Keep the root README focused on reusable mechanics and domain teaching in the
+  owning profile.

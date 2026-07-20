@@ -55,3 +55,4 @@ starter.
 | `logical-replication` | Publication/subscription convergence and DDL boundary checks. |
 | `logical-ddl` | Logical replication DDL boundary, repair, publication refresh. |
 | `connection-pressure` | Session churn, backend reuse, and pooler-shaped behavior. |
+| `massive-dml` | Committed UPDATE/DELETE batches, offline bulk load, and partition removal strategy. |

@@ -8,6 +8,8 @@ GO_MOD_CACHE="${GO_MOD_CACHE:-$REPO_DIR/.tmp/go-mod-cache}"
 
 MATRIX_LIST="$("$REPO_DIR/scripts/run_experiment_matrix.sh" list)"
 grep -q '^smoke$' <<< "$MATRIX_LIST"
+grep -q '^massive-dml-comparison$' <<< "$MATRIX_LIST"
+grep -q '^massive-dml-strategy$' <<< "$MATRIX_LIST"
 
 MATRIX_SHOW="$("$REPO_DIR/scripts/run_experiment_matrix.sh" show smoke)"
 grep -q 'MATRIX_NAME="smoke matrix"' <<< "$MATRIX_SHOW"
@@ -15,6 +17,14 @@ grep -q 'MATRIX_NAME="smoke matrix"' <<< "$MATRIX_SHOW"
 MATRIX_PLAN="$("$REPO_DIR/scripts/run_experiment_matrix.sh" plan smoke)"
 grep -q '# Experiment Matrix Plan' <<< "$MATRIX_PLAN"
 grep -q '| `smoke` | `default` | `small` | `1` |' <<< "$MATRIX_PLAN"
+
+MASSIVE_DML_MATRIX_PLAN="$(
+  MATRIX_PROFILE_SIZES=small MATRIX_REPEATS=1 \
+    "$REPO_DIR/scripts/run_experiment_matrix.sh" plan massive-dml-strategy
+)"
+grep -q '| `massive-dml/offline-bulk-load-indexed` | `default` | `small` | `1` |' <<< "$MASSIVE_DML_MATRIX_PLAN"
+grep -q '| `massive-dml/offline-bulk-load-index-after` | `default` | `small` | `1` |' <<< "$MASSIVE_DML_MATRIX_PLAN"
+grep -q '| `massive-dml/partition-drop-vs-delete` | `default` | `small` | `1` |' <<< "$MASSIVE_DML_MATRIX_PLAN"
 
 GO_MATRIX_PLAN="$(
   cd "$REPO_DIR"

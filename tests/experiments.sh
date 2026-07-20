@@ -26,6 +26,15 @@ grep -q '^logical-ddl$' <<< "$EXPERIMENT_LIST"
 grep -q '^pgbouncer-smoke$' <<< "$EXPERIMENT_LIST"
 grep -q '^multi-version-upgrade-smoke$' <<< "$EXPERIMENT_LIST"
 grep -q '^temp-spill$' <<< "$EXPERIMENT_LIST"
+grep -q '^massive-dml/generated-batched-update$' <<< "$EXPERIMENT_LIST"
+grep -q '^massive-dml/generated-batched-delete$' <<< "$EXPERIMENT_LIST"
+grep -q '^massive-dml/procedure-update$' <<< "$EXPERIMENT_LIST"
+grep -q '^massive-dml/queue-update$' <<< "$EXPERIMENT_LIST"
+grep -q '^massive-dml/procedure-delete$' <<< "$EXPERIMENT_LIST"
+grep -q '^massive-dml/transaction-caveats$' <<< "$EXPERIMENT_LIST"
+grep -q '^massive-dml/offline-bulk-load-indexed$' <<< "$EXPERIMENT_LIST"
+grep -q '^massive-dml/offline-bulk-load-index-after$' <<< "$EXPERIMENT_LIST"
+grep -q '^massive-dml/partition-drop-vs-delete$' <<< "$EXPERIMENT_LIST"
 
 "$REPO_DIR/scripts/run_experiment.sh" show smoke | grep -q 'EXPERIMENT_NAME="smoke experiment"'
 

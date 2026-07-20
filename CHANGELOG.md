@@ -1,8 +1,29 @@
 # Changelog
 
-## Unreleased
+## v0.1.37 - 2026-07-20
 
-No changes yet.
+Added domain experiment coverage:
+
+- Added the `massive-dml` profile with deterministic scalable data, generated
+  committed UPDATE/DELETE batches, procedure and queue alternatives,
+  transaction caveats, diagnostics, assertions, and profile-local guidance.
+- Added generated UPDATE/DELETE, procedure UPDATE/DELETE, queue UPDATE, and
+  transaction-caveat workloads and experiments with SQL/error artifacts,
+  metrics, snapshots, assertions, and verdicts.
+- Added the `massive-dml-comparison` parity matrix and Docker-backed runtime
+  coverage for the complete migrated standalone behavior set.
+- Added offline bulk-load experiments comparing index maintenance during load
+  with building secondary indexes afterward, preserving row, timing, WAL, and
+  size measurements as run artifacts.
+- Added a partition detach/drop versus row DELETE experiment with identical
+  source data, correctness assertions, timing/WAL measurements, and a focused
+  three-repeat `massive-dml-strategy` matrix.
+- Reworked the roadmap, release gate, profile documentation, and demo flow
+  around a `v0.1.37` release candidate and an explicit post-release redirect and
+  archive boundary for the standalone repository.
+- Added a reproducible nine-run medium-size candidate demo record with local
+  bulk-load and partition-removal measurements and explicit interpretation
+  limits.
 
 ## v0.1.36 - 2026-06-09
 
