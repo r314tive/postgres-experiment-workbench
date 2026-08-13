@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/critical-finding-review.schema.json",
+  "title": "pgworkbench critical finding review v1",
+  "description": "Manual, administrator-signed v1 release review for critical findings and repository prevention controls.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "record_status",
+    "review_id",
+    "candidate",
+    "scope",
+    "repository_controls",
+    "findings",
+    "decision",
+    "signoff"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.critical-finding-review/v1"},
+    "artifact_type": {"const": "pgworkbench.critical-finding-review"},
+    "record_status": {"enum": ["template", "signed"]},
+    "review_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "candidate": {"$ref": "#/$defs/candidate"},
+    "scope": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {"enum": ["security", "data-loss", "portability", "evidence-integrity"]},
+      "allOf": [
+        {"contains": {"const": "security"}},
+        {"contains": {"const": "data-loss"}},
+        {"contains": {"const": "portability"}},
+        {"contains": {"const": "evidence-integrity"}}
+      ]
+    },
+    "repository_controls": {"$ref": "#/$defs/repository_controls"},
+    "findings": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/finding"}
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "recorded_at", "rationale"],
+      "properties": {
+        "status": {"enum": ["no-go", "go"]},
+        "recorded_at": {"type": "string", "format": "date-time"},
+        "rationale": {"type": "string", "minLength": 1, "maxLength": 4000}
+      }
+    },
+    "signoff": {"$ref": "#/$defs/signoff"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "properties": {"status": {"const": "go"}},
+            "required": ["status"]
+          }
+        },
+        "required": ["decision"]
+      },
+      "then": {
+        "properties": {
+          "record_status": {"const": "signed"},
+          "repository_controls": {
+            "properties": {
+              "tag_ruleset": {
+                "properties": {
+                  "status": {"const": "verified"},
+                  "bypass_actors_reviewed": {"const": true}
+                },
+                "required": ["status", "id", "updated_at", "bypass_actors_reviewed", "evidence"]
+              },
+              "immutable_releases": {
+                "properties": {
+                  "status": {"const": "verified"},
+                  "enabled": {"const": true}
+                },
+                "required": ["status", "enabled", "evidence"]
+              }
+            },
+            "required": ["tag_ruleset", "immutable_releases"]
+          },
+          "findings": {
+            "not": {
+              "contains": {
+                "type": "object",
+                "properties": {
+                  "severity": {"const": "critical"},
+                  "status": {"enum": ["open", "accepted"]}
+                },
+                "required": ["severity", "status"]
+              }
+            }
+          },
+          "signoff": {
+            "properties": {"status": {"const": "signed"}},
+            "required": ["status", "reviewer", "reviewer_role", "signed_at", "statement", "signature_evidence"]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "tag", "git_commit", "pack_digest"],
+      "properties": {
+        "version": {"$ref": "#/$defs/semver"},
+        "tag": {"type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"},
+        "git_commit": {"type": "string", "pattern": "^(?!(?:0{40}|0{64})$)(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "pack_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "digest", "captured_at"],
+      "properties": {
+        "ref": {"type": "string", "format": "uri", "pattern": "^(?:https|s3|gs|urn):"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "captured_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "repository_controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag_ruleset", "immutable_releases"],
+      "properties": {
+        "tag_ruleset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "target", "enforcement", "include_pattern", "excludes", "creation_restricted", "update_prohibited", "deletion_prohibited", "bypass_actors_reviewed"],
+          "properties": {
+            "status": {"enum": ["open", "verified"]},
+            "id": {"type": "integer", "minimum": 1},
+            "updated_at": {"type": "string", "format": "date-time"},
+            "target": {"const": "tag"},
+            "enforcement": {"const": "active"},
+            "include_pattern": {"const": "refs/tags/v*"},
+            "excludes": {"type": "array", "maxItems": 0},
+            "creation_restricted": {"const": true},
+            "update_prohibited": {"const": true},
+            "deletion_prohibited": {"const": true},
+            "bypass_actors_reviewed": {"type": "boolean"},
+            "evidence": {"$ref": "#/$defs/evidence"}
+          }
+        },
+        "immutable_releases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "enabled"],
+          "properties": {
+            "status": {"enum": ["open", "verified"]},
+            "enabled": {"type": "boolean"},
+            "enforced_by_owner": {"type": "boolean"},
+            "evidence": {"$ref": "#/$defs/evidence"}
+          }
+        }
+      }
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "severity", "status", "summary"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Z]+-[0-9]+$"},
+        "category": {"enum": ["security", "data-loss", "portability", "evidence-integrity"]},
+        "severity": {"enum": ["critical", "high", "medium", "low"]},
+        "status": {"enum": ["open", "closed", "accepted"]},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "resolution": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "evidence": {"$ref": "#/$defs/evidence"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "closed"}}, "required": ["status"]},
+          "then": {"required": ["resolution", "evidence"]}
+        }
+      ]
+    },
+    "signoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["open", "signed"]},
+        "reviewer": {"type": "string", "minLength": 1, "maxLength": 128},
+        "reviewer_role": {"const": "repository-administrator"},
+        "signed_at": {"type": "string", "format": "date-time"},
+        "statement": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "signature_evidence": {"$ref": "#/$defs/evidence"}
+      }
+    }
+  }
+}

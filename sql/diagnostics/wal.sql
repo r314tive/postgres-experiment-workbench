@@ -8,10 +8,10 @@ SELECT
   wal_fpi,
   pg_size_pretty(wal_bytes) AS wal_bytes,
   wal_buffers_full,
-  wal_write,
-  wal_sync,
+  COALESCE((to_jsonb(w) ->> 'wal_write')::bigint, 0) AS wal_write,
+  COALESCE((to_jsonb(w) ->> 'wal_sync')::bigint, 0) AS wal_sync,
   stats_reset
-FROM pg_stat_wal;
+FROM pg_stat_wal AS w;
 
 \echo 'diagnostic: checkpoints'
 

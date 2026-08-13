@@ -1,0 +1,44 @@
+{
+  "schema_version": "pgworkbench.critical-finding-review/v1",
+  "artifact_type": "pgworkbench.critical-finding-review",
+  "record_status": "template",
+  "review_id": "v0-2-0-critical-review",
+  "candidate": {
+    "version": "0.2.0",
+    "tag": "v0.2.0",
+    "git_commit": "1111111111111111111111111111111111111111",
+    "pack_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "scope": [
+    "security",
+    "data-loss",
+    "portability",
+    "evidence-integrity"
+  ],
+  "repository_controls": {
+    "tag_ruleset": {
+      "status": "open",
+      "target": "tag",
+      "enforcement": "active",
+      "include_pattern": "refs/tags/v*",
+      "excludes": [],
+      "creation_restricted": true,
+      "update_prohibited": true,
+      "deletion_prohibited": true,
+      "bypass_actors_reviewed": false
+    },
+    "immutable_releases": {
+      "status": "open",
+      "enabled": false
+    }
+  },
+  "findings": [],
+  "decision": {
+    "status": "no-go",
+    "recorded_at": "2026-08-13T00:00:00Z",
+    "rationale": "Template only; repository controls and critical findings have not been reviewed."
+  },
+  "signoff": {
+    "status": "open"
+  }
+}

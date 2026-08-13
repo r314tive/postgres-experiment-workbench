@@ -31,9 +31,18 @@ PRESERVED_ENV_NAMES=()
 PRESERVED_ENV_VALUES=()
 for name in \
   COMPOSE \
+  PGWORKBENCH_EXPERIMENT_MODE \
+  POSTGRES_HOST \
+  POSTGRES_REPLICA_HOST \
+  POSTGRES_LOGICAL_SUBSCRIBER_HOST \
+  POSTGRES_UPGRADE_OLD_HOST \
+  POSTGRES_UPGRADE_NEW_HOST \
+  PGBOUNCER_HOST \
   POSTGRES_DB \
   POSTGRES_USER \
   POSTGRES_PASSWORD \
+  ALLOW_NONLOCAL_PG \
+  ALLOW_SYSTEM_DB \
   NOISIA_CONNINFO \
   NOISIA_DURATION \
   NOISIA_JOBS \
@@ -58,6 +67,10 @@ fi
 for ((i = 0; i < ${#PRESERVED_ENV_NAMES[@]}; i++)); do
   export "${PRESERVED_ENV_NAMES[$i]}=${PRESERVED_ENV_VALUES[$i]}"
 done
+
+if [[ "${PGWORKBENCH_EXPERIMENT_MODE:-0}" = "1" ]]; then
+  "$REPO_DIR/scripts/guard_local_pg.sh"
+fi
 
 read -r -a COMPOSE_CMD <<< "${COMPOSE:-docker compose}"
 COMPOSE_ARGS=()
@@ -125,7 +138,7 @@ esac
 "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" up -d postgres
 "$REPO_DIR/scripts/wait_for_pg.sh"
 
-RUN_ARGS=(--conninfo "$NOISIA_CONNINFO")
+RUN_ARGS=()
 if [[ "$WORKLOAD" != "cleanup" ]]; then
   RUN_ARGS+=(--duration "$NOISIA_DURATION" --jobs "$NOISIA_JOBS")
 fi
@@ -133,4 +146,5 @@ fi
 "${COMPOSE_CMD[@]}" "${COMPOSE_ARGS[@]}" run --rm noisia \
   "${RUN_ARGS[@]}" \
   "${WORKLOAD_ARGS[@]}" \
-  "$@"
+  "$@" \
+  --conninfo "$NOISIA_CONNINFO"

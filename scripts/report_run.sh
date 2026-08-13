@@ -206,8 +206,33 @@ if [[ -n "$OUT_FILE" ]]; then
   if [[ "$OUT_FILE" != /* ]]; then
     OUT_FILE="$REPO_DIR/$OUT_FILE"
   fi
-  mkdir -p "$(dirname "$OUT_FILE")"
-  render_report > "$OUT_FILE"
+  if [[ -e "$OUT_FILE" || -L "$OUT_FILE" ]]; then
+    echo "Refusing to overwrite report output: $OUT_FILE" >&2
+    exit 1
+  fi
+  output_parent="$(dirname "$OUT_FILE")"
+  mkdir -p "$output_parent"
+  output_parent="$(realpath "$output_parent")"
+  OUT_FILE="$output_parent/$(basename "$OUT_FILE")"
+  case "$OUT_FILE/" in
+    "$RUN_DIR/"*)
+      echo "Refusing to write a report inside immutable run input: $OUT_FILE" >&2
+      exit 1
+      ;;
+  esac
+  temporary="$(mktemp "$output_parent/.pgworkbench-report.XXXXXX")"
+  cleanup_report_temp() {
+    rm -f -- "$temporary"
+  }
+  trap cleanup_report_temp EXIT
+  render_report > "$temporary"
+  chmod 0644 "$temporary"
+  if ! ln "$temporary" "$OUT_FILE"; then
+    echo "Refusing to overwrite report output: $OUT_FILE" >&2
+    exit 1
+  fi
+  rm -f -- "$temporary"
+  trap - EXIT
   echo "Wrote report: $OUT_FILE"
 else
   render_report

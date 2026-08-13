@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +43,8 @@ func (r Result) Valid() bool {
 
 type Options struct {
 	SkipDockerDaemon bool
+	Runtime          string
+	NativeBindir     string
 }
 
 type Deps struct {
@@ -53,9 +56,23 @@ type Deps struct {
 func Run(root string, options Options, deps Deps) Result {
 	deps = withDefaults(deps)
 	result := Result{}
+	runtime := strings.TrimSpace(options.Runtime)
+	if runtime == "" {
+		runtime = "docker"
+	}
+	if runtime != "docker" && runtime != "native" {
+		add(&result, Fail, "runtime", fmt.Sprintf("unsupported %q; expected docker or native", runtime))
+		return result
+	}
+	add(&result, Pass, "runtime", runtime)
 
-	checkFile(&result, deps, filepath.Join(root, "Makefile"), "repo Makefile")
-	checkFile(&result, deps, filepath.Join(root, "compose.yaml"), "compose.yaml")
+	checkWorkspace(&result, deps, root)
+	checkFile(&result, deps, filepath.Join(root, "scripts", "runtime.sh"), "runtime dispatcher")
+	if runtime == "docker" {
+		checkFile(&result, deps, filepath.Join(root, "compose.yaml"), "compose.yaml")
+	} else {
+		checkFile(&result, deps, filepath.Join(root, "scripts", "native_runtime.sh"), "native runtime")
+	}
 
 	envPath := filepath.Join(root, ".env")
 	envLabel := ".env"
@@ -79,22 +96,101 @@ func Run(root string, options Options, deps Deps) Result {
 
 	checkLocalTarget(&result, envValues)
 
-	for _, command := range []string{"bash", "make", "docker", "go", "psql", "awk", "sed", "realpath", "rg"} {
+	requiredCommands := []string{"bash", "awk", "sed", "realpath"}
+	if runtime == "docker" {
+		requiredCommands = append(requiredCommands, "docker", "psql")
+	} else {
+		for _, command := range []string{"initdb", "pg_ctl", "createdb", "pg_isready", "psql"} {
+			checkNativeCommand(&result, deps, options.NativeBindir, command)
+		}
+	}
+	for _, command := range requiredCommands {
 		checkCommand(&result, deps, command, true)
 	}
-	checkCommand(&result, deps, "gh", false)
+	checkBashVersion(&result, deps)
+	for _, command := range []string{"go", "make", "rg", "gh"} {
+		checkCommand(&result, deps, command, false)
+	}
 
-	checkCommandOutput(&result, deps, "go version", "go", "version")
-	checkCommandOutput(&result, deps, "docker version", "docker", "--version")
-	checkCommandOutput(&result, deps, "docker compose version", "docker", "compose", "version")
-	checkCommandOutput(&result, deps, "docker compose config", "docker", "compose", "--env-file", envPath, "config", "--quiet")
-	if options.SkipDockerDaemon {
-		add(&result, Warn, "docker daemon", "skipped")
-	} else {
-		checkCommandOutput(&result, deps, "docker daemon", "docker", "info", "--format", "{{.ServerVersion}}")
+	checkOptionalCommandOutput(&result, deps, "go version", "go", "version")
+	if runtime == "docker" {
+		checkCommandOutput(&result, deps, "docker version", "docker", "--version")
+		checkCommandOutput(&result, deps, "docker compose version", "docker", "compose", "version")
+		checkCommandOutput(&result, deps, "docker compose config", "docker", "compose", "--env-file", envPath, "config", "--quiet")
+		if options.SkipDockerDaemon {
+			add(&result, Warn, "docker daemon", "skipped")
+		} else {
+			checkCommandOutput(&result, deps, "docker daemon", "docker", "info", "--format", "{{.ServerVersion}}")
+		}
 	}
 
 	return result
+}
+
+func checkBashVersion(result *Result, deps Deps) {
+	if _, err := deps.LookupPath("bash"); err != nil {
+		return
+	}
+	output, err := deps.RunCommand("bash", "--version")
+	line := firstLine(output)
+	if err != nil {
+		add(result, Fail, "bash version", valueOrDetail(line, err.Error()))
+		return
+	}
+	marker := "version "
+	index := strings.Index(line, marker)
+	if index < 0 {
+		add(result, Fail, "bash version", "could not parse: "+line)
+		return
+	}
+	versionText := strings.Fields(line[index+len(marker):])
+	if len(versionText) == 0 {
+		add(result, Fail, "bash version", "could not parse: "+line)
+		return
+	}
+	majorText, _, _ := strings.Cut(strings.TrimSuffix(versionText[0], "("), ".")
+	major, parseErr := strconv.Atoi(majorText)
+	if parseErr != nil {
+		add(result, Fail, "bash version", "could not parse: "+line)
+		return
+	}
+	if major < 4 {
+		add(result, Fail, "bash version", fmt.Sprintf("%s; Bash 4 or newer is required", line))
+		return
+	}
+	add(result, Pass, "bash version", line)
+}
+
+func valueOrDetail(value string, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
+}
+
+func checkNativeCommand(result *Result, deps Deps, bindir string, command string) {
+	if strings.TrimSpace(bindir) == "" {
+		checkCommand(result, deps, command, true)
+		return
+	}
+	path := filepath.Join(bindir, command)
+	info, err := deps.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+		add(result, Fail, "command "+command, "not executable: "+path)
+		return
+	}
+	add(result, Pass, "command "+command, path)
+}
+
+func checkWorkspace(result *Result, deps Deps, root string) {
+	for _, marker := range []string{"pgworkbench-pack.json", "Makefile"} {
+		info, err := deps.Stat(filepath.Join(root, marker))
+		if err == nil && info.Mode().IsRegular() {
+			add(result, Pass, "workspace", marker)
+			return
+		}
+	}
+	add(result, Fail, "workspace", "missing pgworkbench-pack.json or Makefile")
 }
 
 func Render(w io.Writer, result Result) error {
@@ -203,6 +299,13 @@ func checkCommandOutput(result *Result, deps Deps, name string, command string, 
 		output = "ok"
 	}
 	add(result, Pass, name, output)
+}
+
+func checkOptionalCommandOutput(result *Result, deps Deps, name string, command string, args ...string) {
+	if _, err := deps.LookupPath(command); err != nil {
+		return
+	}
+	checkCommandOutput(result, deps, name, command, args...)
 }
 
 func firstLine(output string) string {

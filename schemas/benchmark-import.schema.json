@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-import.schema.json",
+  "title": "pgworkbench descriptive offline benchmark import",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_type", "contract_version", "classification",
+    "analysis_design", "status", "conclusion", "decision_eligible",
+    "pgbench_series_eligible", "driver", "driver_version", "workload",
+    "source_format", "parser_version", "primary_metric", "errors", "timing",
+    "raw_input", "assurance", "digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.benchmark-import/v1"},
+    "artifact_type": {"const": "pgworkbench.benchmark-import"},
+    "contract_version": {"const": "1.1.0"},
+    "classification": {"const": "descriptive-imported"},
+    "analysis_design": {"const": "offline-import"},
+    "status": {"const": "imported"},
+    "conclusion": {"const": "descriptive"},
+    "decision_eligible": {"const": false},
+    "pgbench_series_eligible": {"const": false},
+    "driver": {"enum": ["hammerdb", "sysbench", "benchbase"]},
+    "driver_version": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._+\\-]*$"},
+    "driver_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "workload": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9][A-Za-z0-9._/\\-]*$"},
+    "source_format": {
+      "enum": [
+        "hammerdb6-saved-job-report-json",
+        "hammerdb-job-report-v1",
+        "sysbench-1.0-console-summary",
+        "benchbase-structured-result-json-explicit-mapping",
+        "benchbase-summary-json@33c0047"
+      ]
+    },
+    "parser_version": {"enum": ["sysbench-console-summary/v1.1", "explicit-json-pointer-mapping/v1", "hammerdb6-job-report/v1", "benchbase-summary/33c0047-v1"]},
+    "primary_metric": {"$ref": "#/$defs/primary_metric"},
+    "errors": {"$ref": "#/$defs/errors"},
+    "timing": {"$ref": "#/$defs/timing"},
+    "raw_input": {"$ref": "#/$defs/raw_input"},
+    "mapping_input": {"$ref": "#/$defs/mapping_input"},
+    "assurance": {"$ref": "#/$defs/assurance"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"parser_version": {"const": "explicit-json-pointer-mapping/v1"}}},
+      "then": {
+        "required": ["mapping_input"],
+        "properties": {"errors": {"properties": {"complete": {"const": false}}}}
+      },
+      "else": {"not": {"required": ["mapping_input"]}}
+    },
+    {
+      "if": {"properties": {"driver": {"const": "sysbench"}}},
+      "then": {
+        "properties": {
+          "source_format": {"const": "sysbench-1.0-console-summary"},
+          "parser_version": {"const": "sysbench-console-summary/v1.1"},
+          "errors": {"properties": {"complete": {"const": true}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"driver": {"const": "hammerdb"}}},
+      "then": {"properties": {"source_format": {"enum": ["hammerdb6-saved-job-report-json", "hammerdb-job-report-v1"]}}}
+    },
+    {
+      "if": {"properties": {"driver": {"const": "benchbase"}}},
+      "then": {"properties": {"source_format": {"enum": ["benchbase-structured-result-json-explicit-mapping", "benchbase-summary-json@33c0047"]}}}
+    },
+    {
+      "if": {"properties": {"source_format": {"const": "hammerdb-job-report-v1"}}},
+      "then": {
+        "required": ["driver_commit"],
+        "properties": {
+          "driver": {"const": "hammerdb"},
+          "driver_version": {"const": "v6.0"},
+          "driver_commit": {"const": "d33f879aec858063edd17aa2daa46db03abb2bae"},
+          "parser_version": {"const": "hammerdb6-job-report/v1"},
+          "errors": {"properties": {"complete": {"const": false}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"source_format": {"const": "benchbase-summary-json@33c0047"}}},
+      "then": {
+        "required": ["driver_commit"],
+        "properties": {
+          "driver": {"const": "benchbase"},
+          "driver_version": {"const": "2023-SNAPSHOT+33c0047"},
+          "driver_commit": {"const": "33c00473807ebd49304d114a6d769d2d2b2bbb34"},
+          "parser_version": {"const": "benchbase-summary/33c0047-v1"},
+          "errors": {"properties": {"complete": {"const": false}}}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "primary_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value", "unit", "direction", "basis"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        "value": {"type": "number", "minimum": 0},
+        "unit": {"type": "string", "minLength": 1, "maxLength": 64},
+        "direction": {"enum": ["higher", "lower"]},
+        "basis": {"enum": ["reported", "derived-from-reported-totals", "selected-from-structured-source"]}
+      }
+    },
+    "errors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "messages", "complete"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "messages": {"type": "array", "maxItems": 100, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+        "complete": {"type": "boolean"}
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "elapsed_seconds"],
+      "properties": {
+        "basis": {"enum": ["reported-elapsed", "selected-from-structured-source", "declared-window", "reported-aggregate-query-time"]},
+        "elapsed_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": "string", "format": "date-time"}
+      },
+      "dependentRequired": {
+        "started_at": ["finished_at"],
+        "finished_at": ["started_at"]
+      }
+    },
+    "raw_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "digest", "size_bytes"],
+      "properties": {
+        "file": {"const": "raw/source"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864}
+      }
+    },
+    "mapping_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "digest", "size_bytes"],
+      "properties": {
+        "file": {"const": "raw/mapping.json"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 1048576}
+      }
+    },
+    "assurance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_origin", "normalization_origin", "verification_scope",
+        "tpc_compliance_claim", "cross_system_comparison_eligible"
+      ],
+      "properties": {
+        "evidence_origin": {"const": "offline-import"},
+        "normalization_origin": {"enum": ["strict-parser", "strict-pinned-parser", "explicit-json-pointer-mapping"]},
+        "verification_scope": {"const": "raw-byte-integrity-and-contract-rederivation"},
+        "tpc_compliance_claim": {"const": false},
+        "cross_system_comparison_eligible": {"const": false}
+      }
+    }
+  }
+}

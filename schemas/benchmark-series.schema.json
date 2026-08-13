@@ -1,0 +1,279 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-series.schema.json",
+  "title": "pgworkbench benchmark series v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "benchmark",
+    "name",
+    "class",
+    "driver",
+    "target",
+    "target_endpoint_contract",
+    "target_topology",
+    "subject",
+    "run_id",
+    "run_dir",
+    "spec_ref",
+    "spec_digest",
+    "protocol_digest",
+    "comparison_key_digest",
+    "engine_binary_ref",
+    "engine_binary_digest",
+    "allowed_subject_differences",
+    "runtime",
+    "evidence_class",
+    "primary_metric",
+    "direction",
+    "max_cv_pct",
+    "reset_policy",
+    "started_at",
+    "finished_at",
+    "status",
+    "reasons",
+    "trials_planned",
+    "trials_valid",
+    "trials_failed",
+    "trials_invalid",
+    "trials"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "pgworkbench.benchmark-series/v1"
+    },
+    "artifact_type": {
+      "const": "pgworkbench.benchmark-series"
+    },
+    "benchmark": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "class": {
+      "enum": ["smoke", "measurement"]
+    },
+    "driver": {
+      "const": "pgbench"
+    },
+    "target": {
+      "enum": ["direct-postgres", "pgbouncer"]
+    },
+    "target_endpoint_contract": {
+      "enum": [
+        "pgworkbench.pgbench-target/direct-postgres/v1",
+        "pgworkbench.pgbench-target/pgbouncer/v1"
+      ]
+    },
+    "target_topology": {
+      "enum": ["single", "pgbouncer"]
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "run_dir": {
+      "const": "."
+    },
+    "spec_ref": {
+      "$ref": "#/$defs/portablePath"
+    },
+    "spec_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "protocol_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "comparison_key_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "engine_binary_ref": {
+      "const": "protocol/engine/pgworkbench"
+    },
+    "engine_binary_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "allowed_subject_differences": {
+      "type": "array",
+      "items": {
+        "enum": ["pg_config", "native_toolchain"]
+      },
+      "uniqueItems": true
+    },
+    "runtime": {
+      "enum": ["docker", "native"]
+    },
+    "evidence_class": {
+      "type": "string",
+      "minLength": 1
+    },
+    "primary_metric": {
+      "enum": ["pgbench.tps", "pgbench.latency_mean_us"]
+    },
+    "direction": {
+      "enum": ["higher", "lower"]
+    },
+    "regression_threshold_pct": {
+      "type": "number",
+      "minimum": 0
+    },
+    "max_cv_pct": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "reset_policy": {
+      "enum": ["rebuild-per-trial", "reuse-readonly"]
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "enum": ["passed", "failed", "invalid", "inconclusive"]
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "trials_planned": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "trials_valid": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "trials_failed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "trials_invalid": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "scenario_pack": {
+      "$ref": "#/$defs/scenarioPackIdentity"
+    },
+    "environment": {
+      "$ref": "benchmark-environment.schema.json"
+    },
+    "stats": {
+      "$ref": "#/$defs/trialStats"
+    },
+    "trials": {
+      "type": "array",
+      "items": {
+        "$ref": "benchmark-trial.schema.json"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "portablePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$"
+    },
+    "scenarioPackIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "digest", "inventory_ref", "inventory_digest"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "inventory_ref": {
+          "const": "protocol/scenario-pack.json"
+        },
+        "inventory_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "trialStats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "stats_version",
+        "n",
+        "mean",
+        "median",
+        "sample_stddev",
+        "cv_pct",
+        "mad",
+        "robust_cv_pct",
+        "min",
+        "max"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "pgworkbench.trial-stats/v1"
+        },
+        "stats_version": {
+          "const": "1.0.0"
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "mean": {
+          "type": "number"
+        },
+        "median": {
+          "type": "number"
+        },
+        "sample_stddev": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cv_pct": {
+          "type": ["number", "null"]
+        },
+        "mad": {
+          "type": "number",
+          "minimum": 0
+        },
+        "robust_cv_pct": {
+          "type": ["number", "null"]
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

@@ -21,6 +21,7 @@ USAGE
 OUT_FILE=""
 RUN_DIRS=()
 SEEN_RUN_DIRS=()
+INPUT_DIRS=()
 
 CUMULATIVE_METRICS=(
   xact_commit
@@ -126,6 +127,7 @@ add_input() {
   local run_dir
 
   dir="$(resolve_dir "$input")"
+  INPUT_DIRS+=("$dir")
   if [[ -f "$dir/runs.tsv" ]]; then
     while IFS= read -r run_dir; do
       [[ -z "$run_dir" ]] && continue
@@ -341,7 +343,8 @@ if (( ${#RUN_DIRS[@]} == 0 )); then
 fi
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-workbench-summary.XXXXXX")"
-trap 'rm -rf "$TMP_DIR"' EXIT
+OUTPUT_TEMP=""
+trap 'rm -rf "$TMP_DIR"; [[ -z "$OUTPUT_TEMP" ]] || rm -f -- "$OUTPUT_TEMP"' EXIT
 RUNS_TSV="$TMP_DIR/runs.tsv"
 METRICS_TSV="$TMP_DIR/metrics.tsv"
 
@@ -356,8 +359,31 @@ if [[ -n "$OUT_FILE" ]]; then
   if [[ "$OUT_FILE" != /* ]]; then
     OUT_FILE="$REPO_DIR/$OUT_FILE"
   fi
-  mkdir -p "$(dirname "$OUT_FILE")"
-  render_summary > "$OUT_FILE"
+  if [[ -e "$OUT_FILE" || -L "$OUT_FILE" ]]; then
+    echo "Refusing to overwrite run-series summary: $OUT_FILE" >&2
+    exit 1
+  fi
+  output_parent="$(dirname "$OUT_FILE")"
+  mkdir -p "$output_parent"
+  output_parent="$(realpath "$output_parent")"
+  OUT_FILE="$output_parent/$(basename "$OUT_FILE")"
+  for protected in "${INPUT_DIRS[@]}" "${RUN_DIRS[@]}"; do
+    case "$OUT_FILE/" in
+      "$protected/"*)
+        echo "Refusing to write a summary inside immutable input: $OUT_FILE" >&2
+        exit 1
+        ;;
+    esac
+  done
+  OUTPUT_TEMP="$(mktemp "$output_parent/.pgworkbench-summary.XXXXXX")"
+  render_summary > "$OUTPUT_TEMP"
+  chmod 0644 "$OUTPUT_TEMP"
+  if ! ln "$OUTPUT_TEMP" "$OUT_FILE"; then
+    echo "Refusing to overwrite run-series summary: $OUT_FILE" >&2
+    exit 1
+  fi
+  rm -f -- "$OUTPUT_TEMP"
+  OUTPUT_TEMP=""
   echo "Wrote run series summary: $OUT_FILE"
 else
   render_summary

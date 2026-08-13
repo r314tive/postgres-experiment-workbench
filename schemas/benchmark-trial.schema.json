@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-trial.schema.json",
+  "title": "pgworkbench benchmark trial v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "trial",
+    "run_id",
+    "run_ref",
+    "started_at",
+    "finished_at",
+    "duration_ms",
+    "status",
+    "reasons",
+    "experiment_verified",
+    "raw_logs",
+    "phase_timeline",
+    "primary_metric"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "pgworkbench.benchmark-trial/v1"
+    },
+    "artifact_type": {
+      "const": "pgworkbench.benchmark-trial"
+    },
+    "trial": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "run_ref": {
+      "$ref": "#/$defs/portablePath"
+    },
+    "started_at": {
+      "type": "string"
+    },
+    "finished_at": {
+      "type": "string"
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "status": {
+      "enum": ["passed", "failed", "invalid"]
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "experiment_verified": {
+      "type": "boolean"
+    },
+    "environment_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "summary": {
+      "$ref": "#/$defs/artifactRef"
+    },
+    "raw_logs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactRef"
+      }
+    },
+    "pgbench": {
+      "$ref": "benchmark-pgbench-result.schema.json"
+    },
+    "transaction_log": {
+      "$ref": "benchmark-pgbench-log-result.schema.json"
+    },
+    "postgres_metrics": {
+      "$ref": "benchmark-postgres-metrics.schema.json"
+    },
+    "effective_settings": {
+      "$ref": "benchmark-effective-settings.schema.json"
+    },
+    "controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cache_state", "statistics_reset", "collector_overhead", "resource_budget"],
+      "properties": {
+        "cache_state": {"$ref": "#/$defs/artifactRef"},
+        "statistics_reset": {"$ref": "#/$defs/artifactRef"},
+        "collector_overhead": {"$ref": "#/$defs/artifactRef"},
+        "resource_budget": {"$ref": "#/$defs/artifactRef"}
+      }
+    },
+    "phase_journal": {
+      "$ref": "#/$defs/artifactRef"
+    },
+    "phase_timeline": {
+      "$ref": "benchmark-phase-timeline.schema.json"
+    },
+    "primary_metric": {
+      "enum": ["pgbench.tps", "pgbench.latency_mean_us"]
+    },
+    "primary_value": {
+      "type": "number"
+    }
+  },
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest", "size"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/portablePath"
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "portablePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"const": "passed"}},
+        "required": ["status"]
+      },
+      "then": {"required": ["postgres_metrics", "phase_journal"]}
+    }
+  ]
+}

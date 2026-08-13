@@ -15,7 +15,7 @@ capture_env_overrides() {
   local name
   while IFS= read -r name; do
     case "$name" in
-      ENV_FILE|COMPOSE|POSTGRES_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|UPGRADE_*)
+      ENV_FILE|COMPOSE|POSTGRES_*|PGBOUNCER_*|ALLOW_*|PGWORKBENCH_EXPERIMENT_MODE|TOPOLOGY|TOPOLOGY_*|UPGRADE_*)
         PRESERVED_ENV_NAMES+=("$name")
         PRESERVED_ENV_VALUES+=("${!name}")
         ;;
@@ -64,6 +64,9 @@ compose_command() {
 }
 
 load_repo_env
+if [[ "${PGWORKBENCH_EXPERIMENT_MODE:-0}" = "1" ]]; then
+  "$REPO_DIR/scripts/guard_local_pg.sh"
+fi
 compose_command
 
 TOPOLOGY=multi-version-upgrade "$REPO_DIR/scripts/topology.sh" up multi-version-upgrade >/dev/null

@@ -98,6 +98,153 @@ func TestRunUtilitySuiteStopsOnFail(t *testing.T) {
 	}
 }
 
+func TestRunUtilitySuiteRejectsTraversingRunIDBeforeWriting(t *testing.T) {
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "repo")
+	writeUtilitySuiteFixture(t, root)
+	called := false
+
+	_, err := Run(root, speccatalog.New(root), "native", RunOptions{
+		Getenv: func(key string) string {
+			if key == "UTILITY_SUITE_RUN_ID" {
+				return "../../../escaped-suite"
+			}
+			return ""
+		},
+		RunUtility: func(string, speccatalog.Catalog, string, utilityrun.Options) (utilityrun.Result, error) {
+			called = true
+			return utilityrun.Result{}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid utility suite run id") {
+		t.Fatalf("traversing utility suite run id was not rejected: %v", err)
+	}
+	if called {
+		t.Fatal("utility ran after a traversing suite run id")
+	}
+	if _, statErr := os.Lstat(filepath.Join(workspace, "escaped-suite")); !os.IsNotExist(statErr) {
+		t.Fatalf("traversing suite run id created an outside artifact: %v", statErr)
+	}
+}
+
+func TestRunUtilitySuiteRejectsSymlinkedRunsRoot(t *testing.T) {
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "repo")
+	writeUtilitySuiteFixture(t, root)
+	outside := filepath.Join(workspace, "outside")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "runs")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, err := Run(root, speccatalog.New(root), "native", RunOptions{
+		Getenv: suiteRunEnv("safe-suite", ""),
+		RunUtility: func(string, speccatalog.Catalog, string, utilityrun.Options) (utilityrun.Result, error) {
+			t.Fatal("utility ran through a symlinked runs root")
+			return utilityrun.Result{}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "artifact root") {
+		t.Fatalf("symlinked runs root was not rejected: %v", err)
+	}
+	if entries, readErr := os.ReadDir(outside); readErr != nil || len(entries) != 0 {
+		t.Fatalf("symlinked runs root received suite artifacts: entries=%v err=%v", entries, readErr)
+	}
+}
+
+func TestRunUtilitySuiteRefusesExistingRun(t *testing.T) {
+	root := t.TempDir()
+	writeUtilitySuiteFixture(t, root)
+	runDir := filepath.Join(root, "runs", "utility-suites", "existing-suite")
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(runDir, "marker")
+	if err := os.WriteFile(marker, []byte("unchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Run(root, speccatalog.New(root), "native", RunOptions{
+		Getenv: suiteRunEnv("existing-suite", ""),
+		RunUtility: func(string, speccatalog.Catalog, string, utilityrun.Options) (utilityrun.Result, error) {
+			t.Fatal("utility ran for an existing immutable suite")
+			return utilityrun.Result{}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite immutable utility suite run") {
+		t.Fatalf("existing utility suite run was not rejected: %v", err)
+	}
+	content, readErr := os.ReadFile(marker)
+	if readErr != nil || string(content) != "unchanged\n" {
+		t.Fatalf("existing utility suite run changed: content=%q err=%v", content, readErr)
+	}
+	if _, statErr := os.Lstat(filepath.Join(runDir, "runs.tsv")); !os.IsNotExist(statErr) {
+		t.Fatalf("existing utility suite run received a partial result: %v", statErr)
+	}
+}
+
+func TestRunUtilitySuiteRejectsSymlinkRunLeafWithoutTouchingTarget(t *testing.T) {
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "repo")
+	writeUtilitySuiteFixture(t, root)
+	suiteParent := filepath.Join(root, "runs", "utility-suites")
+	if err := os.MkdirAll(suiteParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(workspace, "outside")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(outside, "marker")
+	if err := os.WriteFile(marker, []byte("unchanged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(suiteParent, "linked-suite")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	_, err := Run(root, speccatalog.New(root), "native", RunOptions{
+		Getenv: suiteRunEnv("linked-suite", ""),
+		RunUtility: func(string, speccatalog.Catalog, string, utilityrun.Options) (utilityrun.Result, error) {
+			t.Fatal("utility ran for a symlinked suite run leaf")
+			return utilityrun.Result{}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite immutable utility suite run") {
+		t.Fatalf("symlinked utility suite leaf was not rejected: %v", err)
+	}
+	content, readErr := os.ReadFile(marker)
+	if readErr != nil || string(content) != "unchanged\n" {
+		t.Fatalf("symlink target changed: content=%q err=%v", content, readErr)
+	}
+	if entries, readErr := os.ReadDir(outside); readErr != nil || len(entries) != 1 {
+		t.Fatalf("symlink target received suite artifacts: entries=%v err=%v", entries, readErr)
+	}
+}
+
+func TestRunUtilitySuiteRejectsExplicitRunDirectoryOutsideSuiteRoot(t *testing.T) {
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "repo")
+	writeUtilitySuiteFixture(t, root)
+	outside := filepath.Join(workspace, "outside-suite")
+
+	_, err := Run(root, speccatalog.New(root), "native", RunOptions{
+		Getenv: suiteRunEnv("explicit-suite", outside),
+		RunUtility: func(string, speccatalog.Catalog, string, utilityrun.Options) (utilityrun.Result, error) {
+			t.Fatal("utility ran for an outside suite run directory")
+			return utilityrun.Result{}, nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be below") {
+		t.Fatalf("outside utility suite run directory was not rejected: %v", err)
+	}
+	if _, statErr := os.Lstat(outside); !os.IsNotExist(statErr) {
+		t.Fatalf("outside utility suite run directory was created: %v", statErr)
+	}
+}
+
 func TestRenderUtilitySuite(t *testing.T) {
 	root := t.TempDir()
 	writeUtilitySuiteFixture(t, root)
@@ -141,5 +288,18 @@ func writeSpec(t *testing.T, root string, rel string, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func suiteRunEnv(runID, runDir string) func(string) string {
+	return func(key string) string {
+		switch key {
+		case "UTILITY_SUITE_RUN_ID":
+			return runID
+		case "UTILITY_SUITE_RUN_DIR":
+			return runDir
+		default:
+			return ""
+		}
 	}
 }

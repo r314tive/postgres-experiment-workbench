@@ -32,7 +32,7 @@ make experiment-plan-expanded-json EXPERIMENT_SPEC=smoke
 make experiment-run EXPERIMENT_SPEC=smoke
 ```
 
-`experiment-plan` renders the resolved execution phases without starting Docker.
+`experiment-plan` renders the resolved execution phases without starting a runtime.
 `experiment-plan-expanded` also embeds topology, dataset, foreground workload,
 and background workload previews without starting Docker.
 The JSON variants render the same dry-runs for external tools.
@@ -44,12 +44,16 @@ make experiment-verify RUN_DIR=runs/<run-id>
 make experiment-verify-json RUN_DIR=runs/<run-id>
 go run ./cmd/pgworkbench run verify runs/<run-id>
 go run ./cmd/pgworkbench run verify --json runs/<run-id>
+go run ./cmd/pgworkbench run verify --bundle <extracted-run-dir>
+go run ./cmd/pgworkbench run verify --json --bundle <extracted-run-dir>
 ```
 
 Run verification checks required state files, env/JSON/CSV parseability, verdict
 consistency, exit-code fields, and metrics sample presence. JSON verification
 output is suitable for CI jobs that need structured `valid` and `issues`
-fields.
+fields. `--bundle` is required for an extracted run bundle; it fails closed if
+the complete bundle inventory is absent. Without `--bundle`, inventory remains
+optional so that a live run can be checked before an archive is created.
 
 ## Inspect
 
@@ -70,7 +74,8 @@ go run ./cmd/pgworkbench run bundle --json runs/<run-id> generated/run.tar.gz
 Run catalog commands summarize local run artifacts without starting Docker or
 connecting to PostgreSQL. Run bundles are gzip-compressed tar archives with
 relative paths rooted at the run id, and JSON bundle output reports the archive
-path, file count, and uncompressed byte count.
+path, file count, and uncompressed byte count. After extraction, verify them
+with `run verify --bundle`, not the live-run form.
 
 ## Compare
 
@@ -86,7 +91,7 @@ first-pass report, not a statistical benchmark framework.
 ```bash
 make experiment-report RUN_DIR=runs/<run-id>
 make experiment-report-shell RUN_DIR=runs/<run-id>
-./scripts/report_run.sh runs/<run-id> runs/<run-id>/report.md
+./scripts/report_run.sh runs/<run-id> reports/<run-id>.md
 go run ./cmd/pgworkbench report run runs/<run-id> runs/<run-id>/report.md
 go run ./cmd/pgworkbench report summary runs/repeats/<repeat-id>
 go run ./cmd/pgworkbench report history runs/repeats/a runs/repeats/b
@@ -97,10 +102,10 @@ Reports are Markdown summaries built from `manifest.env`, `verdict.env`,
 
 ## Run State
 
-The runner writes machine-readable state files for every experiment with the Go
-state writer by default. Use `EXPERIMENT_STATE_WRITER=shell` to force the shell
-compatibility path. `EXPERIMENT_STATE_WRITER=auto` remains a compatibility
-alias for the Go writer.
+The runner writes versioned, machine-readable state files with the Go state
+writer. `EXPERIMENT_STATE_WRITER=auto` remains a compatibility alias for Go;
+the legacy shell writer is rejected because it cannot satisfy the portable v1
+evidence contract.
 
 ```bash
 go run ./cmd/pgworkbench run write-manifest --run-dir runs/<run-id>
@@ -175,7 +180,7 @@ Use experiment specs for orchestration:
 - topology and PostgreSQL config profile;
 - dataset loading;
 - profile setup/run;
-- pre/post SQL and shell hooks;
+- declarative pre/post SQL hooks and explicitly trusted host-shell hooks;
 - foreground workload;
 - background workloads;
 - metrics sampling;
@@ -185,6 +190,14 @@ Use experiment specs for orchestration:
 
 Keep scenario-specific interpretation in profile docs and tool-specific
 execution details in workload specs.
+
+Host-shell hooks are a separate trust boundary. `EXPERIMENT_BEFORE_SHELL`,
+`EXPERIMENT_AFTER_SHELL`, and `EXPERIMENT_ASSERT_SHELL` fail closed unless the
+spec explicitly sets `EXPERIMENT_TRUSTED_SHELL=1`; the runner names each trusted
+hook before executing it. SQL hook and assertion fields do not require that
+marker. This is an audit/intent gate rather than a sandbox because experiment
+env files are sourced and therefore the whole spec or pack must already be
+trusted.
 
 Render the generated env spec contract with:
 

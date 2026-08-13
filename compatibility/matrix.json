@@ -1,0 +1,110 @@
+{
+  "schema_version": "pgworkbench.compatibility-matrix/v2",
+  "archive_platforms": [
+    {
+      "os": "darwin",
+      "arch": "amd64",
+      "verification_scope": "compile-package-only",
+      "runtime_cells": []
+    },
+    {
+      "os": "darwin",
+      "arch": "arm64",
+      "verification_scope": "runtime-gated",
+      "runtime_cells": [
+        "native-darwin-arm64-pg16-single"
+      ]
+    },
+    {
+      "os": "linux",
+      "arch": "amd64",
+      "verification_scope": "runtime-gated",
+      "runtime_cells": [
+        "docker-linux-amd64-pg15-to-pg16-multi-version-upgrade",
+        "docker-linux-amd64-pg16-logical-replication",
+        "docker-linux-amd64-pg16-pgbouncer",
+        "docker-linux-amd64-pg16-primary-replica",
+        "docker-linux-amd64-pg16-single",
+        "native-linux-amd64-pg16-single"
+      ]
+    },
+    {
+      "os": "linux",
+      "arch": "arm64",
+      "verification_scope": "compile-package-only",
+      "runtime_cells": []
+    }
+  ],
+  "cells": [
+    {
+      "id": "docker-linux-amd64-pg15-to-pg16-multi-version-upgrade",
+      "runtime": "docker",
+      "topology": "multi-version-upgrade",
+      "os": "linux",
+      "arch": "amd64",
+      "postgres": "15->16",
+      "support_level": "candidate",
+      "gate": "docker-integration"
+    },
+    {
+      "id": "docker-linux-amd64-pg16-logical-replication",
+      "runtime": "docker",
+      "topology": "logical-replication",
+      "os": "linux",
+      "arch": "amd64",
+      "postgres": "16",
+      "support_level": "candidate",
+      "gate": "docker-integration"
+    },
+    {
+      "id": "docker-linux-amd64-pg16-pgbouncer",
+      "runtime": "docker",
+      "topology": "pgbouncer",
+      "os": "linux",
+      "arch": "amd64",
+      "postgres": "16",
+      "support_level": "candidate",
+      "gate": "docker-integration"
+    },
+    {
+      "id": "docker-linux-amd64-pg16-primary-replica",
+      "runtime": "docker",
+      "topology": "primary-replica",
+      "os": "linux",
+      "arch": "amd64",
+      "postgres": "16",
+      "support_level": "candidate",
+      "gate": "docker-integration"
+    },
+    {
+      "id": "docker-linux-amd64-pg16-single",
+      "runtime": "docker",
+      "topology": "single",
+      "os": "linux",
+      "arch": "amd64",
+      "postgres": "16",
+      "support_level": "candidate",
+      "gate": "docker-integration"
+    },
+    {
+      "id": "native-darwin-arm64-pg16-single",
+      "runtime": "native",
+      "topology": "single",
+      "os": "darwin",
+      "arch": "arm64",
+      "postgres": "16",
+      "support_level": "candidate",
+      "gate": "native-integration"
+    },
+    {
+      "id": "native-linux-amd64-pg16-single",
+      "runtime": "native",
+      "topology": "single",
+      "os": "linux",
+      "arch": "amd64",
+      "postgres": "16",
+      "support_level": "candidate",
+      "gate": "native-integration"
+    }
+  ]
+}

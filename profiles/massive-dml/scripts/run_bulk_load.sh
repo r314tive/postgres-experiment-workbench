@@ -34,6 +34,7 @@ fi
 mkdir -p "$artifact_dir"
 result_file="$artifact_dir/bulk-load-$mode.tsv"
 metadata_file="$artifact_dir/bulk-load-$mode.env"
+operation_result_file="$artifact_dir/operation-result.json"
 
 "$REPO_DIR/scripts/psql.sh" \
   -v "bulk_mode=$mode" \
@@ -48,6 +49,35 @@ FROM massive_dml.experiment_results
 WHERE scenario = 'offline-bulk-load' AND variant = '$mode';
 " > "$result_file"
 
+"$REPO_DIR/scripts/psql.sh" -A -t -P footer=off -c "
+SELECT jsonb_build_object(
+         'schema_version', 'pgworkbench.operation-result/v1',
+         'artifact_type', 'pgworkbench.operation-result',
+         'operation_id', CASE variant
+           WHEN 'indexed' THEN 'massive-dml/offline-bulk-load-indexed'
+           WHEN 'index-after' THEN 'massive-dml/offline-bulk-load-index-after'
+         END,
+         'variant', variant,
+         'primary_metric', jsonb_build_object(
+           'name', 'total_ms',
+           'unit', 'milliseconds',
+           'direction', 'lower-is-better',
+           'value', total_ms
+         ),
+         'measurement', jsonb_build_object(
+           'basis', 'postgres-server-clock',
+           'scope', CASE variant
+             WHEN 'indexed' THEN 'PostgreSQL server clock around table creation, required secondary-index creation, and row insertion; ANALYZE is excluded.'
+             WHEN 'index-after' THEN 'PostgreSQL server clock around table creation, row insertion, and required secondary-index creation; ANALYZE is excluded.'
+           END
+         )
+       )::text
+FROM massive_dml.experiment_results
+WHERE scenario = 'offline-bulk-load' AND variant = '$mode';
+" > "$operation_result_file"
+
+test -s "$operation_result_file"
+
 {
   printf 'scenario=offline-bulk-load\n'
   printf 'variant=%s\n' "$mode"
@@ -55,7 +85,9 @@ WHERE scenario = 'offline-bulk-load' AND variant = '$mode';
   printf 'rows=%s\n' "$rows"
   printf 'payload_bytes=%s\n' "$payload_bytes"
   printf 'result_file=%s\n' "$result_file"
+  printf 'operation_result_file=%s\n' "$operation_result_file"
 } > "$metadata_file"
 
 echo "bulk_load_mode=$mode"
 echo "bulk_load_result=$result_file"
+echo "operation_result=$operation_result_file"

@@ -2,9 +2,11 @@ package utilitysuiteartifact
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +14,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/r314tive/postgres-experiment-workbench/internal/pathguard"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runartifact"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runverify"
 	"github.com/r314tive/postgres-experiment-workbench/internal/utilitysuite"
@@ -167,13 +171,28 @@ func Verify(root string, input string) (VerifyResult, error) {
 }
 
 func CreateBundle(root string, input string, output string) (BundleResult, error) {
+	return createBundle(root, input, output, nil)
+}
+
+func createBundle(root string, input string, output string, beforeStageVerify func(string) error) (BundleResult, error) {
 	suiteDir, err := resolveSuiteRunDir(root, input)
 	if err != nil {
 		return BundleResult{}, err
 	}
+	verification, err := Verify(root, suiteDir)
+	if err != nil {
+		return BundleResult{}, fmt.Errorf("verify utility suite artifact before bundling: %w", err)
+	}
+	if !verification.IsValid() {
+		return BundleResult{}, fmt.Errorf("utility suite artifact is invalid: %s", strings.Join(verification.Issues, "; "))
+	}
 	entries, err := readEntries(filepath.Join(suiteDir, "runs.tsv"))
 	if err != nil {
 		return BundleResult{}, err
+	}
+	runResult, err := readRunResultJSON(filepath.Join(suiteDir, "result.json"))
+	if err != nil {
+		return BundleResult{}, fmt.Errorf("read utility suite result.json: %w", err)
 	}
 
 	if output == "" {
@@ -193,21 +212,38 @@ func CreateBundle(root string, input string, output string) (BundleResult, error
 	}
 
 	includedDirs := []string{suiteDir}
+	portableEntries := make([]Entry, 0, len(entries))
 	seenRuns := make(map[string]struct{})
 	for _, entry := range entries {
-		if entry.RunDir == "" {
-			continue
-		}
 		runDir := resolveRootPath(root, entry.RunDir)
-		info, err := os.Stat(runDir)
-		if err != nil || !info.IsDir() || !runartifact.IsRunDir(runDir) {
+		info, err := os.Lstat(runDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				result.MissingLinkedRuns = append(result.MissingLinkedRuns, entry.RunDir)
+				return BundleResult{}, fmt.Errorf("linked experiment run artifact is missing for %s: %s", entry.RunID, runDir)
+			}
+			return BundleResult{}, fmt.Errorf("inspect linked experiment run artifact for %s: %w", entry.RunID, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || !runartifact.IsRunDir(runDir) {
 			result.MissingLinkedRuns = append(result.MissingLinkedRuns, entry.RunDir)
-			continue
+			return BundleResult{}, fmt.Errorf("linked experiment run artifact is invalid for %s: %s", entry.RunID, runDir)
 		}
 		abs, err := filepath.Abs(runDir)
 		if err != nil {
 			return BundleResult{}, err
 		}
+		portableRunDir := filepath.ToSlash(filepath.Join("runs", filepath.Base(abs)))
+		portableDriverLog, err := bundleDriverLogPath(root, suiteDir, entry)
+		if err != nil {
+			return BundleResult{}, err
+		}
+		portableEntry := entry
+		portableEntry.RunDir = portableRunDir
+		portableEntry.DriverLog = portableDriverLog
+		if portableEntry.ExperimentSpec != "" {
+			portableEntry.ExperimentSpec = filepath.ToSlash(filepath.Join(portableRunDir, "artifacts", "provenance", "experiment-spec.env"))
+		}
+		portableEntries = append(portableEntries, portableEntry)
 		if _, ok := seenRuns[abs]; ok {
 			continue
 		}
@@ -217,37 +253,244 @@ func CreateBundle(root string, input string, output string) (BundleResult, error
 	}
 	sort.Strings(result.LinkedRuns)
 	sort.Strings(result.MissingLinkedRuns)
-
-	for _, dir := range includedDirs {
-		if isSubpath(dir, output) {
-			return BundleResult{}, fmt.Errorf("bundle output must not be inside an included artifact directory: %s", output)
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
-		return BundleResult{}, err
-	}
-
-	file, err := os.Create(output)
+	portableMetadata, err := bundleMetadata(filepath.Base(suiteDir), portableEntries, *runResult)
 	if err != nil {
 		return BundleResult{}, err
 	}
-	defer file.Close()
 
-	gzipWriter := gzip.NewWriter(file)
-	defer gzipWriter.Close()
-	tarWriter := tar.NewWriter(gzipWriter)
-	defer tarWriter.Close()
-
-	if err := addDirToTar(tarWriter, suiteDir, filepath.ToSlash(filepath.Join("utility-suites", filepath.Base(suiteDir))), &result); err != nil {
-		return BundleResult{}, err
-	}
-	for _, dir := range includedDirs[1:] {
-		name := filepath.ToSlash(filepath.Join("runs", filepath.Base(dir)))
-		if err := addDirToTar(tarWriter, dir, name, &result); err != nil {
-			return BundleResult{}, err
+	for _, dir := range includedDirs {
+		output, err = pathguard.ResolveOutputOutside(dir, output)
+		if err != nil {
+			return BundleResult{}, fmt.Errorf("resolve bundle output outside included artifact %s: %w", dir, err)
 		}
 	}
+	output, err = pathguard.PrepareNewOutput(output, 0o755)
+	if err != nil {
+		return BundleResult{}, fmt.Errorf("prepare utility suite bundle output: %w", err)
+	}
+	for _, dir := range includedDirs {
+		if _, err := pathguard.ResolveOutputOutside(dir, output); err != nil {
+			return BundleResult{}, fmt.Errorf("recheck bundle output outside included artifact %s: %w", dir, err)
+		}
+	}
+	result.Output = output
+	stage, err := os.MkdirTemp("", ".pgworkbench-utility-suite-bundle-*")
+	if err != nil {
+		return BundleResult{}, fmt.Errorf("create utility suite bundle staging directory: %w", err)
+	}
+	defer os.RemoveAll(stage)
+	stagedSuiteDir := filepath.Join(stage, "utility-suites", filepath.Base(suiteDir))
+	if err := copyDirToStage(suiteDir, stagedSuiteDir, portableMetadata); err != nil {
+		return BundleResult{}, fmt.Errorf("stage utility suite artifact: %w", err)
+	}
+	stagedRunDirs := make([]string, 0, len(includedDirs)-1)
+	for _, dir := range includedDirs[1:] {
+		destination := filepath.Join(stage, "runs", filepath.Base(dir))
+		if err := copyDirToStage(dir, destination, nil); err != nil {
+			return BundleResult{}, fmt.Errorf("stage linked experiment run %s: %w", filepath.Base(dir), err)
+		}
+		stagedRunDirs = append(stagedRunDirs, destination)
+	}
+	if beforeStageVerify != nil {
+		if err := beforeStageVerify(stage); err != nil {
+			return BundleResult{}, fmt.Errorf("prepare staged utility suite bundle verification: %w", err)
+		}
+	}
+	stagedVerification, err := Verify(stage, stagedSuiteDir)
+	if err != nil {
+		return BundleResult{}, fmt.Errorf("verify staged utility suite bundle: %w", err)
+	}
+	if !stagedVerification.IsValid() {
+		return BundleResult{}, fmt.Errorf("staged utility suite bundle is invalid: %s", strings.Join(stagedVerification.Issues, "; "))
+	}
+
+	file, err := os.CreateTemp(filepath.Dir(output), ".pgworkbench-utility-suite-bundle-*.tmp")
+	if err != nil {
+		return BundleResult{}, err
+	}
+	tempPath := file.Name()
+	keepTemp := false
+	defer func() {
+		if !keepTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	gzipWriter := gzip.NewWriter(file)
+	gzipWriter.Header.ModTime = time.Unix(0, 0).UTC()
+	gzipWriter.Header.OS = 255
+	tarWriter := tar.NewWriter(gzipWriter)
+
+	writeErr := addDirToTar(
+		tarWriter,
+		stagedSuiteDir,
+		filepath.ToSlash(filepath.Join("utility-suites", filepath.Base(suiteDir))),
+		nil,
+		&result,
+	)
+	if writeErr == nil {
+		for _, dir := range stagedRunDirs {
+			name := filepath.ToSlash(filepath.Join("runs", filepath.Base(dir)))
+			if err := addDirToTar(tarWriter, dir, name, nil, &result); err != nil {
+				writeErr = err
+				break
+			}
+		}
+	}
+	if err := tarWriter.Close(); writeErr == nil && err != nil {
+		writeErr = err
+	}
+	if err := gzipWriter.Close(); writeErr == nil && err != nil {
+		writeErr = err
+	}
+	if err := file.Chmod(0o644); writeErr == nil && err != nil {
+		writeErr = err
+	}
+	if err := file.Sync(); writeErr == nil && err != nil {
+		writeErr = err
+	}
+	if err := file.Close(); writeErr == nil && err != nil {
+		writeErr = err
+	}
+	if writeErr != nil {
+		return BundleResult{}, writeErr
+	}
+	if err := pathguard.PublishFileExclusive(tempPath, output); err != nil {
+		return BundleResult{}, err
+	}
+	keepTemp = true
 	return result, nil
+}
+
+func copyDirToStage(source string, destination string, replacements map[string][]byte) error {
+	info, err := os.Lstat(source)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("bundle source must be a real directory: %s", source)
+	}
+	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		entryInfo, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		if entryInfo.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("artifact contains unsupported symlink: %s", path)
+		}
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		if !entryInfo.Mode().IsRegular() {
+			return fmt.Errorf("artifact contains unsupported non-regular path: %s", path)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if replacement, ok := replacements[relative]; ok {
+			return os.WriteFile(target, replacement, 0o644)
+		}
+		input, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err != nil {
+			_ = input.Close()
+			return err
+		}
+		_, copyErr := io.Copy(output, input)
+		return errors.Join(copyErr, input.Close(), output.Close())
+	})
+}
+
+func bundleDriverLogPath(root string, suiteDir string, entry Entry) (string, error) {
+	path := resolveSuitePath(root, suiteDir, entry.DriverLog)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("inspect driver log for %s: %w", entry.RunID, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("driver log for %s is not a regular file: %s", entry.RunID, path)
+	}
+	if !isSubpath(suiteDir, path) {
+		return "", fmt.Errorf("driver log for %s is outside the suite artifact: %s", entry.RunID, path)
+	}
+	rel, err := filepath.Rel(suiteDir, path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+func bundleMetadata(suiteRunID string, entries []Entry, runResult utilitysuite.RunResult) (map[string][]byte, error) {
+	runsTSV, err := marshalEntriesTSV(entries)
+	if err != nil {
+		return nil, fmt.Errorf("render portable runs.tsv: %w", err)
+	}
+
+	portableByRunID := make(map[string]Entry, len(entries))
+	for _, entry := range entries {
+		portableByRunID[entry.RunID] = entry
+	}
+	runResult.RunDir = filepath.ToSlash(filepath.Join("utility-suites", suiteRunID))
+	for index := range runResult.Entries {
+		portable, ok := portableByRunID[runResult.Entries[index].RunID]
+		if !ok {
+			return nil, fmt.Errorf("result.json entry has no runs.tsv row: %s", runResult.Entries[index].RunID)
+		}
+		runResult.Entries[index].RunDir = portable.RunDir
+		runResult.Entries[index].ExperimentSpec = portable.ExperimentSpec
+		runResult.Entries[index].DriverLog = portable.DriverLog
+	}
+	var resultJSON bytes.Buffer
+	if err := utilitysuite.RenderRunJSON(&resultJSON, runResult); err != nil {
+		return nil, fmt.Errorf("render portable result.json: %w", err)
+	}
+	return map[string][]byte{
+		"runs.tsv":    runsTSV,
+		"result.json": resultJSON.Bytes(),
+	}, nil
+}
+
+func marshalEntriesTSV(entries []Entry) ([]byte, error) {
+	var out bytes.Buffer
+	writer := csv.NewWriter(&out)
+	writer.Comma = '\t'
+	if err := writer.Write(requiredColumns()); err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		record := []string{
+			entry.UtilityTest,
+			entry.ProfileSize,
+			strconv.Itoa(entry.Repeat),
+			entry.RunID,
+			strconv.Itoa(entry.ExitCode),
+			entry.Status,
+			entry.Message,
+			entry.RunDir,
+			entry.ExperimentSpec,
+			entry.DriverLog,
+		}
+		if err := writer.Write(record); err != nil {
+			return nil, err
+		}
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
 
 func LoadDir(root string, dir string) (Summary, error) {
@@ -860,7 +1103,7 @@ func resolveSuitePath(root string, suiteDir string, value string) string {
 	return filepath.Clean(candidate)
 }
 
-func addDirToTar(tarWriter *tar.Writer, dir string, archivePrefix string, result *BundleResult) error {
+func addDirToTar(tarWriter *tar.Writer, dir string, archivePrefix string, replacements map[string][]byte, result *BundleResult) error {
 	return filepath.WalkDir(dir, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -873,17 +1116,40 @@ func addDirToTar(tarWriter *tar.Writer, dir string, archivePrefix string, result
 			return err
 		}
 		if !info.Mode().IsRegular() {
-			return nil
+			return fmt.Errorf("artifact contains unsupported non-regular path: %s", path)
 		}
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
 			return err
 		}
+		rel = filepath.ToSlash(rel)
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
 		}
 		header.Name = filepath.ToSlash(filepath.Join(archivePrefix, rel))
+		header.Mode = 0o644
+		header.Uid = 0
+		header.Gid = 0
+		header.Uname = ""
+		header.Gname = ""
+		header.ModTime = time.Unix(0, 0).UTC()
+		header.AccessTime = time.Time{}
+		header.ChangeTime = time.Time{}
+		header.Format = tar.FormatPAX
+		if replacement, ok := replacements[rel]; ok {
+			header.Size = int64(len(replacement))
+			if err := tarWriter.WriteHeader(header); err != nil {
+				return err
+			}
+			written, err := tarWriter.Write(replacement)
+			if err != nil {
+				return err
+			}
+			result.Files++
+			result.Bytes += int64(written)
+			return nil
+		}
 		if err := tarWriter.WriteHeader(header); err != nil {
 			return err
 		}

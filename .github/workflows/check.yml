@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   workbench:
     runs-on: ubuntu-latest
@@ -13,12 +16,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version-file: .go-version
           cache: false
 
       - name: Show Docker versions
@@ -37,3 +40,44 @@ jobs:
 
       - name: Artifact scan
         run: make scan-artifacts
+
+  native-pg16:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Install native PostgreSQL runtime
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          bindir=/usr/lib/postgresql/16/bin
+          "$bindir/postgres" --version | grep -Eq 'PostgreSQL 16([.[:space:]]|$)'
+          printf 'PGWORKBENCH_NATIVE_BINDIR=%s\n' "$bindir" >> "$GITHUB_ENV"
+
+      - name: Native prerequisite check
+        run: go run ./cmd/pgworkbench doctor --runtime native
+
+      - name: Native runtime and evidence gate
+        run: make native-test
+
+      - name: Upload native evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: check-native-linux-amd64-pg16-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            runs/native-*/
+            runs/benchmarks/native-*/
+            runs/benchmark-history/history-native-*/
+          if-no-files-found: warn
+          retention-days: 14

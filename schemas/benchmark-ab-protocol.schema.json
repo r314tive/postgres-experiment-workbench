@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-ab-protocol.schema.json",
+  "title": "pgworkbench counterbalanced benchmark A/B protocol v3",
+  "description": "Immutable predeclared AB/BA protocol. Host qualification remains unsigned and operator-recorded; this contract contains no storage path, credentials, signature, or attestation claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "scheduler_version",
+    "run_id",
+    "runtime",
+    "subject_dimension",
+    "baseline",
+    "candidate",
+    "comparison_key_digest",
+    "blocks_planned",
+    "min_valid_units",
+    "orders",
+    "primary_metric",
+    "direction",
+    "regression_threshold_pct",
+    "analysis",
+    "qualification",
+    "effective_settings",
+    "max_bookend_gap_seconds",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "pgworkbench.benchmark-ab-protocol/v3" },
+    "artifact_type": { "const": "pgworkbench.benchmark-ab-protocol" },
+    "scheduler_version": { "const": "3.0.0" },
+    "run_id": { "$ref": "#/$defs/run_id" },
+    "runtime": { "enum": ["docker", "native"] },
+    "subject_dimension": { "enum": ["pg_config", "native_toolchain"] },
+    "baseline": { "$ref": "#/$defs/baseline_subject" },
+    "candidate": { "$ref": "#/$defs/candidate_subject" },
+    "comparison_key_digest": { "$ref": "#/$defs/digest" },
+    "blocks_planned": {
+      "type": "integer",
+      "minimum": 10,
+      "multipleOf": 2
+    },
+    "min_valid_units": {
+      "type": "integer",
+      "minimum": 5
+    },
+    "orders": {
+      "type": "array",
+      "minItems": 10,
+      "items": { "enum": ["AB", "BA"] }
+    },
+    "primary_metric": {
+      "enum": ["pgbench.tps", "pgbench.latency_mean_us"]
+    },
+    "direction": { "enum": ["higher", "lower"] },
+    "regression_threshold_pct": {
+      "type": "number",
+      "minimum": 0
+    },
+    "analysis": { "$ref": "#/$defs/analysis_policy" },
+    "qualification": { "$ref": "#/$defs/qualification_policy" },
+    "effective_settings": { "$ref": "#/$defs/effective_settings_protocol" },
+    "max_bookend_gap_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "portable_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "benchmark",
+        "subject",
+        "protocol_digest",
+        "pg_config",
+        "pg_config_digest"
+      ],
+      "properties": {
+        "role": { "enum": ["baseline", "candidate"] },
+        "benchmark": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocol_digest": { "$ref": "#/$defs/digest" },
+        "pg_config": { "$ref": "#/$defs/portable_path" },
+        "pg_config_digest": { "$ref": "#/$defs/digest" },
+        "native_toolchain": { "$ref": "#/$defs/native_toolchain_identity" }
+      }
+    },
+    "native_toolchain_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manifest_ref", "digest", "postgres_version", "pgbench_version", "psql_version", "source_commit", "build_provenance"],
+      "properties": {
+        "manifest_ref": { "$ref": "#/$defs/portable_path" },
+        "digest": { "$ref": "#/$defs/digest" },
+        "postgres_version": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "pgbench_version": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "psql_version": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "source_commit": { "const": "unattested" },
+        "build_provenance": { "const": "unattested" }
+      }
+    },
+    "baseline_subject": {
+      "allOf": [
+        { "$ref": "#/$defs/subject" },
+        {
+          "type": "object",
+          "properties": { "role": { "const": "baseline" } }
+        }
+      ]
+    },
+    "candidate_subject": {
+      "allOf": [
+        { "$ref": "#/$defs/subject" },
+        {
+          "type": "object",
+          "properties": { "role": { "const": "candidate" } }
+        }
+      ]
+    },
+    "analysis_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bootstrap_method",
+        "bootstrap_resamples",
+        "confidence_level",
+        "seed"
+      ],
+      "properties": {
+        "bootstrap_method": {
+          "const": "percentile-cluster-bootstrap-of-block-median"
+        },
+        "bootstrap_resamples": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 1000000
+        },
+        "confidence_level": {
+          "type": "number",
+          "exclusiveMinimum": 0.5,
+          "exclusiveMaximum": 1
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "qualification_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Complete fixed decision policy. The storage path used for collection is intentionally not serializable.",
+      "required": [
+        "policy",
+        "policy_digest",
+        "storage_label",
+        "client_placement"
+      ],
+      "properties": {
+        "policy": {
+          "$ref": "benchmark-host-qualification.schema.json#/$defs/policy"
+        },
+        "policy_digest": { "$ref": "#/$defs/digest" },
+        "storage_label": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+        },
+        "client_placement": {
+          "enum": ["same-host", "separate-host", "remote-host"]
+        }
+      }
+    },
+    "effective_settings_protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parser_version", "source_path", "names", "require_cross_arm_difference"],
+      "properties": {
+        "parser_version": { "const": "1.0.0" },
+        "source_path": { "const": "artifacts/benchmark/effective-pg-settings.tsv" },
+        "names": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 512,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.]*$" }
+        },
+        "require_cross_arm_difference": { "type": "boolean" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "subject_dimension": { "const": "native_toolchain" } }, "required": ["subject_dimension"] },
+      "then": {
+        "properties": {
+          "runtime": { "const": "native" },
+          "baseline": { "required": ["native_toolchain"] },
+          "candidate": { "required": ["native_toolchain"] },
+          "effective_settings": { "properties": { "require_cross_arm_difference": { "const": false } } }
+        }
+      },
+      "else": {
+        "properties": {
+          "baseline": { "not": { "required": ["native_toolchain"] } },
+          "candidate": { "not": { "required": ["native_toolchain"] } },
+          "effective_settings": { "properties": { "require_cross_arm_difference": { "const": true } } }
+        }
+      }
+    }
+  ]
+}

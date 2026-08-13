@@ -103,6 +103,50 @@ func TestBuildPgbenchPlanSplitsExtraArgs(t *testing.T) {
 	t.Fatalf("extra args were not split into argument list: %#v", command)
 }
 
+func TestBuildPostgreSQLUtilityAdapterPlans(t *testing.T) {
+	root := t.TempDir()
+	writeWorkloadFile(t, root, "workloads/utility/dump.env", strings.Join([]string{
+		`WORKLOAD_NAME="dump"`,
+		`WORKLOAD_KIND="pg-dump"`,
+		`UTILITY_SOURCE_SCHEMA="smoke"`,
+		`UTILITY_OUTPUT_FILE="logs/utility/dump.sql"`,
+		"",
+	}, "\n"))
+	writeWorkloadFile(t, root, "workloads/utility/dumpall.env", strings.Join([]string{
+		`WORKLOAD_NAME="dumpall"`,
+		`WORKLOAD_KIND="pg-dumpall"`,
+		`UTILITY_OUTPUT_FILE="logs/utility/dumpall.sql"`,
+		"",
+	}, "\n"))
+	writeWorkloadFile(t, root, "workloads/utility/restore.env", strings.Join([]string{
+		`WORKLOAD_NAME="restore"`,
+		`WORKLOAD_KIND="pg-restore"`,
+		`UTILITY_SOURCE_SCHEMA="smoke"`,
+		`UTILITY_TARGET_SCHEMA="restore_check"`,
+		`UTILITY_ARCHIVE_FILE="logs/utility/restore.dump"`,
+		`UTILITY_OUTPUT_FILE="logs/utility/restore.sql"`,
+		"",
+	}, "\n"))
+
+	for id, want := range map[string]string{
+		"utility/dump":    "Run pg_dump adapter",
+		"utility/dumpall": "Run pg_dumpall adapter",
+		"utility/restore": "Run pg_restore round-trip adapter",
+	} {
+		plan, err := Build(root, speccatalog.New(root), id)
+		if err != nil {
+			t.Fatalf("build %s: %v", id, err)
+		}
+		if len(plan.Steps) != 1 || plan.Steps[0].Name != want {
+			t.Fatalf("unexpected %s plan: %#v", id, plan.Steps)
+		}
+		command := strings.Join(plan.Steps[0].Command, " ")
+		if command != "./scripts/run_workload.sh run "+id {
+			t.Fatalf("utility plan is not runtime-neutral: %s", command)
+		}
+	}
+}
+
 func TestRenderShellPlan(t *testing.T) {
 	root := t.TempDir()
 	writeWorkloadFile(t, root, "workloads/topology/pgbouncer-smoke.env", strings.Join([]string{
@@ -124,7 +168,7 @@ func TestRenderShellPlan(t *testing.T) {
 	if err := Render(&out, plan); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# Workload Plan", "PgBouncer smoke query", "bash -lc", "DATABASE_URL"} {
+	for _, want := range []string{"# Workload Plan", "PgBouncer smoke query", "bash --noprofile --norc -c", "DATABASE_URL"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("rendered plan missing %q:\n%s", want, out.String())
 		}
@@ -133,7 +177,7 @@ func TestRenderShellPlan(t *testing.T) {
 	if err := RenderRaw(&out, plan); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# Workload Plan", "| 1 | Run shell command |", "bash -lc"} {
+	for _, want := range []string{"# Workload Plan", "| 1 | Run shell command |", "bash --noprofile --norc -c"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("raw plan missing %q:\n%s", want, out.String())
 		}

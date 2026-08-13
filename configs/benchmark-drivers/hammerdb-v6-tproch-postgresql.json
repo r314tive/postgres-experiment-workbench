@@ -1,0 +1,18 @@
+{
+  "schema_version": "pgworkbench.hammerdb-v6-native-run-config/v1",
+  "artifact_type": "pgworkbench.hammerdb-v6-native-run-config",
+  "mode": "execute-only-prepared-schema",
+  "postgresql": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "user": "tpch",
+    "database": "tpch",
+    "sslmode": "prefer"
+  },
+  "tproch": {
+    "scale_factor": 10,
+    "virtual_users": 1,
+    "query_sets": 1,
+    "degree_of_parallelism": 2
+  }
+}

@@ -54,17 +54,38 @@ fi
 grep -q '"status": "passed"' "$RUN_DIR/verdict.json"
 test -s "$RUN_DIR/manifest.env"
 test -s "$RUN_DIR/metrics.csv"
+if [[ "$(manifest_value "$RUN_DIR/manifest.env" runtime_fingerprint_status)" != "observed" ]]; then
+  echo "FAIL: expected observed runtime fingerprint" >&2
+  exit 1
+fi
+RUNTIME_OS="$(manifest_value "$RUN_DIR/manifest.env" runtime_os)"
+RUNTIME_ARCH="$(manifest_value "$RUN_DIR/manifest.env" runtime_arch)"
+SERVER_VERSION_NUM="$(manifest_value "$RUN_DIR/manifest.env" postgres_server_version_num)"
+SERVER_MAJOR="$(manifest_value "$RUN_DIR/manifest.env" postgres_server_major)"
+OBSERVED_AT="$(manifest_value "$RUN_DIR/manifest.env" runtime_fingerprint_observed_at)"
+[[ -n "$RUNTIME_OS" && -n "$RUNTIME_ARCH" && -n "$OBSERVED_AT" ]]
+[[ "$SERVER_VERSION_NUM" =~ ^[0-9]+$ ]]
+NUMERIC_SERVER_VERSION=$((10#$SERVER_VERSION_NUM))
+if (( NUMERIC_SERVER_VERSION >= 100000 )); then
+  EXPECTED_SERVER_MAJOR="$((NUMERIC_SERVER_VERSION / 10000))"
+else
+  EXPECTED_SERVER_MAJOR="$((NUMERIC_SERVER_VERSION / 10000)).$(((NUMERIC_SERVER_VERSION / 100) % 100))"
+fi
+if [[ "$SERVER_MAJOR" != "$EXPECTED_SERVER_MAJOR" ]]; then
+  echo "FAIL: runtime fingerprint PostgreSQL major does not match server_version_num" >&2
+  exit 1
+fi
 
-SHELL_WRITER_RUN_ID="test-smoke-shell-writer-$(date -u +%Y%m%d_%H%M%S)"
-EXPERIMENT_RUN_ID="$SHELL_WRITER_RUN_ID" \
-EXPERIMENT_STATE_WRITER=shell \
+AUTO_WRITER_RUN_ID="test-smoke-auto-writer-$(date -u +%Y%m%d_%H%M%S)"
+EXPERIMENT_RUN_ID="$AUTO_WRITER_RUN_ID" \
+EXPERIMENT_STATE_WRITER=auto \
 EXPERIMENT_SNAPSHOT=0 \
 EXPERIMENT_METRICS_SAMPLES=1 \
   "$REPO_DIR/scripts/run_experiment.sh" run smoke >/dev/null
 
-SHELL_WRITER_RUN_DIR="$REPO_DIR/runs/$SHELL_WRITER_RUN_ID"
-grep -q '"status": "passed"' "$SHELL_WRITER_RUN_DIR/verdict.json"
-if [[ "$(manifest_value "$SHELL_WRITER_RUN_DIR/manifest.env" experiment_topology)" != "single" ]]; then
+AUTO_WRITER_RUN_DIR="$REPO_DIR/runs/$AUTO_WRITER_RUN_ID"
+grep -q '"status": "passed"' "$AUTO_WRITER_RUN_DIR/verdict.json"
+if [[ "$(manifest_value "$AUTO_WRITER_RUN_DIR/manifest.env" experiment_topology)" != "single" ]]; then
   echo "FAIL: expected experiment_topology=single in manifest" >&2
   exit 1
 fi
@@ -155,6 +176,10 @@ UPGRADE_RUN_DIR="$REPO_DIR/runs/$UPGRADE_RUN_ID"
 grep -q '"status": "passed"' "$UPGRADE_RUN_DIR/verdict.json"
 if [[ "$(manifest_value "$UPGRADE_RUN_DIR/manifest.env" experiment_topology)" != "multi-version-upgrade" ]]; then
   echo "FAIL: expected experiment_topology=multi-version-upgrade in manifest" >&2
+  exit 1
+fi
+if [[ "$(manifest_value "$UPGRADE_RUN_DIR/manifest.env" runtime_fingerprint_target)" != "upgrade-new" ]]; then
+  echo "FAIL: expected runtime_fingerprint_target=upgrade-new in multi-version manifest" >&2
   exit 1
 fi
 

@@ -1,0 +1,52 @@
+{
+  "schema_version": "pgworkbench.release-evidence-index/v1",
+  "artifact_type": "pgworkbench.release-evidence-index",
+  "record_status": "complete",
+  "created_at": "2026-08-13T00:00:00Z",
+  "candidate": {
+    "version": "0.2.0",
+    "tag": "v0.2.0",
+    "git_commit": "1111111111111111111111111111111111111111",
+    "asset_fingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+    "scenario_pack": {
+      "id": "builtin",
+      "version": "0.2.0",
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  },
+  "preventive_controls": {
+    "tag_ruleset": {
+      "status": "open",
+      "target": "tag",
+      "enforcement": "active",
+      "include_pattern": "refs/tags/v*",
+      "excludes": [],
+      "creation_restricted": true,
+      "update_prohibited": true,
+      "deletion_prohibited": true,
+      "bypass_review": {"status": "open"}
+    },
+    "immutable_releases": {"status": "open", "enabled": false}
+  },
+  "gates": {
+    "source_compatibility": {"status": "open"},
+    "aggregate_attempt_1": {"status": "open"},
+    "aggregate_attempt_2": {"status": "open"},
+    "draft_asset_verification": {"status": "open"},
+    "draft_compatibility_7_cells": {"status": "open"},
+    "draft_external_drivers": {"status": "open"},
+    "publication": {"status": "open"},
+    "public_asset_verification": {"status": "open"},
+    "published_compatibility_7_cells": {"status": "open"},
+    "critical_finding_review": {"status": "open"},
+    "adoption_pilot_1": {"status": "open"},
+    "adoption_pilot_2": {"status": "open"},
+    "independent_authoring_reproduction": {"status": "open"}
+  },
+  "decision": {
+    "scope": "v1-readiness",
+    "status": "go",
+    "recorded_at": "2026-08-13T00:00:00Z",
+    "reasons": ["Invalid fixture: open gates cannot yield GO."]
+  }
+}

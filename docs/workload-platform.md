@@ -5,7 +5,8 @@ single-purpose lab.
 
 The platform has six layers:
 
-1. PostgreSQL runtime: Docker Compose starts a disposable PostgreSQL instance.
+1. PostgreSQL runtime: Docker Compose or native PostgreSQL binaries start a
+   disposable instance.
 2. Topologies: runtime shape such as `single` or `primary-replica`.
 3. Profiles: SQL creates repeatable database states.
 4. Workload specs: adapters run SQL, `pgbench`, noisia, shell commands, or
@@ -22,7 +23,9 @@ The platform has six layers:
 - `profile-sql`: profile-local SQL files.
 - `sql`: any repo-local SQL file.
 - `pgbench`: standard PostgreSQL benchmark client inside the postgres
-  container.
+  container or from the selected native PostgreSQL installation.
+- `pg-dump`, `pg-dumpall`, `pg-restore`: runtime-neutral PostgreSQL utility
+  adapters with repository-local output paths.
 - `pg-source-check`: clone, patch, build, test, and scan a PostgreSQL source
   tree.
 - `noisia`: harmful PostgreSQL workload generator through the existing wrapper.
@@ -43,10 +46,25 @@ make workload-plan-json WORKLOAD_SPEC=pgbench/tiny
 
 ## External Utility Testing
 
-For a utility installed on the host:
+For the built-in PostgreSQL dump/restore utilities:
 
 ```bash
 make profile-reset PROFILE=smoke
+make workload-run WORKLOAD_SPEC=utility/pg-dump-smoke
+PGWORKBENCH_RUNTIME=native PGWORKBENCH_NATIVE_BINDIR=/path/to/postgresql/bin \
+  make workload-run WORKLOAD_SPEC=utility/pg-restore-smoke
+```
+
+These adapters use clients inside the workbench-owned `postgres` service in
+Docker mode and resolve them from `PGWORKBENCH_NATIVE_BINDIR`,
+`PG_INSTALL_DIR/bin`, or `PATH` in native mode. Output and archive fields are
+portable repository-relative paths; parent/leaf symlinks and path traversal
+are rejected before opening the file. The experiment-owned loopback target
+cannot be replaced by a nested workload spec.
+
+For another utility installed on the host, use a reviewed `shell` workload:
+
+```bash
 make workload-run WORKLOAD_SPEC=shell/pg-dump-smoke
 make workload-run-json WORKLOAD_SPEC=shell/pg-dump-smoke
 ```

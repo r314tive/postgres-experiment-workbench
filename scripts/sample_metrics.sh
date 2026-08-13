@@ -72,6 +72,13 @@ sample_once() {
   "$REPO_DIR/scripts/psql.sh" -q -f "$REPO_DIR/sql/metrics_sample.sql" >> "$OUT_FILE"
 }
 
+# Duration-mode collectors are stopped explicitly after the foreground
+# workload. Record one final boundary sample before exiting so a verifier can
+# prove that metrics span the complete benchmark measure interval. A failed
+# boundary sample remains a collector failure rather than silently claiming
+# coverage.
+trap 'sample_once; exit 0' TERM
+
 if [[ -n "$SAMPLES" ]]; then
   for ((i = 1; i <= SAMPLES; i++)); do
     sample_once

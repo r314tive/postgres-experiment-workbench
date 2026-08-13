@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/compatibility-matrix.schema.json",
+  "title": "pgworkbench compatibility matrix v2",
+  "description": "Declared release archive verification scope, candidate support cells, and their required gates. Candidate, runtime-gated, or compile-package-only does not mean any gate passed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "archive_platforms", "cells"],
+  "properties": {
+    "schema_version": {
+      "const": "pgworkbench.compatibility-matrix/v2"
+    },
+    "archive_platforms": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/archive_platform"
+      }
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/cell"
+      }
+    }
+  },
+  "$defs": {
+    "archive_platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch", "verification_scope", "runtime_cells"],
+      "properties": {
+        "os": {
+          "enum": ["linux", "darwin"]
+        },
+        "arch": {
+          "enum": ["amd64", "arm64"]
+        },
+        "verification_scope": {
+          "enum": ["runtime-gated", "compile-package-only"]
+        },
+        "runtime_cells": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "verification_scope": {"const": "runtime-gated"}
+            },
+            "required": ["verification_scope"]
+          },
+          "then": {
+            "properties": {
+              "runtime_cells": {"minItems": 1}
+            }
+          },
+          "else": {
+            "properties": {
+              "runtime_cells": {"maxItems": 0}
+            }
+          }
+        }
+      ]
+    },
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "runtime",
+        "topology",
+        "os",
+        "arch",
+        "postgres",
+        "support_level",
+        "gate"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "runtime": {
+          "enum": ["docker", "native"]
+        },
+        "topology": {
+          "enum": [
+            "single",
+            "primary-replica",
+            "logical-replication",
+            "pgbouncer",
+            "multi-version-upgrade"
+          ]
+        },
+        "os": {
+          "enum": ["linux", "darwin"]
+        },
+        "arch": {
+          "enum": ["amd64", "arm64"]
+        },
+        "postgres": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(->[1-9][0-9]*)?$"
+        },
+        "support_level": {
+          "enum": ["candidate", "unsupported"]
+        },
+        "gate": {
+          "enum": [
+            "docker-integration",
+            "native-integration",
+            "manual",
+            "not-applicable"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "runtime": {"const": "native"}
+            },
+            "required": ["runtime"]
+          },
+          "then": {
+            "properties": {
+              "topology": {"const": "single"},
+              "gate": {"not": {"const": "docker-integration"}}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "runtime": {"const": "docker"}
+            },
+            "required": ["runtime"]
+          },
+          "then": {
+            "properties": {
+              "gate": {"not": {"const": "native-integration"}}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "support_level": {"const": "unsupported"}
+            },
+            "required": ["support_level"]
+          },
+          "then": {
+            "properties": {
+              "gate": {"const": "not-applicable"}
+            }
+          },
+          "else": {
+            "properties": {
+              "gate": {"not": {"const": "not-applicable"}}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

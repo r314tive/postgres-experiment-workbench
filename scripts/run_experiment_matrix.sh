@@ -107,7 +107,7 @@ load_matrix() {
   MATRIX_PROFILE_SIZES="${MATRIX_PROFILE_SIZES:-small}"
   MATRIX_REPEATS="${MATRIX_REPEATS:-1}"
   MATRIX_STOP_ON_FAIL="${MATRIX_STOP_ON_FAIL:-0}"
-  MATRIX_DOCKER_RESET="${MATRIX_DOCKER_RESET:-0}"
+  MATRIX_RUNTIME_RESET="${MATRIX_RUNTIME_RESET:-${MATRIX_DOCKER_RESET:-0}}"
   require_positive_int MATRIX_REPEATS "$MATRIX_REPEATS"
 
   read -r -a MATRIX_EXPERIMENT_LIST <<< "$MATRIX_EXPERIMENTS"
@@ -202,7 +202,7 @@ run_matrix() {
           EXPERIMENT_RUN_ID="$run_id" \
           EXPERIMENT_PG_CONFIG="$pg_config" \
           EXPERIMENT_PROFILE_SIZE="$profile_size" \
-          EXPERIMENT_DOCKER_RESET="$MATRIX_DOCKER_RESET" \
+          EXPERIMENT_RUNTIME_RESET="$MATRIX_RUNTIME_RESET" \
             "$REPO_DIR/scripts/run_experiment.sh" run "$experiment" > "$MATRIX_RUN_DIR/driver-logs/$run_id.log" 2>&1
           exit_code="$?"
           set -e

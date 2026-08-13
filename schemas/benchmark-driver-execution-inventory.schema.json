@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-driver-execution-inventory.schema.json",
+  "title": "pgworkbench external benchmark execution closed inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "execution_digest", "files"],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.benchmark-driver-execution-inventory/v2"},
+    "artifact_type": {"const": "pgworkbench.benchmark-driver-execution-inventory"},
+    "execution_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20000,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "digest", "size_bytes"],
+        "properties": {
+          "path": {"type": "string", "pattern": "^[A-Za-z0-9._/-]+$"},
+          "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "size_bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  }
+}

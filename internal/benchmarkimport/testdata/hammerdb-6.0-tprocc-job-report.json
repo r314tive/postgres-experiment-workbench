@@ -1,0 +1,53 @@
+{
+  "schema": "hammerdb-job-report-v1",
+  "description": "HammerDB benchmark result artifact. Machine-readable data, report_hints and analysis_hints are included for reproducible reporting, summary tables and chart generation.",
+  "artifact": {
+    "type": "hammerdb-result-json",
+    "schema": "hammerdb-job-report-v1",
+    "source": "HammerDB",
+    "generated_by": "HammerDB jobs summaryjson",
+    "visibility": "public",
+    "redacted": true
+  },
+  "disclaimer": {
+    "result_type": "HammerDB result artifact",
+    "audited": false,
+    "text": "This is a HammerDB result artifact. HammerDB TPROC-C and TPROC-H workloads are derived from the TPC-C and TPC-H specifications respectively. This result is not audited by the TPC-Council and is not a TPC result.",
+    "tpc_trademarks": "TPC-C, tpmC, TPC-H and QphH are trademarks of the Transaction Processing Performance Council. Unauthorised and unaudited use of official TPC result trademarks is not permitted.",
+    "hammerdb_copyright": "HammerDB is open source software distributed under the GNU General Public License (GPL). HammerDB source code, TPROC-C and TPROC-H workload implementations, documentation and related materials are copyright HammerDB Ltd. NOPM, TPROC-C and TPROC-H are HammerDB benchmark terminology.",
+    "learn_more_tpc": "https://www.tpc.org/",
+    "learn_more_hammerdb": "https://www.hammerdb.com/"
+  },
+  "report_hints": {"primary_metric": "NOPM"},
+  "analysis_hints": {"shutdown_tail": {"present": false}},
+  "job": {
+    "jobid": "67FD3C792EF803E253533323",
+    "hdb_version": "v6.0",
+    "database": "PostgreSQL",
+    "database_display": "PostgreSQL",
+    "release": "16.4",
+    "benchmark": "TPROC-C",
+    "timestamp": "2026-06-24 10:15:34"
+  },
+  "benchmark_config": {
+    "warehouses": 100,
+    "virtual_users": 32,
+    "rampup_minutes": 2,
+    "duration_minutes": 5
+  },
+  "system": {"available": true, "hostname": "benchmark-host", "cpucount": "16"},
+  "result": {
+    "type": "tproc_c_result",
+    "database_display": "PostgreSQL",
+    "active_virtual_users": 32,
+    "nopm": 125000,
+    "tpm": 303411,
+    "chart_data": [
+      {"metric": "NOPM", "value": 125000},
+      {"metric": "TPM", "value": 303411}
+    ]
+  },
+  "transaction_count": {"type": "line", "rows": []},
+  "response_times": {"type": "boxplot", "unit": "milliseconds", "rows": []},
+  "metrics": {"type": "timeseries", "rows": []}
+}

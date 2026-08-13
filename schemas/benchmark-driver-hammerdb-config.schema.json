@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-driver-hammerdb-config.schema.json",
+  "title": "pgworkbench fixed HammerDB v6.0 PostgreSQL execute-only config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "mode", "postgresql"],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.hammerdb-v6-native-run-config/v1"},
+    "artifact_type": {"const": "pgworkbench.hammerdb-v6-native-run-config"},
+    "mode": {"const": "execute-only-prepared-schema"},
+    "postgresql": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port", "user", "database", "sslmode"],
+      "properties": {
+        "host": {"type": "string", "minLength": 1, "maxLength": 255},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "user": {"type": "string", "minLength": 1, "maxLength": 255},
+        "database": {"type": "string", "minLength": 1, "maxLength": 255},
+        "sslmode": {"enum": ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"]}
+      }
+    },
+    "tprocc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["warehouses", "virtual_users", "rampup_minutes", "duration_minutes", "total_iterations"],
+      "properties": {
+        "warehouses": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "virtual_users": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "rampup_minutes": {"type": "integer", "minimum": 0, "maximum": 1440},
+        "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+        "total_iterations": {"type": "integer", "minimum": 1, "maximum": 1000000000000}
+      }
+    },
+    "tproch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scale_factor", "virtual_users", "query_sets", "degree_of_parallelism"],
+      "properties": {
+        "scale_factor": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "virtual_users": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "query_sets": {"type": "integer", "minimum": 1, "maximum": 100000},
+        "degree_of_parallelism": {"type": "integer", "minimum": 1, "maximum": 100000}
+      }
+    }
+  },
+  "oneOf": [
+    {"required": ["tprocc"], "not": {"required": ["tproch"]}},
+    {"required": ["tproch"], "not": {"required": ["tprocc"]}}
+  ]
+}

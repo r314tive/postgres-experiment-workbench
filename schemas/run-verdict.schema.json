@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/run-verdict.schema.json",
+  "title": "pgworkbench run verdict v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_type", "run_id", "status", "message",
+    "started_at", "finished_at", "experiment_spec", "experiment_identity_digest",
+    "manifest_digest", "artifact_root", "run_dir", "workload_exit", "assert_exit", "scan_exit"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.run-verdict/v1"},
+    "artifact_type": {"const": "pgworkbench.run-verdict"},
+    "run_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["passed", "failed"]},
+    "message": {"type": "string", "minLength": 1},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "experiment_spec": {"type": "string", "minLength": 1},
+    "experiment_spec_digest": {"$ref": "#/$defs/digest"},
+    "experiment_identity_digest": {"$ref": "#/$defs/digest"},
+    "manifest_digest": {"$ref": "#/$defs/digest"},
+    "artifact_root": {"const": "."},
+    "run_dir": {"const": "."},
+    "workload_exit": {"type": "integer"},
+    "assert_exit": {"type": "integer"},
+    "scan_exit": {"type": "integer"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "passed"}}},
+      "then": {
+        "properties": {
+          "workload_exit": {"const": 0},
+          "assert_exit": {"const": 0},
+          "scan_exit": {"const": 0}
+        }
+      },
+      "else": {
+        "anyOf": [
+          {"properties": {"workload_exit": {"not": {"const": 0}}}},
+          {"properties": {"assert_exit": {"not": {"const": 0}}}},
+          {"properties": {"scan_exit": {"not": {"const": 0}}}}
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

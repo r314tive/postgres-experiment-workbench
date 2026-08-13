@@ -67,6 +67,48 @@ JSON_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REP
   go run ./cmd/pgworkbench run verify --json "$RUN_DIR")"
 grep -q '"valid": true' <<< "$JSON_OUT"
 grep -q '"issues": \[\]' <<< "$JSON_OUT"
+if MISSING_INVENTORY_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
+  go run ./cmd/pgworkbench run verify --bundle "$RUN_DIR" 2>&1)"; then
+  echo "FAIL: bundle verification accepted a live run without inventory" >&2
+  exit 1
+fi
+grep -q 'bundle verification requires a complete inventory' <<< "$MISSING_INVENTORY_OUT"
+
+printf 'original evidence\n' > "$RUN_DIR/evidence.txt"
+BUNDLE="$BASE_DIR/run-a.tar.gz"
+(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
+  go run ./cmd/pgworkbench run bundle "$RUN_DIR" "$BUNDLE" >/dev/null)
+
+for copy in missing-inventory changed deleted; do
+  mkdir -p "$BASE_DIR/$copy"
+  tar -C "$BASE_DIR/$copy" -xzf "$BUNDLE"
+  (cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
+    go run ./cmd/pgworkbench run verify --bundle "$BASE_DIR/$copy/run-a" >/dev/null)
+done
+
+rm "$BASE_DIR/missing-inventory/run-a/.pgworkbench-bundle.json"
+if REMOVED_INVENTORY_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
+  go run ./cmd/pgworkbench run verify --bundle "$BASE_DIR/missing-inventory/run-a" 2>&1)"; then
+  echo "FAIL: bundle verification accepted an extracted bundle after inventory removal" >&2
+  exit 1
+fi
+grep -q 'bundle verification requires a complete inventory' <<< "$REMOVED_INVENTORY_OUT"
+
+printf 'tampered evidence\n' > "$BASE_DIR/changed/run-a/evidence.txt"
+if CHANGED_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
+  go run ./cmd/pgworkbench run verify --bundle "$BASE_DIR/changed/run-a" 2>&1)"; then
+  echo "FAIL: bundle verification accepted changed evidence" >&2
+  exit 1
+fi
+grep -q 'digest mismatch for evidence.txt' <<< "$CHANGED_OUT"
+
+rm "$BASE_DIR/deleted/run-a/evidence.txt"
+if DELETED_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
+  go run ./cmd/pgworkbench run verify --bundle "$BASE_DIR/deleted/run-a" 2>&1)"; then
+  echo "FAIL: bundle verification accepted deleted evidence" >&2
+  exit 1
+fi
+grep -q 'missing inventoried file: evidence.txt' <<< "$DELETED_OUT"
 
 write_run "$BROKEN_DIR" run-b
 if BROKEN_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
@@ -83,4 +125,4 @@ fi
 grep -q '"valid": false' <<< "$BROKEN_JSON"
 grep -q 'missing metrics.csv' <<< "$BROKEN_JSON"
 
-echo "PASS: run verification"
+echo "PASS: live-run and complete-bundle verification"

@@ -1,0 +1,19 @@
+{
+  "schema_version": "pgworkbench.hammerdb-v6-native-run-config/v1",
+  "artifact_type": "pgworkbench.hammerdb-v6-native-run-config",
+  "mode": "execute-only-prepared-schema",
+  "postgresql": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "user": "tpcc",
+    "database": "tpcc",
+    "sslmode": "prefer"
+  },
+  "tprocc": {
+    "warehouses": 100,
+    "virtual_users": 32,
+    "rampup_minutes": 2,
+    "duration_minutes": 5,
+    "total_iterations": 10000000
+  }
+}

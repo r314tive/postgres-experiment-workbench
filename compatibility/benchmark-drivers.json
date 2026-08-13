@@ -1,0 +1,59 @@
+{
+  "schema_version": "pgworkbench.benchmark-driver-lock/v1",
+  "artifact_type": "pgworkbench.benchmark-driver-lock",
+  "drivers": [
+    {
+      "id": "benchbase-postgresql-33c0047",
+      "adapter": "benchbase",
+      "display_version": "2023-SNAPSHOT+33c0047",
+      "repository": "https://github.com/cmu-db/benchbase",
+      "ref_type": "commit",
+      "ref": "33c00473807ebd49304d114a6d769d2d2b2bbb34",
+      "commit": "33c00473807ebd49304d114a6d769d2d2b2bbb34",
+      "entrypoint": "java -jar benchbase.jar",
+      "result_format": "benchbase-summary-json@33c0047",
+      "parser": "benchbase-summary/33c0047-v1",
+      "runtime_support": ["native"],
+      "workloads": ["smallbank", "tatp", "tpcc", "tpch", "ycsb"],
+      "binary_distributed_by_project": false,
+      "source_to_binary_attested": false,
+      "decision_eligible": false
+    },
+    {
+      "id": "hammerdb-postgresql-6.0",
+      "adapter": "hammerdb6",
+      "display_version": "6.0",
+      "repository": "https://github.com/TPC-Council/HammerDB",
+      "ref_type": "tag",
+      "ref": "v6.0",
+      "tag_object": "18f3e075f4d94fa1dcc3b9f11e743928ef0f7694",
+      "commit": "d33f879aec858063edd17aa2daa46db03abb2bae",
+      "entrypoint": "hammerdbcli auto",
+      "result_format": "hammerdb-job-report-v1",
+      "parser": "hammerdb6-job-report/v1",
+      "runtime_support": ["native"],
+      "workloads": ["tprocc/postgresql", "tproch/postgresql"],
+      "binary_distributed_by_project": false,
+      "source_to_binary_attested": false,
+      "decision_eligible": false
+    },
+    {
+      "id": "sysbench-postgresql-1.0.20",
+      "adapter": "sysbench1",
+      "display_version": "1.0.20",
+      "repository": "https://github.com/akopytov/sysbench",
+      "ref_type": "tag",
+      "ref": "1.0.20",
+      "tag_object": "f3da4313f8177d072b7150be5d00e4adfd15945c",
+      "commit": "ebf1c90da05dea94648165e4f149abc20c979557",
+      "entrypoint": "sysbench",
+      "result_format": "sysbench-1.0-console-summary",
+      "parser": "sysbench-console-summary/v1.1",
+      "runtime_support": ["native"],
+      "workloads": ["oltp_point_select/postgresql", "oltp_read_only/postgresql", "oltp_read_write/postgresql", "oltp_write_only/postgresql"],
+      "binary_distributed_by_project": false,
+      "source_to_binary_attested": false,
+      "decision_eligible": false
+    }
+  ]
+}

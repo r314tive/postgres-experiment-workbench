@@ -1,0 +1,20 @@
+pgbench (18.1, server 18.1)
+transaction type: rate.sql
+scaling factor: 1
+query mode: extended
+number of clients: 8
+number of threads: 4
+maximum number of tries: 1
+duration: 30 s
+number of transactions actually processed: 2990
+number of failed transactions: 3 (0.100%)
+number of serialization failures: 1 (0.033%)
+number of deadlock failures: 1 (0.033%)
+number of other failures: 1 (0.033%)
+number of transactions skipped: 7 (0.233%)
+number of transactions above the 25.0 ms latency limit: 20/2990 (0.669%)
+latency average = 10.500 ms
+latency stddev = 3.250 ms
+rate limit schedule lag: avg 1.250 (max 4.500) ms
+initial connection time = 5.000 ms
+tps = 99.666667 (without initial connection time)

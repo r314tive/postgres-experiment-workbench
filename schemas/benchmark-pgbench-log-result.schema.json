@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-pgbench-log-result.schema.json",
+  "title": "pgworkbench normalized pgbench transaction log result v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "parser_version",
+    "files",
+    "sample_rate",
+    "sampled",
+    "schedule_lag_present",
+    "retries_present",
+    "logged",
+    "completed",
+    "failed",
+    "skipped",
+    "retried",
+    "total_retries",
+    "completion_window",
+    "latency_us",
+    "schedule_lag_us"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "pgworkbench.pgbench-log-result/v2"
+    },
+    "parser_version": {
+      "const": "1.1.0"
+    },
+    "files": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sample_rate": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    },
+    "sampled": {
+      "type": "boolean"
+    },
+    "schedule_lag_present": {
+      "type": "boolean"
+    },
+    "retries_present": {
+      "type": "boolean"
+    },
+    "logged": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "completed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "failed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "skipped": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "retried": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "total_retries": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "completion_window": {
+      "$ref": "#/$defs/completionWindow"
+    },
+    "latency_us": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/distribution"}
+      ]
+    },
+    "schedule_lag_us": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/distribution"}
+      ]
+    }
+  },
+  "$defs": {
+    "completionWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "first_epoch_seconds",
+        "first_epoch_microseconds",
+        "last_epoch_seconds",
+        "last_epoch_microseconds"
+      ],
+      "properties": {
+        "first_epoch_seconds": {"type": "integer", "minimum": 0},
+        "first_epoch_microseconds": {"type": "integer", "minimum": 0, "maximum": 999999},
+        "last_epoch_seconds": {"type": "integer", "minimum": 0},
+        "last_epoch_microseconds": {"type": "integer", "minimum": 0, "maximum": 999999}
+      }
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["n", "min", "mean", "p50", "p95", "p99", "max"],
+      "properties": {
+        "n": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "min": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mean": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p50": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p95": {
+          "type": "number",
+          "minimum": 0
+        },
+        "p99": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "sampled": {"const": false}
+        }
+      },
+      "then": {
+        "properties": {
+          "sample_rate": {"const": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schedule_lag_present": {"const": false}
+        }
+      },
+      "then": {
+        "properties": {
+          "schedule_lag_us": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schedule_lag_present": {"const": true}
+        }
+      },
+      "then": {
+        "properties": {
+          "schedule_lag_us": {"$ref": "#/$defs/distribution"}
+        }
+      }
+    }
+  ]
+}

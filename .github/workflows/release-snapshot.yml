@@ -6,72 +6,2208 @@ on:
       version:
         description: Version without a leading v.
         required: true
-        default: 0.1.0
+        default: 0.2.0
+        type: string
   push:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: release-snapshot-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  snapshot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: write
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      INPUT_VERSION: ${{ inputs.version }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
-
-      - name: Resolve version
+      - name: Resolve immutable candidate version
+        id: version
         shell: bash
         run: |
-          if [[ "${GITHUB_REF_TYPE}" = "tag" ]]; then
+          set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" = tag ]]; then
             version="${GITHUB_REF_NAME#v}"
+            test "$GITHUB_REF_NAME" = "v$version"
           else
-            version="${{ inputs.version }}"
+            version="$INPUT_VERSION"
           fi
-
-          if [[ -z "$version" ]]; then
-            echo "version is required" >&2
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "version must be SemVer without a leading v: $version" >&2
             exit 2
           fi
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
-          printf 'VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+  source-compatibility:
+    needs: prepare
+    uses: ./.github/workflows/compatibility.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+    permissions:
+      attestations: read
+      contents: read
 
-      - name: Static checks
-        run: make check
+  aggregate-attempt-1:
+    needs:
+      - prepare
+      - source-compatibility
+    uses: ./.github/workflows/aggregate-gate.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      attempt: 1
+    permissions:
+      contents: read
 
-      - name: Build release snapshot
-        run: make release-snapshot VERSION="$VERSION"
+  aggregate-attempt-2:
+    needs:
+      - prepare
+      - aggregate-attempt-1
+    uses: ./.github/workflows/aggregate-gate.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      attempt: 2
+    permissions:
+      contents: read
 
-      - name: Upload release snapshot
-        uses: actions/upload-artifact@v6
+  build-snapshot:
+    needs:
+      - prepare
+      - aggregate-attempt-2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    outputs:
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      artifact_fingerprint: ${{ steps.inventory.outputs.artifact_fingerprint }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_name: ${{ steps.inventory.outputs.artifact_name }}
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          name: pgworkbench-${{ env.VERSION }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Install exact native PostgreSQL runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          bindir=/usr/lib/postgresql/16/bin
+          "$bindir/postgres" --version | grep -Eq 'PostgreSQL 16([.[:space:]]|$)'
+          printf 'PGWORKBENCH_NATIVE_BINDIR=%s\n' "$bindir" >> "$GITHUB_ENV"
+
+      - name: Require release changelog entry for tag
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: grep -Eq "^## (v${VERSION}|\\[${VERSION}\\])([[:space:]-]|$)" CHANGELOG.md
+
+      - name: Build and smoke release snapshot
+        shell: bash
+        run: make release-smoke VERSION="$VERSION"
+
+      - name: Verify deterministic release manifest and SPDX documents
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(generated/release/pgworkbench-"$VERSION"-*.tar.gz)
+          sboms=(generated/release/pgworkbench-"$VERSION"-*.spdx.json)
+          test "${#archives[@]}" -eq 4
+          test "${#sboms[@]}" -eq 4
+          go run ./cmd/pgworkbench release manifest verify \
+            --release-dir generated/release \
+            --manifest "pgworkbench-$VERSION-release-manifest.json"
+          verify_base="$RUNNER_TEMP/pgworkbench-snapshot-sbom-verify"
+          mkdir -p "$verify_base"
+          for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            archive="generated/release/pgworkbench-$VERSION-$platform.tar.gz"
+            sbom="generated/release/pgworkbench-$VERSION-$platform.spdx.json"
+            extract_root="$verify_base/$platform"
+            mkdir "$extract_root"
+            tar -C "$extract_root" -xzf "$archive"
+            package_root="$extract_root/pgworkbench-$VERSION-$platform"
+            test -d "$package_root"
+            jq -e '.spdxVersion == "SPDX-2.3"' "$sbom" >/dev/null
+            go run ./cmd/pgworkbench release sbom verify \
+              --package-root "$package_root" "$sbom"
+          done
+
+      - name: Inventory the fixed unsigned candidate artifact
+        id: inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir=generated/release
+          expected=(
+            "pgworkbench-$VERSION-darwin-amd64.tar.gz"
+            "pgworkbench-$VERSION-darwin-arm64.tar.gz"
+            "pgworkbench-$VERSION-linux-amd64.tar.gz"
+            "pgworkbench-$VERSION-linux-arm64.tar.gz"
+            "pgworkbench-$VERSION-SHA256SUMS.txt"
+            "pgworkbench-$VERSION-release-manifest.json"
+            "pgworkbench-$VERSION-darwin-amd64.spdx.json"
+            "pgworkbench-$VERSION-darwin-arm64.spdx.json"
+            "pgworkbench-$VERSION-linux-amd64.spdx.json"
+            "pgworkbench-$VERSION-linux-arm64.spdx.json"
+          )
+          test "$(find "$release_dir" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -eq 10
+          inventory="$({
+            for name in "${expected[@]}"; do
+              path="$release_dir/$name"
+              test -f "$path"
+              test ! -L "$path"
+              jq -n -c \
+                --arg name "$name" \
+                --arg sha256 "$(sha256sum "$path" | awk '{print $1}')" \
+                --argjson size "$(stat -c %s "$path")" \
+                '{name: $name, sha256: $sha256, size: $size}'
+            done
+          } | jq -csS 'sort_by(.name)')"
+          artifact_fingerprint="$(printf '%s' "$inventory" | sha256sum | awk '{print $1}')"
+          artifact_name="release-candidate-$VERSION-$GITHUB_SHA-$GITHUB_RUN_ATTEMPT"
+          printf 'artifact_fingerprint=%s\n' "$artifact_fingerprint" >> "$GITHUB_OUTPUT"
+          printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the fixed unsigned candidate artifact
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.inventory.outputs.artifact_name }}
           path: |
             generated/release/*.tar.gz
-            generated/release/*-SHA256SUMS.txt
+            generated/release/pgworkbench-${{ env.VERSION }}-SHA256SUMS.txt
+            generated/release/*-release-manifest.json
+            generated/release/*.spdx.json
           if-no-files-found: error
+          retention-days: 30
 
-      - name: Publish GitHub release
-        if: github.ref_type == 'tag'
+  verify-candidate-artifact:
+    needs:
+      - prepare
+      - build-snapshot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      CANDIDATE_ARTIFACT_DIGEST: ${{ needs['build-snapshot'].outputs.artifact_digest }}
+      CANDIDATE_ARTIFACT_FINGERPRINT: ${{ needs['build-snapshot'].outputs.artifact_fingerprint }}
+      CANDIDATE_ARTIFACT_ID: ${{ needs['build-snapshot'].outputs.artifact_id }}
+      CANDIDATE_ARTIFACT_NAME: ${{ needs['build-snapshot'].outputs.artifact_name }}
+    outputs:
+      verified_artifact_digest: ${{ steps.verify.outputs.verified_artifact_digest }}
+      verified_artifact_fingerprint: ${{ steps.verify.outputs.verified_artifact_fingerprint }}
+      verified_artifact_id: ${{ steps.verify.outputs.verified_artifact_id }}
+      verified_artifact_name: ${{ steps.verify.outputs.verified_artifact_name }}
+
+    steps:
+      - name: Require exact producer artifact identity
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          tag="$GITHUB_REF_NAME"
-          assets=(generated/release/*.tar.gz generated/release/*-SHA256SUMS.txt)
+          set -euo pipefail
+          [[ "$CANDIDATE_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_ARTIFACT_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          prefix="release-candidate-$VERSION-$GITHUB_SHA-"
+          test "${CANDIDATE_ARTIFACT_NAME#"$prefix"}" != "$CANDIDATE_ARTIFACT_NAME"
+          producer_attempt="${CANDIDATE_ARTIFACT_NAME#"$prefix"}"
+          [[ "$producer_attempt" =~ ^[1-9][0-9]*$ ]]
+          case "$CANDIDATE_ARTIFACT_DIGEST" in
+            sha256:[0-9a-f][0-9a-f]*) expected_digest="$CANDIDATE_ARTIFACT_DIGEST" ;;
+            [0-9a-f][0-9a-f]*) expected_digest="sha256:$CANDIDATE_ARTIFACT_DIGEST" ;;
+            *) exit 1 ;;
+          esac
+          [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$CANDIDATE_ARTIFACT_ID")"
+          jq -e \
+            --argjson id "$CANDIDATE_ARTIFACT_ID" \
+            --arg name "$CANDIDATE_ARTIFACT_NAME" \
+            --arg digest "$expected_digest" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg head_sha "$GITHUB_SHA" \
+            '.id == $id and .name == $name and .expired == false and
+             .digest == $digest and .workflow_run.id == $run_id and
+             .workflow_run.head_sha == $head_sha' <<<"$artifact_json" >/dev/null
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${assets[@]}" --clobber
-          else
-            gh release create "$tag" "${assets[@]}" \
-              --title "$tag" \
-              --notes-file CHANGELOG.md
+      - name: Download exact producer artifact by immutable id
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ env.CANDIDATE_ARTIFACT_ID }}
+          path: candidate
+          merge-multiple: true
+
+      - name: Semantically verify the downloaded candidate
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            "pgworkbench-$VERSION-darwin-amd64.tar.gz"
+            "pgworkbench-$VERSION-darwin-arm64.tar.gz"
+            "pgworkbench-$VERSION-linux-amd64.tar.gz"
+            "pgworkbench-$VERSION-linux-arm64.tar.gz"
+            "pgworkbench-$VERSION-SHA256SUMS.txt"
+            "pgworkbench-$VERSION-release-manifest.json"
+            "pgworkbench-$VERSION-darwin-amd64.spdx.json"
+            "pgworkbench-$VERSION-darwin-arm64.spdx.json"
+            "pgworkbench-$VERSION-linux-amd64.spdx.json"
+            "pgworkbench-$VERSION-linux-arm64.spdx.json"
+          )
+          test "$(find candidate -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -eq 10
+          inventory="$({
+            for name in "${expected[@]}"; do
+              path="candidate/$name"
+              test -f "$path"
+              test ! -L "$path"
+              jq -n -c \
+                --arg name "$name" \
+                --arg sha256 "$(sha256sum "$path" | awk '{print $1}')" \
+                --argjson size "$(stat -c %s "$path")" \
+                '{name: $name, sha256: $sha256, size: $size}'
+            done
+          } | jq -csS 'sort_by(.name)')"
+          artifact_fingerprint="$(printf '%s' "$inventory" | sha256sum | awk '{print $1}')"
+          test "$artifact_fingerprint" = "$CANDIDATE_ARTIFACT_FINGERPRINT"
+          (
+            cd candidate
+            sha256sum -c "pgworkbench-$VERSION-SHA256SUMS.txt"
+          )
+          verify_root="$RUNNER_TEMP/pgworkbench-candidate-verify"
+          mkdir "$verify_root"
+          tar -C "$verify_root" -xzf "candidate/pgworkbench-$VERSION-linux-amd64.tar.gz"
+          verifier="$verify_root/pgworkbench-$VERSION-linux-amd64/pgworkbench"
+          test -x "$verifier"
+          "$verifier" release manifest verify \
+            --release-dir "$GITHUB_WORKSPACE/candidate" \
+            --manifest "pgworkbench-$VERSION-release-manifest.json"
+          sbom_root="$RUNNER_TEMP/pgworkbench-candidate-sbom-verify"
+          mkdir "$sbom_root"
+          for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            extract_root="$sbom_root/$platform"
+            mkdir "$extract_root"
+            tar -C "$extract_root" \
+              -xzf "candidate/pgworkbench-$VERSION-$platform.tar.gz"
+            "$verifier" release sbom verify \
+              --package-root "$extract_root/pgworkbench-$VERSION-$platform" \
+              "candidate/pgworkbench-$VERSION-$platform.spdx.json"
+          done
+          printf 'verified_artifact_digest=%s\n' "$CANDIDATE_ARTIFACT_DIGEST" >> "$GITHUB_OUTPUT"
+          printf 'verified_artifact_fingerprint=%s\n' "$artifact_fingerprint" >> "$GITHUB_OUTPUT"
+          printf 'verified_artifact_id=%s\n' "$CANDIDATE_ARTIFACT_ID" >> "$GITHUB_OUTPUT"
+          printf 'verified_artifact_name=%s\n' "$CANDIDATE_ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+  attest-and-create-draft:
+    if: github.ref_type == 'tag'
+    needs:
+      - prepare
+      - build-snapshot
+      - verify-candidate-artifact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release-publication
+    permissions:
+      actions: read
+      artifact-metadata: write
+      attestations: write
+      contents: write
+      id-token: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      CANDIDATE_ARTIFACT_DIGEST: ${{ needs['build-snapshot'].outputs.artifact_digest }}
+      CANDIDATE_ARTIFACT_FINGERPRINT: ${{ needs['build-snapshot'].outputs.artifact_fingerprint }}
+      CANDIDATE_ARTIFACT_ID: ${{ needs['build-snapshot'].outputs.artifact_id }}
+      CANDIDATE_ARTIFACT_NAME: ${{ needs['build-snapshot'].outputs.artifact_name }}
+      VERIFIED_ARTIFACT_DIGEST: ${{ needs['verify-candidate-artifact'].outputs.verified_artifact_digest }}
+      VERIFIED_ARTIFACT_FINGERPRINT: ${{ needs['verify-candidate-artifact'].outputs.verified_artifact_fingerprint }}
+      VERIFIED_ARTIFACT_ID: ${{ needs['verify-candidate-artifact'].outputs.verified_artifact_id }}
+      VERIFIED_ARTIFACT_NAME: ${{ needs['verify-candidate-artifact'].outputs.verified_artifact_name }}
+    outputs:
+      controls_artifact_digest: ${{ steps.upload_controls.outputs.artifact-digest }}
+      controls_artifact_id: ${{ steps.upload_controls.outputs.artifact-id }}
+      controls_artifact_name: ${{ steps.controls.outputs.artifact_name }}
+      repository_controls_digest: ${{ steps.controls.outputs.repository_controls_digest }}
+
+    steps:
+      - name: Require the exact semantically verified producer artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CANDIDATE_ARTIFACT_ID" = "$VERIFIED_ARTIFACT_ID"
+          test "$CANDIDATE_ARTIFACT_NAME" = "$VERIFIED_ARTIFACT_NAME"
+          test "$CANDIDATE_ARTIFACT_DIGEST" = "$VERIFIED_ARTIFACT_DIGEST"
+          test "$CANDIDATE_ARTIFACT_FINGERPRINT" = "$VERIFIED_ARTIFACT_FINGERPRINT"
+          [[ "$CANDIDATE_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CANDIDATE_ARTIFACT_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          prefix="release-candidate-$VERSION-$GITHUB_SHA-"
+          test "${CANDIDATE_ARTIFACT_NAME#"$prefix"}" != "$CANDIDATE_ARTIFACT_NAME"
+          [[ "${CANDIDATE_ARTIFACT_NAME#"$prefix"}" =~ ^[1-9][0-9]*$ ]]
+          case "$CANDIDATE_ARTIFACT_DIGEST" in
+            sha256:[0-9a-f][0-9a-f]*) expected_digest="$CANDIDATE_ARTIFACT_DIGEST" ;;
+            [0-9a-f][0-9a-f]*) expected_digest="sha256:$CANDIDATE_ARTIFACT_DIGEST" ;;
+            *) exit 1 ;;
+          esac
+          [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$CANDIDATE_ARTIFACT_ID")"
+          jq -e \
+            --argjson id "$CANDIDATE_ARTIFACT_ID" \
+            --arg name "$CANDIDATE_ARTIFACT_NAME" \
+            --arg digest "$expected_digest" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg head_sha "$GITHUB_SHA" \
+            '.id == $id and .name == $name and .expired == false and
+             .digest == $digest and .workflow_run.id == $run_id and
+             .workflow_run.head_sha == $head_sha' <<<"$artifact_json" >/dev/null
+
+      - name: Download exact producer artifact by immutable id
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ env.CANDIDATE_ARTIFACT_ID }}
+          path: candidate
+          merge-multiple: true
+
+      - name: Statically verify the fixed candidate without executing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir=candidate
+          expected=(
+            "pgworkbench-$VERSION-darwin-amd64.tar.gz"
+            "pgworkbench-$VERSION-darwin-arm64.tar.gz"
+            "pgworkbench-$VERSION-linux-amd64.tar.gz"
+            "pgworkbench-$VERSION-linux-arm64.tar.gz"
+            "pgworkbench-$VERSION-SHA256SUMS.txt"
+            "pgworkbench-$VERSION-release-manifest.json"
+            "pgworkbench-$VERSION-darwin-amd64.spdx.json"
+            "pgworkbench-$VERSION-darwin-arm64.spdx.json"
+            "pgworkbench-$VERSION-linux-amd64.spdx.json"
+            "pgworkbench-$VERSION-linux-arm64.spdx.json"
+          )
+          test "$(find "$release_dir" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -eq 10
+          inventory="$({
+            for name in "${expected[@]}"; do
+              path="$release_dir/$name"
+              test -f "$path"
+              test ! -L "$path"
+              jq -n -c \
+                --arg name "$name" \
+                --arg sha256 "$(sha256sum "$path" | awk '{print $1}')" \
+                --argjson size "$(stat -c %s "$path")" \
+                '{name: $name, sha256: $sha256, size: $size}'
+            done
+          } | jq -csS 'sort_by(.name)')"
+          test "$(printf '%s' "$inventory" | sha256sum | awk '{print $1}')" = \
+            "$CANDIDATE_ARTIFACT_FINGERPRINT"
+
+          checksum="$release_dir/pgworkbench-$VERSION-SHA256SUMS.txt"
+          mapfile -t checksum_names < <(awk '{print $2}' "$checksum" | LC_ALL=C sort)
+          expected_checksum_names=(
+            "pgworkbench-$VERSION-darwin-amd64.tar.gz"
+            "pgworkbench-$VERSION-darwin-arm64.tar.gz"
+            "pgworkbench-$VERSION-linux-amd64.tar.gz"
+            "pgworkbench-$VERSION-linux-arm64.tar.gz"
+          )
+          test "${checksum_names[*]}" = "${expected_checksum_names[*]}"
+          (
+            cd "$release_dir"
+            sha256sum -c "pgworkbench-$VERSION-SHA256SUMS.txt"
+          )
+
+          manifest="$release_dir/pgworkbench-$VERSION-release-manifest.json"
+          jq -e \
+            --arg version "$VERSION" \
+            --arg commit "$GITHUB_SHA" \
+            '.schema_version == "pgworkbench.release-manifest/v1" and
+             .version == $version and .git_commit == $commit and
+             ([.archives[].path] == [
+               "pgworkbench-" + $version + "-darwin-amd64.tar.gz",
+               "pgworkbench-" + $version + "-darwin-arm64.tar.gz",
+               "pgworkbench-" + $version + "-linux-amd64.tar.gz",
+               "pgworkbench-" + $version + "-linux-arm64.tar.gz"
+             ]) and
+             ([.sboms[].path] == [
+               "pgworkbench-" + $version + "-darwin-amd64.spdx.json",
+               "pgworkbench-" + $version + "-darwin-arm64.spdx.json",
+               "pgworkbench-" + $version + "-linux-amd64.spdx.json",
+               "pgworkbench-" + $version + "-linux-arm64.spdx.json"
+             ]) and
+             .checksum_file.path == ("pgworkbench-" + $version + "-SHA256SUMS.txt")' \
+            "$manifest" >/dev/null
+          test "$(jq -r .checksum_file.digest "$manifest")" = \
+            "sha256:$(sha256sum "$checksum" | awk '{print $1}')"
+          for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            archive="pgworkbench-$VERSION-$platform.tar.gz"
+            sbom="pgworkbench-$VERSION-$platform.spdx.json"
+            archive_path="$release_dir/$archive"
+            sbom_path="$release_dir/$sbom"
+            test "$(jq -r --arg path "$archive" '.archives[] | select(.path == $path) | .sha256' "$manifest")" = \
+              "$(sha256sum "$archive_path" | awk '{print $1}')"
+            test "$(jq -r --arg path "$archive" '.archives[] | select(.path == $path) | .size' "$manifest")" = \
+              "$(stat -c %s "$archive_path")"
+            test "$(jq -r --arg path "$sbom" '.sboms[] | select(.path == $path) | .sha256' "$manifest")" = \
+              "$(sha256sum "$sbom_path" | awk '{print $1}')"
+            test "$(jq -r --arg path "$sbom" '.sboms[] | select(.path == $path) | .size' "$manifest")" = \
+              "$(stat -c %s "$sbom_path")"
+            test "$(jq -r --arg path "$sbom" '.sboms[] | select(.path == $path) | .subject' "$manifest")" = "$archive"
+            jq -e '.spdxVersion == "SPDX-2.3"' "$sbom_path" >/dev/null
+            root="pgworkbench-$VERSION-$platform"
+            tar -tzf "$archive_path" | awk -v root="$root" '
+              BEGIN { count = 0; invalid = 0 }
+              /^\// || /(^|\/)\.\.($|\/)/ { invalid = 2; exit }
+              $0 != root && $0 != root "/" && index($0, root "/") != 1 { invalid = 3; exit }
+              { count++ }
+              END {
+                if (invalid != 0) exit invalid
+                if (count == 0) exit 4
+              }
+            '
+            tar -tvzf "$archive_path" | awk '
+              substr($1, 1, 1) != "-" && substr($1, 1, 1) != "d" { exit 2 }
+            '
+          done
+
+      - name: Verify preventive repository release controls
+        id: controls
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMMUTABLE_RELEASES_ADMIN_TOKEN: ${{ secrets.PGWORKBENCH_ADMIN_READ_TOKEN }}
+          TAG_RULESET_ADMIN_REVIEW_REF: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEW_REF }}
+          TAG_RULESET_ADMIN_REVIEW_DIGEST: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEW_DIGEST }}
+          TAG_RULESET_ADMIN_REVIEWER: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWER }}
+          TAG_RULESET_ADMIN_REVIEWED_AT: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_AT }}
+          TAG_RULESET_ADMIN_REVIEWED_ID: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_ID }}
+          TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMMUTABLE_RELEASES_ADMIN_TOKEN"
+          [[ "$TAG_RULESET_ADMIN_REVIEW_REF" =~ ^(https?|s3|gs)://[^[:space:]]+$|^urn:[^[:space:]]+$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEW_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWER" =~ ^[A-Za-z0-9@._-]+$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_ID" =~ ^[0-9]+$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          controls=repository-controls
+          mkdir "$controls"
+          gh api --paginate --slurp \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/rulesets?targets=tag&includes_parents=true&per_page=100" \
+            > "$controls/ruleset-pages.json"
+          jq -e --argjson id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            'add | any(.[]; .id == $id)' "$controls/ruleset-pages.json" >/dev/null
+          jq 'add' "$controls/ruleset-pages.json" > "$controls/rulesets.json"
+          gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/rulesets/$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            > "$controls/tag-ruleset.json"
+          jq -e \
+            --arg updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            '.updated_at == $updated_at and .target == "tag" and
+             .enforcement == "active" and
+             .conditions.ref_name.include == ["refs/tags/v*"] and
+             .conditions.ref_name.exclude == [] and
+             ([.rules[].type] | index("creation")) != null and
+             ([.rules[].type] | index("update")) != null and
+             ([.rules[].type] | index("deletion")) != null' \
+            "$controls/tag-ruleset.json" >/dev/null
+          jq -n -e \
+            --arg reviewed_at "$TAG_RULESET_ADMIN_REVIEWED_AT" \
+            --arg ruleset_updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            '($reviewed_at | fromdateiso8601) >= ($ruleset_updated_at | fromdateiso8601)' \
+            >/dev/null
+          GH_TOKEN="$IMMUTABLE_RELEASES_ADMIN_TOKEN" gh api \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" \
+            > "$controls/immutable-releases.json"
+          jq -e '.enabled == true and
+                 (.enforced_by_owner | type) == "boolean" and
+                 (keys | sort) == ["enabled", "enforced_by_owner"]' \
+            "$controls/immutable-releases.json" >/dev/null
+          ruleset_digest="sha256:$(sha256sum "$controls/tag-ruleset.json" | awk '{print $1}')"
+          immutable_digest="sha256:$(sha256sum "$controls/immutable-releases.json" | awk '{print $1}')"
+          jq -n \
+            --arg schema_version pgworkbench.repository-release-controls/v1 \
+            --arg artifact_type pgworkbench.repository-release-controls \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg candidate_sha "$GITHUB_SHA" \
+            --arg ruleset_digest "$ruleset_digest" \
+            --arg immutable_digest "$immutable_digest" \
+            --arg review_ref "$TAG_RULESET_ADMIN_REVIEW_REF" \
+            --arg review_digest "$TAG_RULESET_ADMIN_REVIEW_DIGEST" \
+            --arg reviewer "$TAG_RULESET_ADMIN_REVIEWER" \
+            --arg reviewed_at "$TAG_RULESET_ADMIN_REVIEWED_AT" \
+            --arg reviewed_ruleset_id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            --arg reviewed_ruleset_updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            --slurpfile ruleset "$controls/tag-ruleset.json" \
+            --slurpfile immutable "$controls/immutable-releases.json" \
+            '{
+              schema_version: $schema_version,
+              artifact_type: $artifact_type,
+              tag: $tag,
+              candidate_sha: $candidate_sha,
+              tag_ruleset: {
+                status: "verified",
+                id: $ruleset[0].id,
+                target: $ruleset[0].target,
+                enforcement: $ruleset[0].enforcement,
+                include_pattern: "refs/tags/v*",
+                excludes: [],
+                creation_restricted: true,
+                update_prohibited: true,
+                deletion_prohibited: true,
+                api_evidence_digest: $ruleset_digest,
+                bypass_review: {
+                  status: "admin-reviewed",
+                  reviewer: $reviewer,
+                  reviewed_at: $reviewed_at,
+                  ruleset_id: ($reviewed_ruleset_id | tonumber),
+                  ruleset_updated_at: $reviewed_ruleset_updated_at,
+                  evidence_ref: $review_ref,
+                  evidence_digest: $review_digest
+                }
+              },
+              immutable_releases: {
+                status: "verified",
+                enabled: $immutable[0].enabled,
+                enforced_by_owner: $immutable[0].enforced_by_owner,
+                api_evidence_digest: $immutable_digest
+              }
+            }' > "$controls/repository-controls.json"
+          repository_controls_digest="sha256:$(sha256sum "$controls/repository-controls.json" | awk '{print $1}')"
+          artifact_name="release-controls-${GITHUB_REF_NAME}-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
+          printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
+          printf 'repository_controls_digest=%s\n' "$repository_controls_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Upload protected repository-control evidence
+        id: upload_controls
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.controls.outputs.artifact_name }}
+          path: repository-controls/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Generate signed build provenance
+        id: provenance
+        uses: actions/attest@c32b4b8b198b65d0bd9d63490e847ff7b53989d4 # v4.0.0
+        with:
+          subject-path: |
+            candidate/pgworkbench-${{ env.VERSION }}-*.tar.gz
+            candidate/pgworkbench-${{ env.VERSION }}-SHA256SUMS.txt
+            candidate/pgworkbench-${{ env.VERSION }}-release-manifest.json
+
+      - name: Attest Darwin amd64 SBOM
+        id: sbom_darwin_amd64
+        uses: actions/attest@c32b4b8b198b65d0bd9d63490e847ff7b53989d4 # v4.0.0
+        with:
+          subject-path: candidate/pgworkbench-${{ env.VERSION }}-darwin-amd64.tar.gz
+          sbom-path: candidate/pgworkbench-${{ env.VERSION }}-darwin-amd64.spdx.json
+
+      - name: Attest Darwin arm64 SBOM
+        id: sbom_darwin_arm64
+        uses: actions/attest@c32b4b8b198b65d0bd9d63490e847ff7b53989d4 # v4.0.0
+        with:
+          subject-path: candidate/pgworkbench-${{ env.VERSION }}-darwin-arm64.tar.gz
+          sbom-path: candidate/pgworkbench-${{ env.VERSION }}-darwin-arm64.spdx.json
+
+      - name: Attest Linux amd64 SBOM
+        id: sbom_linux_amd64
+        uses: actions/attest@c32b4b8b198b65d0bd9d63490e847ff7b53989d4 # v4.0.0
+        with:
+          subject-path: candidate/pgworkbench-${{ env.VERSION }}-linux-amd64.tar.gz
+          sbom-path: candidate/pgworkbench-${{ env.VERSION }}-linux-amd64.spdx.json
+
+      - name: Attest Linux arm64 SBOM
+        id: sbom_linux_arm64
+        uses: actions/attest@c32b4b8b198b65d0bd9d63490e847ff7b53989d4 # v4.0.0
+        with:
+          subject-path: candidate/pgworkbench-${{ env.VERSION }}-linux-arm64.tar.gz
+          sbom-path: candidate/pgworkbench-${{ env.VERSION }}-linux-arm64.spdx.json
+
+      - name: Preserve signed attestation bundles and metadata checksums
+        env:
+          PROVENANCE_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+          SBOM_DARWIN_AMD64_BUNDLE: ${{ steps.sbom_darwin_amd64.outputs.bundle-path }}
+          SBOM_DARWIN_ARM64_BUNDLE: ${{ steps.sbom_darwin_arm64.outputs.bundle-path }}
+          SBOM_LINUX_AMD64_BUNDLE: ${{ steps.sbom_linux_amd64.outputs.bundle-path }}
+          SBOM_LINUX_ARM64_BUNDLE: ${{ steps.sbom_linux_arm64.outputs.bundle-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir=candidate
+          cp "$PROVENANCE_BUNDLE" "$release_dir/pgworkbench-$VERSION-provenance.sigstore.json"
+          cp "$SBOM_DARWIN_AMD64_BUNDLE" "$release_dir/pgworkbench-$VERSION-darwin-amd64-sbom.sigstore.json"
+          cp "$SBOM_DARWIN_ARM64_BUNDLE" "$release_dir/pgworkbench-$VERSION-darwin-arm64-sbom.sigstore.json"
+          cp "$SBOM_LINUX_AMD64_BUNDLE" "$release_dir/pgworkbench-$VERSION-linux-amd64-sbom.sigstore.json"
+          cp "$SBOM_LINUX_ARM64_BUNDLE" "$release_dir/pgworkbench-$VERSION-linux-arm64-sbom.sigstore.json"
+          metadata_checksums="pgworkbench-$VERSION-METADATA-SHA256SUMS.txt"
+          (
+            cd "$release_dir"
+            LC_ALL=C sha256sum \
+              ./*.spdx.json \
+              ./*.sigstore.json \
+              "./pgworkbench-$VERSION-release-manifest.json" \
+              > "$metadata_checksums"
+            sha256sum -c "pgworkbench-$VERSION-SHA256SUMS.txt"
+            sha256sum -c "$metadata_checksums"
+          )
+
+      - name: Revalidate controls and create the fixed-asset draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMMUTABLE_RELEASES_ADMIN_TOKEN: ${{ secrets.PGWORKBENCH_ADMIN_READ_TOKEN }}
+          TAG_RULESET_ADMIN_REVIEWED_ID: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_ID }}
+          TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMMUTABLE_RELEASES_ADMIN_TOKEN"
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_ID" =~ ^[0-9]+$ ]]
+          effective_rulesets="$(gh api --paginate --slurp \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/rulesets?targets=tag&includes_parents=true&per_page=100")"
+          jq -e --argjson id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            'add | any(.[]; .id == $id)' <<<"$effective_rulesets" >/dev/null
+          live_ruleset="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/rulesets/$TAG_RULESET_ADMIN_REVIEWED_ID")"
+          jq -e \
+            --arg updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            '.updated_at == $updated_at and .target == "tag" and
+             .enforcement == "active" and
+             .conditions.ref_name.include == ["refs/tags/v*"] and
+             .conditions.ref_name.exclude == [] and
+             ([.rules[].type] | index("creation")) != null and
+             ([.rules[].type] | index("update")) != null and
+             ([.rules[].type] | index("deletion")) != null' \
+            <<<"$live_ruleset" >/dev/null
+          live_ruleset_digest="sha256:$(printf '%s\n' "$live_ruleset" | sha256sum | awk '{print $1}')"
+          test "$live_ruleset_digest" = "sha256:$(sha256sum \
+            repository-controls/tag-ruleset.json | awk '{print $1}')"
+          live_immutable="$({ GH_TOKEN="$IMMUTABLE_RELEASES_ADMIN_TOKEN" gh api \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases"; })"
+          jq -e '.enabled == true and
+                 (.enforced_by_owner | type) == "boolean" and
+                 (keys | sort) == ["enabled", "enforced_by_owner"]' \
+            <<<"$live_immutable" >/dev/null
+          live_immutable_digest="sha256:$(printf '%s\n' "$live_immutable" | sha256sum | awk '{print $1}')"
+          test "$live_immutable_digest" = "sha256:$(sha256sum \
+            repository-controls/immutable-releases.json | awk '{print $1}')"
+          tag="$GITHUB_REF_NAME"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)" = "$GITHUB_SHA"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release already exists; refusing to replace immutable assets: $tag" >&2
+            exit 1
           fi
+          shopt -s nullglob
+          assets=(
+            candidate/*.tar.gz
+            candidate/*-SHA256SUMS.txt
+            candidate/*-release-manifest.json
+            candidate/*.spdx.json
+            candidate/*.sigstore.json
+          )
+          test "${#assets[@]}" -eq 16
+          notes="Automated pgworkbench $tag candidate from commit $GITHUB_SHA."
+          gh release create "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "$tag" --notes "$notes"
+
+  draft-verify:
+    if: github.ref_type == 'tag'
+    needs:
+      - prepare
+      - attest-and-create-draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      attestations: read
+      contents: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    outputs:
+      asset_fingerprint: ${{ steps.draft_assets.outputs.asset_fingerprint }}
+
+    steps:
+      - name: Download draft release into clean workspace
+        id: draft_assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName,assets)"
+          test "$(jq -r .isDraft <<<"$release_json")" = true
+          test "$(jq -r .tagName <<<"$release_json")" = "$GITHUB_REF_NAME"
+          jq -e '
+            .assets | length == 16 and all(.[];
+              .id != null and
+              ((.name | type) == "string") and
+              ((.size | type) == "number") and
+              ((.digest | type) == "string") and
+              (.digest | startswith("sha256:"))
+            )
+          ' <<<"$release_json" >/dev/null
+          asset_inventory="$(jq -cS '[.assets[] | {id, name, size, digest}] | sort_by(.name)' <<<"$release_json")"
+          asset_fingerprint="$(printf '%s' "$asset_inventory" | sha256sum | awk '{print $1}')"
+          printf 'asset_fingerprint=%s\n' "$asset_fingerprint" >> "$GITHUB_OUTPUT"
+          mkdir -p downloaded draft-verification
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir downloaded
+          test "$(find downloaded -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 16
+
+      - name: Verify tag target, checksums, SBOMs, and attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_ASSET_FINGERPRINT: ${{ steps.draft_assets.outputs.asset_fingerprint }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remote_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq .sha)"
+          test "$remote_sha" = "$GITHUB_SHA"
+
+          # Establish authenticity with the GitHub attestation service and the
+          # downloaded signed bundles before trusting checksums, extracting an
+          # archive, or executing a release binary.
+          provenance_bundle="downloaded/pgworkbench-$VERSION-provenance.sigstore.json"
+          provenance_subjects=(
+            downloaded/pgworkbench-"$VERSION"-*.tar.gz
+            "downloaded/pgworkbench-$VERSION-SHA256SUMS.txt"
+            "downloaded/pgworkbench-$VERSION-release-manifest.json"
+          )
+          test "${#provenance_subjects[@]}" -eq 6
+          for subject in "${provenance_subjects[@]}"; do
+            gh attestation verify "$subject" -R "$GITHUB_REPOSITORY" \
+              --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+            gh attestation verify "$subject" -R "$GITHUB_REPOSITORY" \
+              --bundle "$provenance_bundle" \
+              --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+          done
+
+          for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            archive="downloaded/pgworkbench-$VERSION-$platform.tar.gz"
+            sbom_bundle="downloaded/pgworkbench-$VERSION-$platform-sbom.sigstore.json"
+            test -s "$archive"
+            gh attestation verify "$archive" -R "$GITHUB_REPOSITORY" \
+              --predicate-type https://spdx.dev/Document/v2.3 \
+              --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+            gh attestation verify "$archive" -R "$GITHUB_REPOSITORY" \
+              --bundle "$sbom_bundle" \
+              --predicate-type https://spdx.dev/Document/v2.3 \
+              --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+          done
+          unset GH_TOKEN
+
+          (
+            cd downloaded
+            sha256sum -c "pgworkbench-$VERSION-SHA256SUMS.txt"
+            sha256sum -c "pgworkbench-$VERSION-METADATA-SHA256SUMS.txt"
+          )
+
+          verify_root="$RUNNER_TEMP/pgworkbench-release-manifest-verify"
+          mkdir -p "$verify_root"
+          tar -C "$verify_root" -xzf "downloaded/pgworkbench-$VERSION-linux-amd64.tar.gz"
+          verifier="$verify_root/pgworkbench-$VERSION-linux-amd64/pgworkbench"
+          test -x "$verifier"
+          "$verifier" release manifest verify \
+            --release-dir "$GITHUB_WORKSPACE/downloaded" \
+            --manifest "pgworkbench-$VERSION-release-manifest.json"
+
+          sbom_verify_base="$RUNNER_TEMP/pgworkbench-draft-sbom-verify"
+          mkdir -p "$sbom_verify_base"
+          for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            sbom="downloaded/pgworkbench-$VERSION-$platform.spdx.json"
+            extract_root="$sbom_verify_base/$platform"
+            mkdir "$extract_root"
+            tar -C "$extract_root" \
+              -xzf "downloaded/pgworkbench-$VERSION-$platform.tar.gz"
+            package_root="$extract_root/pgworkbench-$VERSION-$platform"
+            test -d "$package_root"
+            jq -e '.spdxVersion == "SPDX-2.3"' "$sbom" >/dev/null
+            "$verifier" release sbom verify \
+              --package-root "$package_root" "$sbom"
+          done
+          {
+            printf 'tag=%s\n' "$GITHUB_REF_NAME"
+            printf 'candidate_sha=%s\n' "$GITHUB_SHA"
+            printf 'remote_sha=%s\n' "$remote_sha"
+            printf 'release_state=draft\n'
+            printf 'asset_fingerprint=%s\n' "$VERIFIED_ASSET_FINGERPRINT"
+            printf 'archive_checksums=verified\n'
+            printf 'metadata_checksums=verified\n'
+            printf 'release_manifest=verified\n'
+            printf 'provenance_attestations=verified\n'
+            printf 'sbom_attestations=verified\n'
+          } > draft-verification/result.env
+          find downloaded -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort \
+            > draft-verification/assets.txt
+
+      - name: Upload draft verification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: draft-verification-${{ github.ref_name }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: draft-verification/
+          if-no-files-found: error
+          retention-days: 90
+
+  draft-compatibility:
+    if: github.ref_type == 'tag'
+    needs:
+      - attest-and-create-draft
+      - draft-verify
+    uses: ./.github/workflows/compatibility.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+      qualification_mode: draft
+    permissions:
+      attestations: read
+      contents: read
+
+  draft-external-drivers:
+    if: github.ref_type == 'tag'
+    needs:
+      - prepare
+      - attest-and-create-draft
+      - draft-verify
+      - draft-compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: release-external-drivers
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      VERIFIED_ASSET_FINGERPRINT: ${{ needs['draft-verify'].outputs.asset_fingerprint }}
+      VERIFIED_CONTROLS_ARTIFACT_DIGEST: ${{ needs['attest-and-create-draft'].outputs.controls_artifact_digest }}
+      VERIFIED_CONTROLS_ARTIFACT_ID: ${{ needs['attest-and-create-draft'].outputs.controls_artifact_id }}
+      VERIFIED_CONTROLS_ARTIFACT_NAME: ${{ needs['attest-and-create-draft'].outputs.controls_artifact_name }}
+      VERIFIED_REPOSITORY_CONTROLS_DIGEST: ${{ needs['attest-and-create-draft'].outputs.repository_controls_digest }}
+      DRAFT_DOWNLOAD_DIR: draft-external-driver-download-${{ github.run_id }}-${{ github.run_attempt }}
+      EXTERNAL_DRIVER_EVIDENCE_DIR: draft-external-driver-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+      EXTERNAL_DRIVER_PACKAGE_DIR: draft-external-driver-package-${{ github.run_id }}-${{ github.run_attempt }}
+      EXTERNAL_DRIVER_SANDBOX_USER: pgwdriver
+    outputs:
+      gate_digest: ${{ steps.gate.outputs.gate_digest }}
+      evidence_archive_digest: ${{ steps.package.outputs.evidence_archive_digest }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      artifact_name: ${{ steps.package.outputs.artifact_name }}
+
+    steps:
+      - name: Require the protected hosted release-smoke contract
+        env:
+          EXPECTED_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          test "$EXPECTED_RUNNER_ENVIRONMENT" = github-hosted
+          command -v gh >/dev/null
+          command -v jq >/dev/null
+          command -v sha256sum >/dev/null
+          tar --version | grep -F 'GNU tar' >/dev/null
+          if id "$EXTERNAL_DRIVER_SANDBOX_USER" >/dev/null 2>&1; then
+            echo 'dedicated external-driver sandbox user already exists' >&2
+            exit 1
+          fi
+          sudo useradd --system --user-group --no-create-home \
+            --shell /usr/sbin/nologin "$EXTERNAL_DRIVER_SANDBOX_USER"
+          sandbox_root="$RUNNER_TEMP/pgworkbench-external-driver-sandbox-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          state_dir="$sandbox_root/pgworkbench-external-driver-gate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          work_dir="$sandbox_root/pgworkbench-external-driver-work-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          sudo install -d -o "$EXTERNAL_DRIVER_SANDBOX_USER" \
+            -g "$EXTERNAL_DRIVER_SANDBOX_USER" -m 0700 "$sandbox_root"
+          sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- \
+            mkdir -m 0700 "$sandbox_root/home" "$sandbox_root/tmp" "$work_dir"
+          sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- mkdir -m 0700 "$work_dir/executions"
+          printf 'EXTERNAL_DRIVER_SANDBOX_ROOT=%s\n' "$sandbox_root" >> "$GITHUB_ENV"
+          printf 'EXTERNAL_DRIVER_STATE_DIR=%s\n' "$state_dir" >> "$GITHUB_ENV"
+          printf 'EXTERNAL_DRIVER_WORK_DIR=%s\n' "$work_dir" >> "$GITHUB_ENV"
+          mkdir "$DRAFT_DOWNLOAD_DIR"
+          mkdir "$EXTERNAL_DRIVER_EVIDENCE_DIR"
+          mkdir "$EXTERNAL_DRIVER_EVIDENCE_DIR/executions"
+          mkdir "$EXTERNAL_DRIVER_EVIDENCE_DIR/provisioning"
+          mkdir "$EXTERNAL_DRIVER_PACKAGE_DIR"
+
+      - name: Download protected repository-control evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ env.VERIFIED_CONTROLS_ARTIFACT_ID }}
+          path: ${{ env.EXTERNAL_DRIVER_EVIDENCE_DIR }}/repository-controls
+          merge-multiple: true
+
+      - name: Verify protected repository-control evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          controls="$GITHUB_WORKSPACE/$EXTERNAL_DRIVER_EVIDENCE_DIR/repository-controls"
+          [[ "$VERIFIED_CONTROLS_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VERIFIED_REPOSITORY_CONTROLS_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          prefix="release-controls-${GITHUB_REF_NAME}-${GITHUB_SHA}-"
+          test "${VERIFIED_CONTROLS_ARTIFACT_NAME#"$prefix"}" != "$VERIFIED_CONTROLS_ARTIFACT_NAME"
+          [[ "${VERIFIED_CONTROLS_ARTIFACT_NAME#"$prefix"}" =~ ^[1-9][0-9]*$ ]]
+          case "$VERIFIED_CONTROLS_ARTIFACT_DIGEST" in
+            sha256:[0-9a-f][0-9a-f]*) expected_digest="$VERIFIED_CONTROLS_ARTIFACT_DIGEST" ;;
+            [0-9a-f][0-9a-f]*) expected_digest="sha256:$VERIFIED_CONTROLS_ARTIFACT_DIGEST" ;;
+            *) exit 1 ;;
+          esac
+          [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$VERIFIED_CONTROLS_ARTIFACT_ID")"
+          jq -e \
+            --argjson id "$VERIFIED_CONTROLS_ARTIFACT_ID" \
+            --arg name "$VERIFIED_CONTROLS_ARTIFACT_NAME" \
+            --arg digest "$expected_digest" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg head_sha "$GITHUB_SHA" \
+            '.id == $id and .name == $name and .expired == false and
+             .digest == $digest and .workflow_run.id == $run_id and
+             .workflow_run.head_sha == $head_sha' <<<"$artifact_json" >/dev/null
+          test "sha256:$(sha256sum "$controls/repository-controls.json" | awk '{print $1}')" = \
+            "$VERIFIED_REPOSITORY_CONTROLS_DIGEST"
+          jq -e \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg sha "$GITHUB_SHA" \
+            '.schema_version == "pgworkbench.repository-release-controls/v1" and
+             .artifact_type == "pgworkbench.repository-release-controls" and
+             .tag == $tag and .candidate_sha == $sha and
+             .tag_ruleset.status == "verified" and
+             .tag_ruleset.creation_restricted == true and
+             .tag_ruleset.update_prohibited == true and
+             .tag_ruleset.deletion_prohibited == true and
+             .immutable_releases.status == "verified" and
+             .immutable_releases.enabled == true' \
+            "$controls/repository-controls.json" >/dev/null
+          repository_controls_digest="sha256:$(sha256sum \
+            "$controls/repository-controls.json" | awk '{print $1}')"
+          printf 'REPOSITORY_CONTROLS_DIGEST=%s\n' "$repository_controls_digest" >> "$GITHUB_ENV"
+
+      - name: Download and authenticate the draft Linux archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_json="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName)"
+          test "$(jq -r .isDraft <<<"$release_json")" = true
+          test "$(jq -r .tagName <<<"$release_json")" = "$GITHUB_REF_NAME"
+          archive="pgworkbench-$VERSION-linux-amd64.tar.gz"
+          checksum="pgworkbench-$VERSION-SHA256SUMS.txt"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$archive" --pattern "$checksum" --dir "$DRAFT_DOWNLOAD_DIR"
+          expected="$(awk -v name="$archive" '$2 == name {print $1}' "$DRAFT_DOWNLOAD_DIR/$checksum")"
+          actual="$(sha256sum "$DRAFT_DOWNLOAD_DIR/$archive" | awk '{print $1}')"
+          test -n "$expected"
+          test "$actual" = "$expected"
+          remote_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq .sha)"
+          test "$remote_sha" = "$GITHUB_SHA"
+          gh attestation verify "$DRAFT_DOWNLOAD_DIR/$archive" -R "$GITHUB_REPOSITORY" \
+            --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+          tar -C "$DRAFT_DOWNLOAD_DIR" -xzf "$DRAFT_DOWNLOAD_DIR/$archive"
+          root="$GITHUB_WORKSPACE/$DRAFT_DOWNLOAD_DIR/pgworkbench-$VERSION-linux-amd64"
+          binary="$root/pgworkbench"
+          test -x "$binary"
+          test -x "$root/scripts/provision_external_driver_gate.sh"
+          chmod -R a-w "$root"
+          binary_digest="$(sha256sum "$binary" | awk '{print $1}')"
+          helper_digest="$(sha256sum "$root/scripts/provision_external_driver_gate.sh" | awk '{print $1}')"
+          benchbase_config_digest="$(sha256sum "$root/configs/benchmark-drivers/benchbase-33c0047-tpcc-release-smoke.xml" | awk '{print $1}')"
+          hammerdb_config_digest="$(sha256sum "$root/configs/benchmark-drivers/hammerdb-v6-tprocc-release-smoke.json" | awk '{print $1}')"
+          sysbench_config_digest="$(sha256sum "$root/configs/benchmark-drivers/sysbench-postgresql.json" | awk '{print $1}')"
+          printf 'PGWORKBENCH_BIN=%s\n' "$binary" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+          printf 'WORKBENCH_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+          printf 'DRAFT_ARCHIVE_DIGEST=sha256:%s\n' "$actual" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BINARY_DIGEST=sha256:%s\n' "$binary_digest" >> "$GITHUB_ENV"
+          printf 'CANDIDATE_HELPER_DIGEST=sha256:%s\n' "$helper_digest" >> "$GITHUB_ENV"
+          printf 'BENCHBASE_RELEASE_CONFIG_DIGEST=sha256:%s\n' "$benchbase_config_digest" >> "$GITHUB_ENV"
+          printf 'HAMMERDB_RELEASE_CONFIG_DIGEST=sha256:%s\n' "$hammerdb_config_digest" >> "$GITHUB_ENV"
+          printf 'SYSBENCH_RELEASE_CONFIG_DIGEST=sha256:%s\n' "$sysbench_config_digest" >> "$GITHUB_ENV"
+
+      - name: Inspect the candidate under the credential-free sandbox identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          sandbox_env=(
+            sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- env -i
+            "HOME=$EXTERNAL_DRIVER_SANDBOX_ROOT/home"
+            "TMPDIR=$EXTERNAL_DRIVER_SANDBOX_ROOT/tmp"
+            "TMP=$EXTERNAL_DRIVER_SANDBOX_ROOT/tmp"
+            "TEMP=$EXTERNAL_DRIVER_SANDBOX_ROOT/tmp"
+            "PATH=/usr/local/bin:/usr/bin:/bin"
+            "LANG=C" "LC_ALL=C" "TZ=UTC"
+            "PGWORKBENCH_ROOT=$PGWORKBENCH_ROOT"
+          )
+          identity="$("${sandbox_env[@]}" "$PGWORKBENCH_BIN" version)"
+          binary_version="$(sed -n 's/.* version=\([^ ]*\).*/\1/p' <<<"$identity")"
+          binary_commit="$(sed -n 's/.* commit=\([^ ]*\).*/\1/p' <<<"$identity")"
+          test "$binary_version" = "$VERSION"
+          test "$binary_commit" = "$GITHUB_SHA"
+          drivers_json="$("${sandbox_env[@]}" "$PGWORKBENCH_BIN" benchmark drivers --json)"
+          jq -e '[.registry.drivers[].id] == [
+            "benchbase-postgresql-33c0047",
+            "hammerdb-postgresql-6.0",
+            "sysbench-postgresql-1.0.20"
+          ]' <<<"$drivers_json" >/dev/null
+          driver_registry_digest="$(jq -r .digest <<<"$drivers_json")"
+          [[ "$driver_registry_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'DRIVER_REGISTRY_DIGEST=%s\n' "$driver_registry_digest" >> "$GITHUB_ENV"
+
+      - name: Install hosted release-smoke build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            postgresql-16 postgresql-client-16 build-essential automake \
+            libtool pkg-config libaio-dev libpq-dev binutils curl jq \
+            python3 unzip zip
+          sudo systemctl stop postgresql.service || true
+          if /usr/lib/postgresql/16/bin/pg_isready -h 127.0.0.1 -p 5432 -t 1; then
+            echo 'refusing to reuse a pre-existing PostgreSQL target' >&2
+            exit 1
+          fi
+
+      - name: Acquire exact drivers and provision fresh PostgreSQL 16 datasets
+        shell: bash
+        run: |
+          set -euo pipefail
+          assert_candidate_immutable() {
+            test "sha256:$(sha256sum "$PGWORKBENCH_BIN" | awk '{print $1}')" = "$PGWORKBENCH_BINARY_DIGEST"
+            test "sha256:$(sha256sum "$WORKBENCH_ROOT/scripts/provision_external_driver_gate.sh" | awk '{print $1}')" = "$CANDIDATE_HELPER_DIGEST"
+            test "sha256:$(sha256sum "$WORKBENCH_ROOT/configs/benchmark-drivers/benchbase-33c0047-tpcc-release-smoke.xml" | awk '{print $1}')" = "$BENCHBASE_RELEASE_CONFIG_DIGEST"
+            test "sha256:$(sha256sum "$WORKBENCH_ROOT/configs/benchmark-drivers/hammerdb-v6-tprocc-release-smoke.json" | awk '{print $1}')" = "$HAMMERDB_RELEASE_CONFIG_DIGEST"
+            test "sha256:$(sha256sum "$WORKBENCH_ROOT/configs/benchmark-drivers/sysbench-postgresql.json" | awk '{print $1}')" = "$SYSBENCH_RELEASE_CONFIG_DIGEST"
+          }
+          assert_candidate_immutable
+          test -x "$WORKBENCH_ROOT/scripts/provision_external_driver_gate.sh"
+          sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- env -i \
+            "HOME=$EXTERNAL_DRIVER_SANDBOX_ROOT/home" \
+            "TMPDIR=$EXTERNAL_DRIVER_SANDBOX_ROOT/tmp" \
+            "TMP=$EXTERNAL_DRIVER_SANDBOX_ROOT/tmp" \
+            "TEMP=$EXTERNAL_DRIVER_SANDBOX_ROOT/tmp" \
+            "XDG_CACHE_HOME=$EXTERNAL_DRIVER_SANDBOX_ROOT/home/.cache" \
+            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            "LANG=C" "LC_ALL=C" "TZ=UTC" \
+            "USER=$EXTERNAL_DRIVER_SANDBOX_USER" "LOGNAME=$EXTERNAL_DRIVER_SANDBOX_USER" \
+            "GITHUB_ACTIONS=true" \
+            "PGWORKBENCH_RUNNER_ENVIRONMENT=github-hosted" \
+            "PGWORKBENCH_IMAGE_OS=$ImageOS" \
+            "PGWORKBENCH_IMAGE_VERSION=$ImageVersion" \
+            "PGWORKBENCH_RUNNER_ARCH=$RUNNER_ARCH" \
+            "$WORKBENCH_ROOT/scripts/provision_external_driver_gate.sh" provision \
+            --state-dir "$EXTERNAL_DRIVER_STATE_DIR" \
+            --repo-root "$WORKBENCH_ROOT"
+          assert_candidate_immutable
+          sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- test -f "$EXTERNAL_DRIVER_STATE_DIR/paths.env"
+          paths_env="$(sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- cat "$EXTERNAL_DRIVER_STATE_DIR/paths.env")"
+          expected_names="$(printf '%s\n' \
+            BENCHBASE_CONFIG BENCHBASE_JAR BENCHBASE_JAVA BENCHBASE_RUNTIME_ROOT \
+            HAMMERDB_BINARY HAMMERDB_RUNTIME_ROOT HAMMERDB_TEMPLATE \
+            PROVISIONING_ACQUISITIONS_JSON PROVISIONING_DATASETS_JSON \
+            PROVISIONING_HOST_JSON PROVISIONING_RUNTIME_SET_JSON \
+            SYSBENCH_BINARY SYSBENCH_RUNTIME_ROOT SYSBENCH_SCRIPT | LC_ALL=C sort)"
+          actual_names="$(cut -d= -f1 <<<"$paths_env" | LC_ALL=C sort)"
+          test "$actual_names" = "$expected_names"
+          while IFS='=' read -r name value; do
+            [[ "$name" =~ ^[A-Z][A-Z0-9_]*$ ]]
+            [[ "$value" =~ ^/[A-Za-z0-9._+/-]+$ ]]
+            printf '%s=%s\n' "$name" "$value" >> "$GITHUB_ENV"
+            printf -v "$name" '%s' "$value"
+            export "$name"
+          done <<<"$paths_env"
+          # The exact-name check above makes these variables safe to use here;
+          # additionally bind every path to its intended owned root.
+          test "$BENCHBASE_CONFIG" = "$WORKBENCH_ROOT/configs/benchmark-drivers/benchbase-33c0047-tpcc-release-smoke.xml"
+          for path in \
+            "$BENCHBASE_JAR" "$BENCHBASE_JAVA" "$BENCHBASE_RUNTIME_ROOT" \
+            "$HAMMERDB_BINARY" "$HAMMERDB_RUNTIME_ROOT" "$HAMMERDB_TEMPLATE" \
+            "$PROVISIONING_ACQUISITIONS_JSON" "$PROVISIONING_DATASETS_JSON" \
+            "$PROVISIONING_HOST_JSON" "$PROVISIONING_RUNTIME_SET_JSON" \
+            "$SYSBENCH_BINARY" "$SYSBENCH_RUNTIME_ROOT" "$SYSBENCH_SCRIPT"; do
+            case "$path" in
+              "$EXTERNAL_DRIVER_STATE_DIR"/*) ;;
+              *) exit 1 ;;
+            esac
+          done
+          for document in acquisitions datasets host runtime-set; do
+            source_path="$EXTERNAL_DRIVER_STATE_DIR/evidence/$document.json"
+            destination="$EXTERNAL_DRIVER_EVIDENCE_DIR/provisioning/$document.json"
+            sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- test -f "$source_path"
+            sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- test ! -L "$source_path"
+            sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- cat "$source_path" > "$destination"
+            chmod 0444 "$destination"
+            jq -e 'type == "object"' "$destination" >/dev/null
+          done
+
+      - name: Execute and locally verify every advertised real driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          sandbox_env=(
+            sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- env -i
+            "HOME=$EXTERNAL_DRIVER_SANDBOX_ROOT/home"
+            "TMPDIR=$EXTERNAL_DRIVER_SANDBOX_ROOT/tmp"
+            "TMP=$EXTERNAL_DRIVER_SANDBOX_ROOT/tmp"
+            "TEMP=$EXTERNAL_DRIVER_SANDBOX_ROOT/tmp"
+            "PATH=/usr/local/bin:/usr/bin:/bin"
+            "LANG=C" "LC_ALL=C" "TZ=UTC"
+            "PGWORKBENCH_ROOT=$PGWORKBENCH_ROOT"
+          )
+          assert_candidate_immutable() {
+            test "sha256:$(sha256sum "$PGWORKBENCH_BIN" | awk '{print $1}')" = "$PGWORKBENCH_BINARY_DIGEST"
+            test "sha256:$(sha256sum "$WORKBENCH_ROOT/scripts/provision_external_driver_gate.sh" | awk '{print $1}')" = "$CANDIDATE_HELPER_DIGEST"
+            test "sha256:$(sha256sum "$BENCHBASE_CONFIG" | awk '{print $1}')" = "$BENCHBASE_RELEASE_CONFIG_DIGEST"
+            test "sha256:$(sha256sum "$WORKBENCH_ROOT/configs/benchmark-drivers/hammerdb-v6-tprocc-release-smoke.json" | awk '{print $1}')" = "$HAMMERDB_RELEASE_CONFIG_DIGEST"
+            test "sha256:$(sha256sum "$WORKBENCH_ROOT/configs/benchmark-drivers/sysbench-postgresql.json" | awk '{print $1}')" = "$SYSBENCH_RELEASE_CONFIG_DIGEST"
+          }
+          assert_candidate_immutable
+          run_and_verify() {
+            local driver="$1"
+            local runtime_root="$2"
+            local binary="$3"
+            local config="$4"
+            local script="$5"
+            local workload="$6"
+            local timeout="$7"
+            local source_runtime_id="$8"
+            local output="$EXTERNAL_DRIVER_WORK_DIR/executions/$driver"
+            local report="$GITHUB_WORKSPACE/$EXTERNAL_DRIVER_EVIDENCE_DIR/executions/$driver.json"
+            local verification_json
+            "${sandbox_env[@]}" "$PGWORKBENCH_BIN" benchmark driver-run --json \
+              --acknowledge-external-disposable-target \
+              --driver "$driver" --runtime-root "$runtime_root" \
+              --binary "$binary" --config "$config" \
+              --script "$script" --workload "$workload" --timeout "$timeout" \
+              "$output" >/dev/null
+            verification_json="$(
+              "${sandbox_env[@]}" "$PGWORKBENCH_BIN" benchmark driver-run-verify --json "$output"
+            )"
+            jq -e --arg driver "$driver" \
+              '.valid == true and .artifact.registry.driver.id == $driver and
+               .artifact.schema_version == "pgworkbench.benchmark-driver-execution/v2" and
+               .artifact.contract_version == "2.0.0" and
+               .artifact.status == "completed" and
+               .artifact.invocation.driver_runtime_mode == "staged-copy-with-pre-post-tree-match" and
+               .artifact.inputs.driver_runtime.root == "inputs/runtime" and
+               (.artifact.inputs.driver_runtime.files | length) == .artifact.inputs.driver_runtime.file_count and
+               (.artifact.inputs.driver_runtime.tree_digest | test("^sha256:[0-9a-f]{64}$")) and
+               .artifact.assurance.binary_distributed_by_project == false and
+               .artifact.assurance.decision_eligible == false and
+               .artifact.assurance.source_to_binary_attested == false and
+               .artifact.assurance.tpc_compliance_claim == false and
+               .artifact.assurance.driver_runtime_closure_attested == true and
+               .artifact.assurance.host_runtime_dependencies_attested == false' \
+              <<<"$verification_json" >/dev/null
+            jq -e --arg runtime_id "$source_runtime_id" \
+              --slurpfile source "$EXTERNAL_DRIVER_EVIDENCE_DIR/provisioning/runtime-set.json" \
+              '($source[0].runtimes[] | select(.runtime_id == $runtime_id)) as $runtime |
+               ([ $runtime.files[] | {
+                 path:("inputs/runtime/" + .path), digest:.sha256,
+                 size_bytes:.size_bytes, mode:.mode
+               } ]) == ([ .artifact.inputs.driver_runtime.files[] | {
+                 path:.path, digest:.digest, size_bytes:.size_bytes, mode:.mode
+               } ])' <<<"$verification_json" >/dev/null
+            jq -n \
+              --arg schema_version pgworkbench.release-external-driver-execution-metadata/v1 \
+              --arg artifact_type pgworkbench.release-external-driver-execution-metadata \
+              --arg driver "$driver" \
+              --arg runtime_id "$source_runtime_id" \
+              --arg candidate_sha "$GITHUB_SHA" \
+              --arg run_id "$GITHUB_RUN_ID" \
+              --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+              --arg verifier_digest "sha256:$(printf '%s' "$verification_json" | sha256sum | awk '{print $1}')" \
+              --slurpfile source "$EXTERNAL_DRIVER_EVIDENCE_DIR/provisioning/runtime-set.json" \
+              --argjson verified "$verification_json" \
+              '{
+                schema_version:$schema_version,
+                artifact_type:$artifact_type,
+                driver_id:$driver,
+                candidate_sha:$candidate_sha,
+                workflow_run:{id:($run_id|tonumber),attempt:($run_attempt|tonumber)},
+                local_verification:{valid:true,verification_digest:$verifier_digest},
+                execution:{
+                  digest:$verified.artifact.digest,
+                  status:$verified.artifact.status,
+                  workload:$verified.artifact.workload,
+                  binary_digest:$verified.artifact.inputs.binary.digest,
+                  config_digest:$verified.artifact.inputs.config.digest,
+                  script_digest:$verified.artifact.inputs.script.digest,
+                  runtime_strategy:$verified.artifact.inputs.driver_runtime.strategy,
+                  staged_runtime_tree_digest:$verified.artifact.inputs.driver_runtime.tree_digest,
+                  staged_runtime_file_count:$verified.artifact.inputs.driver_runtime.file_count,
+                  source_runtime_id:$runtime_id,
+                  source_runtime_tree_digest:($source[0].runtimes[] | select(.runtime_id == $runtime_id) | .tree_digest),
+                  exact_source_to_staged_file_match:true,
+                  target:$verified.artifact.target_safety,
+                  assurance:$verified.artifact.assurance
+                }
+              }' > "$report"
+            jq -e '
+              .local_verification.valid == true and
+              .execution.status == "completed" and
+              .execution.exact_source_to_staged_file_match == true and
+              .execution.assurance.binary_distributed_by_project == false and
+              .execution.assurance.decision_eligible == false and
+              .execution.assurance.source_to_binary_attested == false and
+              .execution.assurance.tpc_compliance_claim == false and
+              .execution.assurance.driver_runtime_closure_attested == true and
+              .execution.assurance.host_runtime_dependencies_attested == false
+            ' "$report" >/dev/null
+            assert_candidate_immutable
+          }
+
+          run_and_verify \
+            benchbase-postgresql-33c0047 \
+            "$BENCHBASE_RUNTIME_ROOT" "$BENCHBASE_JAVA" \
+            "$BENCHBASE_CONFIG" "$BENCHBASE_JAR" tpcc 20m benchbase-33c0047
+          run_and_verify \
+            hammerdb-postgresql-6.0 \
+            "$HAMMERDB_RUNTIME_ROOT" "$HAMMERDB_BINARY" \
+            "$WORKBENCH_ROOT/configs/benchmark-drivers/hammerdb-v6-tprocc-release-smoke.json" \
+            "$HAMMERDB_TEMPLATE" \
+            tprocc/postgresql 15m hammerdb-6.0
+          run_and_verify \
+            sysbench-postgresql-1.0.20 \
+            "$SYSBENCH_RUNTIME_ROOT" "$SYSBENCH_BINARY" \
+            "$WORKBENCH_ROOT/configs/benchmark-drivers/sysbench-postgresql.json" \
+            "$SYSBENCH_SCRIPT" oltp_read_write/postgresql 5m sysbench-1.0.20
+          assert_candidate_immutable
+
+      - name: Bind real-driver evidence to the verified draft candidate
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$GITHUB_WORKSPACE/$EXTERNAL_DRIVER_EVIDENCE_DIR"
+          acquisitions_digest="sha256:$(sha256sum "$evidence/provisioning/acquisitions.json" | awk '{print $1}')"
+          datasets_digest="sha256:$(sha256sum "$evidence/provisioning/datasets.json" | awk '{print $1}')"
+          host_digest="sha256:$(sha256sum "$evidence/provisioning/host.json" | awk '{print $1}')"
+          runtime_set_digest="sha256:$(sha256sum "$evidence/provisioning/runtime-set.json" | awk '{print $1}')"
+          benchbase_metadata_digest="sha256:$(sha256sum "$evidence/executions/benchbase-postgresql-33c0047.json" | awk '{print $1}')"
+          hammerdb_metadata_digest="sha256:$(sha256sum "$evidence/executions/hammerdb-postgresql-6.0.json" | awk '{print $1}')"
+          sysbench_metadata_digest="sha256:$(sha256sum "$evidence/executions/sysbench-postgresql-1.0.20.json" | awk '{print $1}')"
+          jq -n \
+            --arg schema_version pgworkbench.release-external-driver-gate/v2 \
+            --arg artifact_type pgworkbench.release-external-driver-gate \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg version "$VERSION" \
+            --arg candidate_sha "$GITHUB_SHA" \
+            --arg asset_fingerprint "$VERIFIED_ASSET_FINGERPRINT" \
+            --arg archive_digest "$DRAFT_ARCHIVE_DIGEST" \
+            --arg pgworkbench_binary_digest "$PGWORKBENCH_BINARY_DIGEST" \
+            --arg driver_registry_digest "$DRIVER_REGISTRY_DIGEST" \
+            --arg repository_controls_digest "$REPOSITORY_CONTROLS_DIGEST" \
+            --arg acquisitions_digest "$acquisitions_digest" \
+            --arg datasets_digest "$datasets_digest" \
+            --arg host_digest "$host_digest" \
+            --arg runtime_set_digest "$runtime_set_digest" \
+            --arg benchbase_metadata_digest "$benchbase_metadata_digest" \
+            --arg hammerdb_metadata_digest "$hammerdb_metadata_digest" \
+            --arg sysbench_metadata_digest "$sysbench_metadata_digest" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --slurpfile benchbase "$evidence/executions/benchbase-postgresql-33c0047.json" \
+            --slurpfile hammerdb "$evidence/executions/hammerdb-postgresql-6.0.json" \
+            --slurpfile sysbench "$evidence/executions/sysbench-postgresql-1.0.20.json" \
+            '{
+              schema_version: $schema_version,
+              artifact_type: $artifact_type,
+              qualification_mode: "draft-release-smoke",
+              tag: $tag,
+              version: $version,
+              candidate_sha: $candidate_sha,
+              workflow_run:{id:($run_id|tonumber),attempt:($run_attempt|tonumber)},
+              asset_fingerprint: $asset_fingerprint,
+              archive_digest: $archive_digest,
+              pgworkbench_binary_digest: $pgworkbench_binary_digest,
+              driver_registry_digest: $driver_registry_digest,
+              repository_controls_digest: $repository_controls_digest,
+              provisioning:{
+                acquisitions_digest:$acquisitions_digest,
+                datasets_digest:$datasets_digest,
+                host_digest:$host_digest,
+                runtime_set_digest:$runtime_set_digest
+              },
+              assurance: {
+                purpose: "adapter-compatibility-release-smoke",
+                artifact_payload: "metadata-only-no-third-party-runtime-bytes",
+                third_party_runtime_bytes_uploaded: false,
+                performance_claim: false,
+                source_to_binary_attested: false,
+                driver_runtime_closure_attested: true,
+                host_runtime_dependencies_attested: false,
+                benchmark_comparability_claim: false,
+                binary_distributed_by_project: false,
+                project_redistribution: false,
+                runtime_replay_available: false,
+                complete_license_or_source_closure_attested: false
+              },
+              executions: [
+                ($benchbase[0] + {metadata_digest:$benchbase_metadata_digest}),
+                ($hammerdb[0] + {metadata_digest:$hammerdb_metadata_digest}),
+                ($sysbench[0] + {metadata_digest:$sysbench_metadata_digest})
+              ] | map({
+                driver_id:.driver_id,
+                metadata_digest:.metadata_digest,
+                candidate_sha:.candidate_sha,
+                workflow_run:.workflow_run,
+                local_verification:.local_verification,
+                execution:.execution
+              })
+            }' > "$evidence/gate.json"
+          jq -e --slurpfile datasets "$evidence/provisioning/datasets.json" '
+            . as $gate |
+            .qualification_mode == "draft-release-smoke" and
+            (.asset_fingerprint | test("^[0-9a-f]{64}$")) and
+            (.archive_digest | test("^sha256:[0-9a-f]{64}$")) and
+            (.pgworkbench_binary_digest | test("^sha256:[0-9a-f]{64}$")) and
+            (.driver_registry_digest | test("^sha256:[0-9a-f]{64}$")) and
+            (.repository_controls_digest | test("^sha256:[0-9a-f]{64}$")) and
+            all(.provisioning[]; test("^sha256:[0-9a-f]{64}$")) and
+            .assurance.artifact_payload == "metadata-only-no-third-party-runtime-bytes" and
+            .assurance.third_party_runtime_bytes_uploaded == false and
+            .assurance.performance_claim == false and
+            .assurance.source_to_binary_attested == false and
+            .assurance.driver_runtime_closure_attested == true and
+            .assurance.host_runtime_dependencies_attested == false and
+            .assurance.benchmark_comparability_claim == false and
+            .assurance.binary_distributed_by_project == false and
+            .assurance.project_redistribution == false and
+            .assurance.runtime_replay_available == false and
+            .assurance.complete_license_or_source_closure_attested == false and
+            ([.executions[].driver_id] == [
+              "benchbase-postgresql-33c0047",
+              "hammerdb-postgresql-6.0",
+              "sysbench-postgresql-1.0.20"
+            ]) and
+            all(.executions[];
+              .candidate_sha == $gate.candidate_sha and
+              .workflow_run == $gate.workflow_run and
+              .local_verification.valid == true and
+              .execution.status == "completed" and
+              .execution.exact_source_to_staged_file_match == true and
+              (.execution.runtime_strategy | IN(
+                "jar-manifest-transitive-closure/v1",
+                "hammerdb-self-contained-launcher/v1",
+                "sysbench-pinned-lua-closure/v1"
+              )) and
+              (.execution.staged_runtime_tree_digest | test("^sha256:[0-9a-f]{64}$")) and
+              (.execution.source_runtime_tree_digest | test("^sha256:[0-9a-f]{64}$")) and
+              .execution.target.acknowledged == true and
+              .execution.target.loopback_only == true and
+              .execution.target.system_databases_denied == true
+            ) and
+            (.executions[] | select(.driver_id == "benchbase-postgresql-33c0047") | .execution.config_digest) ==
+              ($datasets[0].datasets[] | select(.driver_id == "benchbase-postgresql-33c0047") | .config_digest) and
+            (.executions[] | select(.driver_id == "hammerdb-postgresql-6.0") | .execution.config_digest) ==
+              ($datasets[0].datasets[] | select(.driver_id == "hammerdb-postgresql-6.0") | .execution_config_digest) and
+            (.executions[] | select(.driver_id == "sysbench-postgresql-1.0.20") | .execution.config_digest) ==
+              ($datasets[0].datasets[] | select(.driver_id == "sysbench-postgresql-1.0.20") | .execution_config_digest)
+          ' "$evidence/gate.json" >/dev/null
+          gate_digest="$(sha256sum "$evidence/gate.json" | awk '{print $1}')"
+          printf 'gate_digest=%s\n' "$gate_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Package the explicit metadata-only allowlist
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$GITHUB_WORKSPACE/$EXTERNAL_DRIVER_EVIDENCE_DIR"
+          expected="$(printf '%s\n' \
+            executions \
+            executions/benchbase-postgresql-33c0047.json \
+            executions/hammerdb-postgresql-6.0.json \
+            executions/sysbench-postgresql-1.0.20.json \
+            gate.json \
+            provisioning \
+            provisioning/acquisitions.json \
+            provisioning/datasets.json \
+            provisioning/host.json \
+            provisioning/runtime-set.json \
+            repository-controls \
+            repository-controls/repository-controls.json | LC_ALL=C sort)"
+          actual="$(find "$evidence" -mindepth 1 -printf '%P\n' | LC_ALL=C sort)"
+          test "$actual" = "$expected"
+          while IFS= read -r relative; do
+            [[ "$relative" == *.json ]] || continue
+            path="$evidence/$relative"
+            test -f "$path"
+            test ! -L "$path"
+            test "$(stat -c %s "$path")" -le 4194304
+            jq -e 'type == "object"' "$path" >/dev/null
+          done <<<"$expected"
+          if find "$evidence" -type f \( \
+            -name '*.jar' -o -name '*.class' -o -name '*.so' -o -name '*.lua' \
+            -o -name '*.tcl' -o -name '*.xml' -o -name 'hammerdbcli' \
+            -o -name 'sysbench' -o -name 'benchbase.jar' \) | grep -q .; then
+            echo 'third-party runtime bytes entered the metadata-only allowlist' >&2
+            exit 1
+          fi
+          archive="$GITHUB_WORKSPACE/$EXTERNAL_DRIVER_PACKAGE_DIR/metadata-only.tar.gz"
+          tar --sort=name --mtime='UTC 1970-01-01' \
+            --owner=0 --group=0 --numeric-owner \
+            -C "$evidence" \
+            -czf "$archive" .
+          archive_digest="$(sha256sum "$archive" | awk '{print $1}')"
+          artifact_name="draft-external-driver-metadata-${GITHUB_REF_NAME}-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
+          printf '%s  metadata-only.tar.gz\n' "$archive_digest" \
+            > "$GITHUB_WORKSPACE/$EXTERNAL_DRIVER_PACKAGE_DIR/metadata-only.tar.gz.sha256"
+          expected_package="$(printf '%s\n' \
+            metadata-only.tar.gz metadata-only.tar.gz.sha256 | LC_ALL=C sort)"
+          actual_package="$(find "$GITHUB_WORKSPACE/$EXTERNAL_DRIVER_PACKAGE_DIR" \
+            -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)"
+          test "$actual_package" = "$expected_package"
+          while IFS= read -r file; do
+            path="$GITHUB_WORKSPACE/$EXTERNAL_DRIVER_PACKAGE_DIR/$file"
+            test -f "$path"
+            test ! -L "$path"
+          done <<<"$expected_package"
+          printf 'evidence_archive_digest=%s\n' "$archive_digest" >> "$GITHUB_OUTPUT"
+          printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload packaged draft external-driver metadata
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ env.EXTERNAL_DRIVER_PACKAGE_DIR }}/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Write metadata-only failure record
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg schema_version pgworkbench.release-external-driver-failure/v1 \
+            --arg artifact_type pgworkbench.release-external-driver-failure \
+            --arg candidate_sha "$GITHUB_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            '{schema_version:$schema_version,artifact_type:$artifact_type,candidate_sha:$candidate_sha,workflow_run:{id:($run_id|tonumber),attempt:($run_attempt|tonumber)},third_party_runtime_bytes_uploaded:false,project_redistribution:false,runtime_replay_available:false,complete_license_or_source_closure_attested:false}' \
+            > "$EXTERNAL_DRIVER_EVIDENCE_DIR/failure.json"
+          failure="$EXTERNAL_DRIVER_EVIDENCE_DIR/failure.json"
+          test -f "$failure"
+          test ! -L "$failure"
+          test "$(stat -c %s "$failure")" -le 65536
+          jq -e \
+            --arg sha "$GITHUB_SHA" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            '.schema_version == "pgworkbench.release-external-driver-failure/v1" and
+             .artifact_type == "pgworkbench.release-external-driver-failure" and
+             .candidate_sha == $sha and .workflow_run == {id:$run_id,attempt:$run_attempt} and
+             .third_party_runtime_bytes_uploaded == false and
+             .project_redistribution == false and .runtime_replay_available == false and
+             .complete_license_or_source_closure_attested == false' "$failure" >/dev/null
+
+      - name: Upload failed external-driver metadata
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: draft-external-driver-failure-metadata-${{ github.ref_name }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ env.EXTERNAL_DRIVER_EVIDENCE_DIR }}/failure.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Destroy PostgreSQL, acquired runtimes, and local execution bytes
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper="$GITHUB_WORKSPACE/$DRAFT_DOWNLOAD_DIR/pgworkbench-$VERSION-linux-amd64/scripts/provision_external_driver_gate.sh"
+          if [[ -x "$helper" ]] && sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- \
+            test -f "$EXTERNAL_DRIVER_STATE_DIR/.pgworkbench-external-driver-gate"; then
+            sudo --user "$EXTERNAL_DRIVER_SANDBOX_USER" -- env -i \
+              "HOME=$EXTERNAL_DRIVER_SANDBOX_ROOT/home" \
+              "PATH=/usr/local/bin:/usr/bin:/bin" "LANG=C" "LC_ALL=C" "TZ=UTC" \
+              "$helper" cleanup --state-dir "$EXTERNAL_DRIVER_STATE_DIR"
+          fi
+          test "$EXTERNAL_DRIVER_SANDBOX_USER" = pgwdriver
+          sudo pkill -KILL -u "$EXTERNAL_DRIVER_SANDBOX_USER" 2>/dev/null || true
+          test ! -e "$EXTERNAL_DRIVER_STATE_DIR"
+          case "$EXTERNAL_DRIVER_WORK_DIR" in
+            "$EXTERNAL_DRIVER_SANDBOX_ROOT"/pgworkbench-external-driver-work-*) ;;
+            *) exit 1 ;;
+          esac
+          sudo find "$EXTERNAL_DRIVER_WORK_DIR" -depth -delete
+          test ! -e "$EXTERNAL_DRIVER_WORK_DIR"
+          case "$EXTERNAL_DRIVER_SANDBOX_ROOT" in
+            "$RUNNER_TEMP"/pgworkbench-external-driver-sandbox-*) ;;
+            *) exit 1 ;;
+          esac
+          sudo find "$EXTERNAL_DRIVER_SANDBOX_ROOT" -depth -delete
+          test ! -e "$EXTERNAL_DRIVER_SANDBOX_ROOT"
+          if id "$EXTERNAL_DRIVER_SANDBOX_USER" >/dev/null 2>&1; then
+            sudo userdel "$EXTERNAL_DRIVER_SANDBOX_USER"
+          fi
+
+  verify-publication-evidence:
+    if: github.ref_type == 'tag'
+    needs:
+      - prepare
+      - attest-and-create-draft
+      - draft-verify
+      - draft-compatibility
+      - draft-external-drivers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      VERIFIED_ASSET_FINGERPRINT: ${{ needs['draft-verify'].outputs.asset_fingerprint }}
+      VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST: ${{ needs['draft-external-drivers'].outputs.gate_digest }}
+      VERIFIED_EXTERNAL_DRIVER_ARCHIVE_DIGEST: ${{ needs['draft-external-drivers'].outputs.evidence_archive_digest }}
+      VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST: ${{ needs['draft-external-drivers'].outputs.artifact_digest }}
+      VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID: ${{ needs['draft-external-drivers'].outputs.artifact_id }}
+      VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME: ${{ needs['draft-external-drivers'].outputs.artifact_name }}
+    outputs:
+      verified_external_driver_artifact_digest: ${{ steps.verify.outputs.verified_external_driver_artifact_digest }}
+      verified_external_driver_artifact_id: ${{ steps.verify.outputs.verified_external_driver_artifact_id }}
+      verified_external_driver_artifact_name: ${{ steps.verify.outputs.verified_external_driver_artifact_name }}
+      verified_external_driver_archive_digest: ${{ steps.verify.outputs.verified_external_driver_archive_digest }}
+      verified_external_driver_gate_digest: ${{ steps.verify.outputs.verified_external_driver_gate_digest }}
+
+    steps:
+      - name: Require exact external-driver artifact identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="draft-external-driver-metadata-${GITHUB_REF_NAME}-${GITHUB_SHA}-"
+          test -n "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME"
+          test "${VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME#"$prefix"}" != "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME"
+          producer_attempt="${VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME#"$prefix"}"
+          [[ "$producer_attempt" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          case "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" in
+            sha256:[0-9a-f][0-9a-f]*) expected_digest="$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" ;;
+            [0-9a-f][0-9a-f]*) expected_digest="sha256:$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" ;;
+            *) exit 1 ;;
+          esac
+          [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID")"
+          jq -e \
+            --argjson id "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID" \
+            --arg name "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME" \
+            --arg digest "$expected_digest" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg head_sha "$GITHUB_SHA" \
+            '.id == $id and .name == $name and .expired == false and
+             .digest == $digest and .workflow_run.id == $run_id and
+             .workflow_run.head_sha == $head_sha' <<<"$artifact_json" >/dev/null
+
+      - name: Download verified draft external-driver metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ env.VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID }}
+          path: draft-external-driver-package
+          merge-multiple: true
+
+      - name: Reverify metadata-only gate and draft candidate
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          remote_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
+          test "$remote_sha" = "$GITHUB_SHA"
+          release_json="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName,assets)"
+          test "$(jq -r .isDraft <<<"$release_json")" = true
+          test "$(jq -r .tagName <<<"$release_json")" = "$tag"
+          jq -e '.assets | length == 16 and all(.[]; (.digest | type) == "string" and (.digest | startswith("sha256:")))' \
+            <<<"$release_json" >/dev/null
+          asset_inventory="$(jq -cS '[.assets[] | {id, name, size, digest}] | sort_by(.name)' <<<"$release_json")"
+          asset_fingerprint="$(printf '%s' "$asset_inventory" | sha256sum | awk '{print $1}')"
+          draft_archive_digest="$(jq -r \
+            --arg name "pgworkbench-$VERSION-linux-amd64.tar.gz" \
+            '.assets[] | select(.name == $name) | .digest' <<<"$release_json")"
+          test -n "$VERIFIED_ASSET_FINGERPRINT"
+          test "$asset_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"
+          test -n "$draft_archive_digest"
+          test -n "$VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST"
+          test -n "$VERIFIED_EXTERNAL_DRIVER_ARCHIVE_DIGEST"
+          evidence_archive_digest="$(sha256sum \
+            draft-external-driver-package/metadata-only.tar.gz | awk '{print $1}')"
+          test "$evidence_archive_digest" = "$VERIFIED_EXTERNAL_DRIVER_ARCHIVE_DIGEST"
+          (
+            cd draft-external-driver-package
+            sha256sum -c metadata-only.tar.gz.sha256
+          )
+          tar -tzf draft-external-driver-package/metadata-only.tar.gz | awk '
+            BEGIN { count = 0; invalid = 0 }
+            /^\// || /(^|\/)\.\.($|\/)/ { invalid = 2; exit }
+            $0 != "." && $0 != "./" && index($0, "./") != 1 { invalid = 3; exit }
+            { count++ }
+            END {
+              if (invalid != 0) exit invalid
+              if (count == 0) exit 4
+            }
+          '
+          tar -tvzf draft-external-driver-package/metadata-only.tar.gz | awk '
+            substr($1, 1, 1) != "-" && substr($1, 1, 1) != "d" { exit 2 }
+          '
+          mkdir draft-external-driver-evidence
+          tar -C draft-external-driver-evidence \
+            -xzf draft-external-driver-package/metadata-only.tar.gz
+          expected_metadata="$(printf '%s\n' \
+            executions/benchbase-postgresql-33c0047.json \
+            executions/hammerdb-postgresql-6.0.json \
+            executions/sysbench-postgresql-1.0.20.json \
+            gate.json \
+            provisioning/acquisitions.json \
+            provisioning/datasets.json \
+            provisioning/host.json \
+            provisioning/runtime-set.json \
+            repository-controls/repository-controls.json | LC_ALL=C sort)"
+          actual_metadata="$(find draft-external-driver-evidence -type f -printf '%P\n' | LC_ALL=C sort)"
+          test "$actual_metadata" = "$expected_metadata"
+          while IFS= read -r relative; do
+            jq -e 'type == "object"' "draft-external-driver-evidence/$relative" >/dev/null
+          done <<<"$expected_metadata"
+          external_gate_digest="$(sha256sum draft-external-driver-evidence/gate.json | awk '{print $1}')"
+          test "$external_gate_digest" = "$VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST"
+          gate_repository_controls_digest="$(jq -r .repository_controls_digest \
+            draft-external-driver-evidence/gate.json)"
+          repository_controls_digest="sha256:$(sha256sum \
+            draft-external-driver-evidence/repository-controls/repository-controls.json | awk '{print $1}')"
+          test "$repository_controls_digest" = "$gate_repository_controls_digest"
+          acquisitions_digest="sha256:$(sha256sum draft-external-driver-evidence/provisioning/acquisitions.json | awk '{print $1}')"
+          datasets_digest="sha256:$(sha256sum draft-external-driver-evidence/provisioning/datasets.json | awk '{print $1}')"
+          host_digest="sha256:$(sha256sum draft-external-driver-evidence/provisioning/host.json | awk '{print $1}')"
+          runtime_set_digest="sha256:$(sha256sum draft-external-driver-evidence/provisioning/runtime-set.json | awk '{print $1}')"
+          jq -e \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg version "$VERSION" \
+            --arg candidate_sha "$GITHUB_SHA" \
+            --arg asset_fingerprint "$VERIFIED_ASSET_FINGERPRINT" \
+            --arg archive_digest "$draft_archive_digest" \
+            --arg acquisitions_digest "$acquisitions_digest" \
+            --arg datasets_digest "$datasets_digest" \
+            --arg host_digest "$host_digest" \
+            --arg runtime_set_digest "$runtime_set_digest" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            '.schema_version == "pgworkbench.release-external-driver-gate/v2" and
+             .artifact_type == "pgworkbench.release-external-driver-gate" and
+             .qualification_mode == "draft-release-smoke" and
+             .tag == $tag and .version == $version and
+             .candidate_sha == $candidate_sha and
+             .workflow_run == {id:$run_id,attempt:$run_attempt} and
+             .asset_fingerprint == $asset_fingerprint and
+             .archive_digest == $archive_digest and
+             (.repository_controls_digest | test("^sha256:[0-9a-f]{64}$")) and
+             .provisioning == {
+               acquisitions_digest:$acquisitions_digest,
+               datasets_digest:$datasets_digest,
+               host_digest:$host_digest,
+               runtime_set_digest:$runtime_set_digest
+             } and
+             .assurance.purpose == "adapter-compatibility-release-smoke" and
+             .assurance.artifact_payload == "metadata-only-no-third-party-runtime-bytes" and
+             .assurance.third_party_runtime_bytes_uploaded == false and
+             .assurance.performance_claim == false and
+             .assurance.source_to_binary_attested == false and
+             .assurance.driver_runtime_closure_attested == true and
+             .assurance.host_runtime_dependencies_attested == false and
+             .assurance.benchmark_comparability_claim == false and
+             .assurance.binary_distributed_by_project == false and
+             .assurance.project_redistribution == false and
+             .assurance.runtime_replay_available == false and
+             .assurance.complete_license_or_source_closure_attested == false and
+             ([.executions[].driver_id] == [
+               "benchbase-postgresql-33c0047",
+               "hammerdb-postgresql-6.0",
+               "sysbench-postgresql-1.0.20"
+             ]) and
+             all(.executions[];
+               .candidate_sha == $candidate_sha and
+               .workflow_run == {id:$run_id,attempt:$run_attempt} and
+               .local_verification.valid == true and
+               (.local_verification.verification_digest | test("^sha256:[0-9a-f]{64}$")) and
+               .execution.status == "completed" and
+               .execution.exact_source_to_staged_file_match == true and
+               .execution.assurance.binary_distributed_by_project == false and
+               .execution.assurance.decision_eligible == false and
+               .execution.assurance.source_to_binary_attested == false and
+               .execution.assurance.tpc_compliance_claim == false and
+               .execution.assurance.driver_runtime_closure_attested == true and
+               .execution.assurance.host_runtime_dependencies_attested == false
+             )' draft-external-driver-evidence/gate.json >/dev/null
+
+          jq -e '
+            .schema_version == "pgworkbench.external-driver-acquisitions/v1" and
+            .project_redistribution == false and
+            .runtime_replay_available == false and
+            .complete_license_or_source_closure_attested == false and
+            ([.assets[] | {id,url,sha256,size_bytes,format,root,license_expression}] | sort_by(.id)) == ([
+              {id:"apache-maven",url:"https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.8.4/apache-maven-3.8.4-bin.zip",sha256:"sha256:ccd67d1ee4fd79339c9b6f95d1e5e1e0e0209a8c1b095d9291e009afa0a492a5",size_bytes:9130223,format:"zip",root:"apache-maven-3.8.4",license_expression:"Apache-2.0"},
+              {id:"benchbase-source",url:"https://codeload.github.com/cmu-db/benchbase/tar.gz/33c00473807ebd49304d114a6d769d2d2b2bbb34",sha256:"sha256:804c9b3018f2f230f4ebbb5d0ebfed28ca417650037736f13fe9212d406fc4bc",size_bytes:43098598,format:"tar.gz",root:"benchbase-33c00473807ebd49304d114a6d769d2d2b2bbb34",license_expression:"GPL-3.0-or-later AND Apache-2.0"},
+              {id:"hammerdb-distribution",url:"https://github.com/TPC-Council/HammerDB/releases/download/v6.0/HammerDB-6.0-Prod-Lin-UBU24.tar.gz",sha256:"sha256:6e0b94724356f35f60760fdcacd0b19de655ec0477383d59e585a7235c4d4a58",size_bytes:36188110,format:"tar.gz-links",root:"HammerDB-6.0",license_expression:"GPL-3.0-or-later"},
+              {id:"sysbench-source",url:"https://codeload.github.com/akopytov/sysbench/tar.gz/ebf1c90da05dea94648165e4f149abc20c979557",sha256:"sha256:2a664cb397ebb0678a91d7b876c1ffcebe728a52cbb1ffe0aa63b36fad1c9e1c",size_bytes:1509951,format:"tar.gz",root:"sysbench-ebf1c90da05dea94648165e4f149abc20c979557",license_expression:"GPL-2.0-or-later"},
+              {id:"temurin-jdk",url:"https://github.com/adoptium/temurin23-binaries/releases/download/jdk-23.0.2%2B7/OpenJDK23U-jdk_x64_linux_hotspot_23.0.2_7.tar.gz",sha256:"sha256:870ac8c05c6fe563e7a3878a47d0234b83c050e83651d2c47e8b822ec74512dd",size_bytes:214525906,format:"tar.gz-links",root:"jdk-23.0.2+7",license_expression:"NOASSERTION"},
+              {id:"temurin-jre",url:"https://github.com/adoptium/temurin23-binaries/releases/download/jdk-23.0.2%2B7/OpenJDK23U-jre_x64_linux_hotspot_23.0.2_7.tar.gz",sha256:"sha256:1a16c654e67a72dadfa632969a457404ad1cc30c6375857fdcb393e0592ce3ba",size_bytes:51939941,format:"tar.gz-links",root:"jdk-23.0.2+7-jre",license_expression:"NOASSERTION"}
+            ] | sort_by(.id)) and
+            all(.assets[];
+              .dependency_license_closure_asserted == false and
+              .project_redistribution == false and
+              .runtime_replay_available == false)
+          ' draft-external-driver-evidence/provisioning/acquisitions.json >/dev/null
+          jq -e '
+            .purpose == "release-smoke-adapter-compatibility" and
+            .performance_claim == false and
+            .target == {engine:"PostgreSQL",major:16,host:"127.0.0.1",port:5432,authentication:"ephemeral-loopback-trust",fresh_cluster:true} and
+            (.datasets[] | select(.driver_id == "benchbase-postgresql-33c0047") | {scale_factor,pinned_loader_rng_seed,pinned_workload_random_seed,observed_warehouses}) == {scale_factor:1,pinned_loader_rng_seed:0,pinned_workload_random_seed:424242,observed_warehouses:1} and
+            (.datasets[] | select(.driver_id == "hammerdb-postgresql-6.0") | {warehouses,build_virtual_users,observed_warehouses,observed_required_tables}) == {warehouses:20,build_virtual_users:4,observed_warehouses:20,observed_required_tables:9} and
+            (.datasets[] | select(.driver_id == "sysbench-postgresql-1.0.20") | {tables,table_size,random_seed,observed_rows}) == {tables:1,table_size:10000,random_seed:424242,observed_rows:10000}
+          ' draft-external-driver-evidence/provisioning/datasets.json >/dev/null
+          jq -e '
+            .runner.provider == "github-hosted" and .runner.environment == "github-hosted" and
+            .runner.label == "ubuntu-24.04" and
+            .host_runtime_dependencies_attested == false and .performance_qualified == false
+          ' draft-external-driver-evidence/provisioning/host.json >/dev/null
+          jq -e '
+            .source_to_binary_attested == false and
+            .host_runtime_dependencies_attested == false and
+            .complete_license_or_source_closure_attested == false and
+            .project_redistribution == false and
+            .runtime_replay_available == false and
+            ([.runtimes[].runtime_id] == ["benchbase-33c0047","hammerdb-6.0","sysbench-1.0.20"]) and
+            (.runtimes[] | select(.runtime_id == "benchbase-33c0047") | .file_count) == 28 and
+            (.runtimes[] | select(.runtime_id == "benchbase-33c0047") | .license_expression) == "GPL-3.0-or-later AND Apache-2.0" and
+            (.runtimes[] | select(.runtime_id == "hammerdb-6.0") | .file_count) == 1 and
+            (.runtimes[] | select(.runtime_id == "hammerdb-6.0") | .license_expression) == "GPL-3.0-or-later" and
+            (.runtimes[] | select(.runtime_id == "sysbench-1.0.20") | .file_count) == 3 and
+            (.runtimes[] | select(.runtime_id == "sysbench-1.0.20") | .license_expression) == "GPL-2.0-or-later" and
+            all(.runtimes[];
+              .dependency_license_closure_asserted == false and
+              .project_redistribution == false and
+              .runtime_replay_available == false)
+          ' draft-external-driver-evidence/provisioning/runtime-set.json >/dev/null
+          for driver in \
+            benchbase-postgresql-33c0047 \
+            hammerdb-postgresql-6.0 \
+            sysbench-postgresql-1.0.20; do
+            report="draft-external-driver-evidence/executions/$driver.json"
+            metadata_digest="sha256:$(sha256sum "$report" | awk '{print $1}')"
+            gate_metadata_digest="$(jq -r --arg driver "$driver" \
+              '.executions[] | select(.driver_id == $driver) | .metadata_digest' \
+              draft-external-driver-evidence/gate.json)"
+            test "$metadata_digest" = "$gate_metadata_digest"
+            jq -e --arg driver "$driver" --arg candidate_sha "$GITHUB_SHA" \
+              --argjson run_id "$GITHUB_RUN_ID" --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+              '.schema_version == "pgworkbench.release-external-driver-execution-metadata/v1" and
+               .artifact_type == "pgworkbench.release-external-driver-execution-metadata" and
+               .driver_id == $driver and .candidate_sha == $candidate_sha and
+               .workflow_run == {id:$run_id,attempt:$run_attempt} and
+               .local_verification.valid == true and
+               .execution.status == "completed" and
+               .execution.exact_source_to_staged_file_match == true' "$report" >/dev/null
+          done
+
+          mkdir draft-external-driver-reverify
+          archive="pgworkbench-$VERSION-linux-amd64.tar.gz"
+          checksum="pgworkbench-$VERSION-SHA256SUMS.txt"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$archive" --pattern "$checksum" \
+            --dir draft-external-driver-reverify
+          expected="$(awk -v name="$archive" '$2 == name {print $1}' \
+            "draft-external-driver-reverify/$checksum")"
+          actual="$(sha256sum "draft-external-driver-reverify/$archive" | awk '{print $1}')"
+          test -n "$expected"
+          test "$actual" = "$expected"
+          test "sha256:$actual" = "$draft_archive_digest"
+          gh attestation verify "draft-external-driver-reverify/$archive" \
+            -R "$GITHUB_REPOSITORY" \
+            --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+          unset GH_TOKEN
+          tar -C draft-external-driver-reverify \
+            -xzf "draft-external-driver-reverify/$archive"
+          verifier_root="$GITHUB_WORKSPACE/draft-external-driver-reverify/pgworkbench-$VERSION-linux-amd64"
+          verifier="$verifier_root/pgworkbench"
+          test -x "$verifier"
+          identity="$("$verifier" version)"
+          test "$(sed -n 's/.* version=\([^ ]*\).*/\1/p' <<<"$identity")" = "$VERSION"
+          test "$(sed -n 's/.* commit=\([^ ]*\).*/\1/p' <<<"$identity")" = "$GITHUB_SHA"
+          gate_binary_digest="$(jq -r .pgworkbench_binary_digest \
+            draft-external-driver-evidence/gate.json)"
+          verifier_digest="sha256:$(sha256sum "$verifier" | awk '{print $1}')"
+          test "$verifier_digest" = "$gate_binary_digest"
+          gate_registry_digest="$(jq -r .driver_registry_digest \
+            draft-external-driver-evidence/gate.json)"
+          drivers_json="$(PGWORKBENCH_ROOT="$verifier_root" \
+            "$verifier" benchmark drivers --json)"
+          test "$(jq -r .digest <<<"$drivers_json")" = "$gate_registry_digest"
+          printf 'verified_external_driver_artifact_digest=%s\n' \
+            "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" >> "$GITHUB_OUTPUT"
+          printf 'verified_external_driver_artifact_id=%s\n' \
+            "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID" >> "$GITHUB_OUTPUT"
+          printf 'verified_external_driver_artifact_name=%s\n' \
+            "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          printf 'verified_external_driver_archive_digest=%s\n' \
+            "$VERIFIED_EXTERNAL_DRIVER_ARCHIVE_DIGEST" >> "$GITHUB_OUTPUT"
+          printf 'verified_external_driver_gate_digest=%s\n' \
+            "$VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST" >> "$GITHUB_OUTPUT"
+
+  publish-release:
+    if: github.ref_type == 'tag'
+    needs:
+      - prepare
+      - attest-and-create-draft
+      - draft-verify
+      - draft-compatibility
+      - draft-external-drivers
+      - verify-publication-evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release-publication
+    permissions:
+      actions: read
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      VERIFIED_ASSET_FINGERPRINT: ${{ needs['draft-verify'].outputs.asset_fingerprint }}
+      VERIFIED_CONTROLS_ARTIFACT_DIGEST: ${{ needs['attest-and-create-draft'].outputs.controls_artifact_digest }}
+      VERIFIED_CONTROLS_ARTIFACT_ID: ${{ needs['attest-and-create-draft'].outputs.controls_artifact_id }}
+      VERIFIED_CONTROLS_ARTIFACT_NAME: ${{ needs['attest-and-create-draft'].outputs.controls_artifact_name }}
+      VERIFIED_REPOSITORY_CONTROLS_DIGEST: ${{ needs['attest-and-create-draft'].outputs.repository_controls_digest }}
+      PRODUCER_EXTERNAL_DRIVER_ARTIFACT_DIGEST: ${{ needs['draft-external-drivers'].outputs.artifact_digest }}
+      PRODUCER_EXTERNAL_DRIVER_ARTIFACT_ID: ${{ needs['draft-external-drivers'].outputs.artifact_id }}
+      PRODUCER_EXTERNAL_DRIVER_ARTIFACT_NAME: ${{ needs['draft-external-drivers'].outputs.artifact_name }}
+      VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST: ${{ needs['verify-publication-evidence'].outputs.verified_external_driver_artifact_digest }}
+      VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID: ${{ needs['verify-publication-evidence'].outputs.verified_external_driver_artifact_id }}
+      VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME: ${{ needs['verify-publication-evidence'].outputs.verified_external_driver_artifact_name }}
+      VERIFIED_EXTERNAL_DRIVER_ARCHIVE_DIGEST: ${{ needs['verify-publication-evidence'].outputs.verified_external_driver_archive_digest }}
+      VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST: ${{ needs['verify-publication-evidence'].outputs.verified_external_driver_gate_digest }}
+
+    steps:
+      - name: Download exact protected control evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ env.VERIFIED_CONTROLS_ARTIFACT_ID }}
+          path: repository-controls
+          merge-multiple: true
+
+      - name: Download exact verified external-driver evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ env.VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID }}
+          path: draft-external-driver-package
+          merge-multiple: true
+
+      - name: Revalidate static evidence, live controls, and publish verified draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMMUTABLE_RELEASES_ADMIN_TOKEN: ${{ secrets.PGWORKBENCH_ADMIN_READ_TOKEN }}
+          TAG_RULESET_ADMIN_REVIEWED_ID: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_ID }}
+          TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$IMMUTABLE_RELEASES_ADMIN_TOKEN"
+          test "$PRODUCER_EXTERNAL_DRIVER_ARTIFACT_ID" = "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID"
+          test "$PRODUCER_EXTERNAL_DRIVER_ARTIFACT_NAME" = "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME"
+          test "$PRODUCER_EXTERNAL_DRIVER_ARTIFACT_DIGEST" = "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST"
+          [[ "$VERIFIED_CONTROLS_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VERIFIED_REPOSITORY_CONTROLS_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$VERIFIED_EXTERNAL_DRIVER_ARCHIVE_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          controls_prefix="release-controls-${GITHUB_REF_NAME}-${GITHUB_SHA}-"
+          test "${VERIFIED_CONTROLS_ARTIFACT_NAME#"$controls_prefix"}" != \
+            "$VERIFIED_CONTROLS_ARTIFACT_NAME"
+          [[ "${VERIFIED_CONTROLS_ARTIFACT_NAME#"$controls_prefix"}" =~ ^[1-9][0-9]*$ ]]
+          external_prefix="draft-external-driver-metadata-${GITHUB_REF_NAME}-${GITHUB_SHA}-"
+          test "${VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME#"$external_prefix"}" != \
+            "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME"
+          [[ "${VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME#"$external_prefix"}" =~ ^[1-9][0-9]*$ ]]
+          case "$VERIFIED_CONTROLS_ARTIFACT_DIGEST" in
+            sha256:[0-9a-f][0-9a-f]*) controls_artifact_digest="$VERIFIED_CONTROLS_ARTIFACT_DIGEST" ;;
+            [0-9a-f][0-9a-f]*) controls_artifact_digest="sha256:$VERIFIED_CONTROLS_ARTIFACT_DIGEST" ;;
+            *) exit 1 ;;
+          esac
+          case "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" in
+            sha256:[0-9a-f][0-9a-f]*) external_artifact_digest="$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" ;;
+            [0-9a-f][0-9a-f]*) external_artifact_digest="sha256:$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" ;;
+            *) exit 1 ;;
+          esac
+          [[ "$controls_artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$external_artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          controls_artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$VERIFIED_CONTROLS_ARTIFACT_ID")"
+          external_artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID")"
+          jq -e \
+            --argjson id "$VERIFIED_CONTROLS_ARTIFACT_ID" \
+            --arg name "$VERIFIED_CONTROLS_ARTIFACT_NAME" \
+            --arg digest "$controls_artifact_digest" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg head_sha "$GITHUB_SHA" \
+            '.id == $id and .name == $name and .expired == false and
+             .digest == $digest and .workflow_run.id == $run_id and
+             .workflow_run.head_sha == $head_sha' <<<"$controls_artifact_json" >/dev/null
+          jq -e \
+            --argjson id "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID" \
+            --arg name "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME" \
+            --arg digest "$external_artifact_digest" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg head_sha "$GITHUB_SHA" \
+            '.id == $id and .name == $name and .expired == false and
+             .digest == $digest and .workflow_run.id == $run_id and
+             .workflow_run.head_sha == $head_sha' <<<"$external_artifact_json" >/dev/null
+          test "sha256:$(sha256sum repository-controls/repository-controls.json | awk '{print $1}')" = \
+            "$VERIFIED_REPOSITORY_CONTROLS_DIGEST"
+          test "$(sha256sum draft-external-driver-package/metadata-only.tar.gz | awk '{print $1}')" = \
+            "$VERIFIED_EXTERNAL_DRIVER_ARCHIVE_DIGEST"
+          (
+            cd draft-external-driver-package
+            sha256sum -c metadata-only.tar.gz.sha256
+          )
+          static_gate_digest="$(tar -xOzf draft-external-driver-package/metadata-only.tar.gz ./gate.json | sha256sum | awk '{print $1}')"
+          test "$static_gate_digest" = "$VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST"
+          tar -xOzf draft-external-driver-package/metadata-only.tar.gz ./gate.json | jq -e '
+            .schema_version == "pgworkbench.release-external-driver-gate/v2" and
+            .qualification_mode == "draft-release-smoke" and
+            .assurance.artifact_payload == "metadata-only-no-third-party-runtime-bytes" and
+            .assurance.third_party_runtime_bytes_uploaded == false and
+            .assurance.performance_claim == false and
+            .assurance.binary_distributed_by_project == false and
+            .assurance.project_redistribution == false and
+            .assurance.runtime_replay_available == false and
+            .assurance.complete_license_or_source_closure_attested == false
+          ' >/dev/null
+          static_controls_digest="sha256:$(tar -xOzf \
+            draft-external-driver-package/metadata-only.tar.gz \
+            ./repository-controls/repository-controls.json | sha256sum | awk '{print $1}')"
+          test "$static_controls_digest" = "$VERIFIED_REPOSITORY_CONTROLS_DIGEST"
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_ID" =~ ^[0-9]+$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          effective_rulesets="$(gh api --paginate --slurp \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/rulesets?targets=tag&includes_parents=true&per_page=100")"
+          jq -e --argjson id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            'add | any(.[]; .id == $id)' <<<"$effective_rulesets" >/dev/null
+          live_ruleset="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/rulesets/$TAG_RULESET_ADMIN_REVIEWED_ID")"
+          jq -e \
+            --argjson ruleset_id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            --arg updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            '.id == $ruleset_id and
+             .updated_at == $updated_at and
+             .target == "tag" and
+             .enforcement == "active" and
+             .conditions.ref_name.include == ["refs/tags/v*"] and
+             .conditions.ref_name.exclude == [] and
+             ([.rules[].type] | index("creation")) != null and
+             ([.rules[].type] | index("update")) != null and
+             ([.rules[].type] | index("deletion")) != null' \
+            <<<"$live_ruleset" >/dev/null
+          live_ruleset_digest="sha256:$(printf '%s\n' "$live_ruleset" | sha256sum | awk '{print $1}')"
+          test "$live_ruleset_digest" = "$(jq -r .tag_ruleset.api_evidence_digest \
+            repository-controls/repository-controls.json)"
+
+          live_immutable="$({ GH_TOKEN="$IMMUTABLE_RELEASES_ADMIN_TOKEN" gh api \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases"; })"
+          jq -e '.enabled == true and
+                 (.enforced_by_owner | type) == "boolean" and
+                 (keys | sort) == ["enabled", "enforced_by_owner"]' \
+            <<<"$live_immutable" >/dev/null
+          live_immutable_digest="sha256:$(printf '%s\n' "$live_immutable" | sha256sum | awk '{print $1}')"
+          test "$live_immutable_digest" = "$(jq -r .immutable_releases.api_evidence_digest \
+            repository-controls/repository-controls.json)"
+
+          tag="$GITHUB_REF_NAME"
+          prepublish_remote_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
+          test "$prepublish_remote_sha" = "$GITHUB_SHA"
+          prepublish_json="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName,assets)"
+          test "$(jq -r .isDraft <<<"$prepublish_json")" = true
+          test "$(jq -r .tagName <<<"$prepublish_json")" = "$tag"
+          prepublish_inventory="$(jq -cS '[.assets[] | {id, name, size, digest}] | sort_by(.name)' <<<"$prepublish_json")"
+          prepublish_fingerprint="$(printf '%s' "$prepublish_inventory" | sha256sum | awk '{print $1}')"
+          test "$prepublish_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+
+  public-verify:
+    if: github.ref_type == 'tag'
+    needs:
+      - prepare
+      - draft-verify
+      - publish-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      attestations: read
+      contents: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      VERIFIED_ASSET_FINGERPRINT: ${{ needs['draft-verify'].outputs.asset_fingerprint }}
+
+    steps:
+      - name: Download and authenticate the complete public release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          remote_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
+          test "$remote_sha" = "$GITHUB_SHA"
+          release_json="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isImmutable,tagName,assets)"
+          test "$(jq -r .isDraft <<<"$release_json")" = false
+          test "$(jq -r .isImmutable <<<"$release_json")" = true
+          test "$(jq -r .tagName <<<"$release_json")" = "$tag"
+          jq -e '
+            .assets | length == 16 and all(.[];
+              .id != null and
+              ((.name | type) == "string") and
+              ((.size | type) == "number") and
+              ((.digest | type) == "string") and
+              (.digest | startswith("sha256:"))
+            )
+          ' <<<"$release_json" >/dev/null
+          asset_inventory="$(jq -cS '[.assets[] | {id, name, size, digest}] | sort_by(.name)' <<<"$release_json")"
+          asset_fingerprint="$(printf '%s' "$asset_inventory" | sha256sum | awk '{print $1}')"
+          test -n "$VERIFIED_ASSET_FINGERPRINT"
+          test "$asset_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"
+
+          mkdir -p public-download public-verification
+          gh release verify "$tag" --repo "$GITHUB_REPOSITORY" --format json \
+            > public-verification/release-attestation.json
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir public-download
+          test "$(find public-download -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 16
+
+          provenance_bundle="public-download/pgworkbench-$VERSION-provenance.sigstore.json"
+          provenance_subjects=(
+            public-download/pgworkbench-"$VERSION"-*.tar.gz
+            "public-download/pgworkbench-$VERSION-SHA256SUMS.txt"
+            "public-download/pgworkbench-$VERSION-release-manifest.json"
+          )
+          test "${#provenance_subjects[@]}" -eq 6
+          for subject in "${provenance_subjects[@]}"; do
+            gh attestation verify "$subject" -R "$GITHUB_REPOSITORY" \
+              --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+            gh attestation verify "$subject" -R "$GITHUB_REPOSITORY" \
+              --bundle "$provenance_bundle" \
+              --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+          done
+
+          for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            archive="public-download/pgworkbench-$VERSION-$platform.tar.gz"
+            sbom_bundle="public-download/pgworkbench-$VERSION-$platform-sbom.sigstore.json"
+            test -s "$archive"
+            gh attestation verify "$archive" -R "$GITHUB_REPOSITORY" \
+              --predicate-type https://spdx.dev/Document/v2.3 \
+              --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+            gh attestation verify "$archive" -R "$GITHUB_REPOSITORY" \
+              --bundle "$sbom_bundle" \
+              --predicate-type https://spdx.dev/Document/v2.3 \
+              --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+          done
+          unset GH_TOKEN
+
+          (
+            cd public-download
+            sha256sum -c "pgworkbench-$VERSION-SHA256SUMS.txt"
+            sha256sum -c "pgworkbench-$VERSION-METADATA-SHA256SUMS.txt"
+          )
+
+          verify_root="$RUNNER_TEMP/pgworkbench-public-release-verify"
+          mkdir -p "$verify_root"
+          tar -C "$verify_root" -xzf "public-download/pgworkbench-$VERSION-linux-amd64.tar.gz"
+          verifier="$verify_root/pgworkbench-$VERSION-linux-amd64/pgworkbench"
+          test -x "$verifier"
+          identity="$("$verifier" version)"
+          test "$(sed -n 's/.* version=\([^ ]*\).*/\1/p' <<<"$identity")" = "$VERSION"
+          test "$(sed -n 's/.* commit=\([^ ]*\).*/\1/p' <<<"$identity")" = "$GITHUB_SHA"
+          "$verifier" release manifest verify \
+            --release-dir "$GITHUB_WORKSPACE/public-download" \
+            --manifest "pgworkbench-$VERSION-release-manifest.json"
+          sbom_verify_base="$RUNNER_TEMP/pgworkbench-public-sbom-verify"
+          mkdir -p "$sbom_verify_base"
+          for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
+            sbom="public-download/pgworkbench-$VERSION-$platform.spdx.json"
+            extract_root="$sbom_verify_base/$platform"
+            mkdir "$extract_root"
+            tar -C "$extract_root" \
+              -xzf "public-download/pgworkbench-$VERSION-$platform.tar.gz"
+            package_root="$extract_root/pgworkbench-$VERSION-$platform"
+            test -d "$package_root"
+            jq -e '.spdxVersion == "SPDX-2.3"' "$sbom" >/dev/null
+            "$verifier" release sbom verify \
+              --package-root "$package_root" "$sbom"
+          done
+
+          {
+            printf 'tag=%s\n' "$tag"
+            printf 'candidate_sha=%s\n' "$GITHUB_SHA"
+            printf 'remote_sha=%s\n' "$remote_sha"
+            printf 'release_state=published\n'
+            printf 'release_immutable=verified\n'
+            printf 'release_attestation=verified\n'
+            printf 'asset_count=16\n'
+            printf 'asset_fingerprint=%s\n' "$asset_fingerprint"
+            printf 'archive_checksums=verified\n'
+            printf 'metadata_checksums=verified\n'
+            printf 'release_manifest=verified\n'
+            printf 'provenance_attestations=verified\n'
+            printf 'sbom_attestations=verified\n'
+          } > public-verification/result.env
+          find public-download -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort \
+            > public-verification/assets.txt
+
+      - name: Upload public release verification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-verification-${{ github.ref_name }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: public-verification/
+          if-no-files-found: error
+          retention-days: 90
+
+  published-compatibility:
+    if: github.ref_type == 'tag'
+    needs:
+      - public-verify
+    uses: ./.github/workflows/compatibility.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+      qualification_mode: published
+    permissions:
+      attestations: read
+      contents: read

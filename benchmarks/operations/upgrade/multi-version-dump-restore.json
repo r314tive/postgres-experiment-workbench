@@ -1,0 +1,20 @@
+{
+  "schema_version": "pgworkbench.operation-benchmark-spec/v1",
+  "id": "upgrade/multi-version-dump-restore",
+  "name": "Multi-version dump/restore end-to-end rehearsal",
+  "description": "Repeated disposable old-major to new-major logical upgrade rehearsals using pg_dump and pg_restore with post-restore validation.",
+  "classification": "descriptive-engineering",
+  "decision_eligible": false,
+  "experiment_spec": "multi-version-upgrade-benchmark",
+  "trials": 3,
+  "max_cv_pct": 30,
+  "supported_runtimes": ["docker"],
+  "measurement": {
+    "basis": "linked-run-wall-clock",
+    "metric": "scenario_elapsed_ms",
+    "unit": "milliseconds",
+    "direction": "lower-is-better",
+    "scope": "Top-level linked-run interval from immutable manifest start through terminal verdict; includes topology reset/readiness, source data setup, dump, restore, validation, evidence collection, and cleanup."
+  },
+  "assurance": "A passing series proves repeated end-to-end dump/restore rehearsal completion and row/version assertions for the exact disposable topology and pack. The wall-clock metric is deliberately scenario-wide; it is not isolated pg_dump or pg_restore throughput, physical pg_upgrade evidence, production downtime, RTO, or recovery assurance."
+}

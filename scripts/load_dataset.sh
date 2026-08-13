@@ -89,7 +89,7 @@ capture_env_overrides() {
   local name
   while IFS= read -r name; do
     case "$name" in
-      ENV_FILE|COMPOSE|POSTGRES_*|PGBOUNCER_*|ALLOW_*|DATASET_*|PROFILE_*|PGBENCH_*|WORKLOAD_*)
+      ENV_FILE|COMPOSE|POSTGRES_*|PGBOUNCER_*|ALLOW_*|DATASET_*|PROFILE_*|PGBENCH_*|WORKLOAD_*|NOISIA_CONNINFO|PGWORKBENCH_EXPERIMENT_MODE)
         PRESERVED_ENV_NAMES+=("$name")
         PRESERVED_ENV_VALUES+=("${!name}")
         ;;
@@ -105,12 +105,36 @@ restore_env_overrides() {
   done
 }
 
+restore_experiment_target_overrides() {
+  local inherited_experiment_mode="$1"
+  local i name
+
+  if [[ "$inherited_experiment_mode" = "1" ]]; then
+    for ((i = 0; i < ${#PRESERVED_ENV_NAMES[@]}; i++)); do
+      name="${PRESERVED_ENV_NAMES[$i]}"
+      case "$name" in
+        POSTGRES_*|PGBOUNCER_*|ALLOW_*|WORKLOAD_PGHOST|WORKLOAD_PGPORT|NOISIA_CONNINFO|PGWORKBENCH_EXPERIMENT_MODE)
+          export "$name=${PRESERVED_ENV_VALUES[$i]}"
+          ;;
+      esac
+    done
+  fi
+
+  export PGWORKBENCH_EXPERIMENT_MODE="$inherited_experiment_mode"
+}
+
 load_dataset() {
+  local inherited_experiment_mode="${PGWORKBENCH_EXPERIMENT_MODE:-0}"
   DATASET_SPEC_FILE="$(resolve_spec "$1")"
   set -a
   # shellcheck disable=SC1090
   source "$DATASET_SPEC_FILE"
   set +a
+  restore_experiment_target_overrides "$inherited_experiment_mode"
+
+  if [[ "$PGWORKBENCH_EXPERIMENT_MODE" = "1" ]]; then
+    "$REPO_DIR/scripts/guard_local_pg.sh"
+  fi
 
   case "${DATASET_KIND:-}" in
     sql)

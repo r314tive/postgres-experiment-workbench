@@ -1,0 +1,3 @@
+# Retained upstream license and attribution evidence is byte-exact. Do not
+# normalize or flag the upstream project's whitespace as workbench style drift.
+third_party/licenses/** -whitespace

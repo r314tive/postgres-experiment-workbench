@@ -2,6 +2,16 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=target_arg_guard.sh
+source "$REPO_DIR/scripts/target_arg_guard.sh"
+# shellcheck source=benchmark_phase.sh
+source "$REPO_DIR/scripts/benchmark_phase.sh"
+# shellcheck source=benchmark_control.sh
+source "$REPO_DIR/scripts/benchmark_control.sh"
+# shellcheck source=benchmark_capsule.sh
+source "$REPO_DIR/scripts/benchmark_capsule.sh"
+# shellcheck source=capture_effective_pg_settings.sh
+source "$REPO_DIR/scripts/capture_effective_pg_settings.sh"
 PRESERVED_ENV_NAMES=()
 PRESERVED_ENV_VALUES=()
 
@@ -31,17 +41,54 @@ sanitize_id() {
   printf '%s' "$1" | tr '/ ' '__' | tr -cd '[:alnum:]_.-'
 }
 
+sha256_digest_file() {
+  local file="${1:?file is required}"
+  local digest
+
+  if command -v shasum >/dev/null 2>&1; then
+    digest="$(shasum -a 256 -- "$file" | awk '{print $1}')"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    digest="$(sha256sum -- "$file" | awk '{print $1}')"
+  else
+    echo "A SHA-256 implementation (shasum or sha256sum) is required" >&2
+    return 2
+  fi
+  if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "Failed to calculate a canonical SHA-256 digest for: $file" >&2
+    return 2
+  fi
+  printf 'sha256:%s\n' "$digest"
+}
+
+is_safe_utility_source_id() {
+  local value="$1"
+  local component
+  local -a components=()
+
+  [[ -n "$value" && ${#value} -le 200 ]] || return 1
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]] || return 1
+  IFS='/' read -r -a components <<< "$value"
+  for component in "${components[@]}"; do
+    [[ "$component" != "." && "$component" != ".." ]] || return 1
+  done
+}
+
 json_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
 run_pgworkbench() {
-  if [[ -x "$REPO_DIR/generated/bin/pgworkbench" ]]; then
-    "$REPO_DIR/generated/bin/pgworkbench" "$@"
+  if [[ -n "${PGWORKBENCH_BIN:-}" && -x "$PGWORKBENCH_BIN" ]]; then
+    "$PGWORKBENCH_BIN" "$@"
     return
   fi
 
-  if command -v go >/dev/null 2>&1; then
+  if [[ -x "$REPO_DIR/pgworkbench" ]]; then
+    "$REPO_DIR/pgworkbench" "$@"
+    return
+  fi
+
+  if [[ -f "$REPO_DIR/go.mod" && -f "$REPO_DIR/cmd/pgworkbench/main.go" ]] && command -v go >/dev/null 2>&1; then
     (
       cd "$REPO_DIR"
       GOCACHE="${GOCACHE:-$REPO_DIR/.tmp/go-cache}" \
@@ -51,7 +98,75 @@ run_pgworkbench() {
     return
   fi
 
+  if [[ -x "$REPO_DIR/generated/bin/pgworkbench" ]]; then
+    "$REPO_DIR/generated/bin/pgworkbench" "$@"
+    return
+  fi
+
+  if command -v pgworkbench >/dev/null 2>&1; then
+    pgworkbench "$@"
+    return
+  fi
+
   return 127
+}
+
+selected_built_pgworkbench() {
+  local candidate
+
+  if [[ -n "${PGWORKBENCH_BIN:-}" && -x "$PGWORKBENCH_BIN" ]]; then
+    printf '%s\n' "$PGWORKBENCH_BIN"
+    return
+  fi
+  if [[ -x "$REPO_DIR/pgworkbench" ]]; then
+    printf '%s\n' "$REPO_DIR/pgworkbench"
+    return
+  fi
+
+  # The state writer below will use go run before any cached/generated binary.
+  # Source execution has no immutable candidate identity, especially in a dirty
+  # worktree, so leave it explicitly unverified.
+  if [[ -f "$REPO_DIR/go.mod" && -f "$REPO_DIR/cmd/pgworkbench/main.go" ]] && command -v go >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [[ -x "$REPO_DIR/generated/bin/pgworkbench" ]]; then
+    printf '%s\n' "$REPO_DIR/generated/bin/pgworkbench"
+    return
+  fi
+  candidate="$(command -v pgworkbench 2>/dev/null || true)"
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return
+  fi
+  return 1
+}
+
+resolve_engine_identity() {
+  local binary output
+
+  if [[ "${PGWORKBENCH_ENGINE_VERSION+x}" = x || "${PGWORKBENCH_ENGINE_COMMIT+x}" = x ]]; then
+    PGWORKBENCH_ENGINE_VERSION="${PGWORKBENCH_ENGINE_VERSION:-unverified}"
+    PGWORKBENCH_ENGINE_COMMIT="${PGWORKBENCH_ENGINE_COMMIT:-unverified}"
+    export PGWORKBENCH_ENGINE_VERSION PGWORKBENCH_ENGINE_COMMIT
+    return
+  fi
+
+  PGWORKBENCH_ENGINE_VERSION=unverified
+  PGWORKBENCH_ENGINE_COMMIT=unverified
+  if ! binary="$(selected_built_pgworkbench)"; then
+    export PGWORKBENCH_ENGINE_VERSION PGWORKBENCH_ENGINE_COMMIT
+    return
+  fi
+  if ! output="$("$binary" version 2>/dev/null)"; then
+    export PGWORKBENCH_ENGINE_VERSION PGWORKBENCH_ENGINE_COMMIT
+    return
+  fi
+  if [[ "$output" =~ ^pgworkbench[[:space:]]version=([^[:space:]]+)[[:space:]]commit=([^[:space:]]+)[[:space:]]built_at=([^[:space:]]+)$ ]]; then
+    PGWORKBENCH_ENGINE_VERSION="${BASH_REMATCH[1]}"
+    PGWORKBENCH_ENGINE_COMMIT="${BASH_REMATCH[2]}"
+  fi
+  export PGWORKBENCH_ENGINE_VERSION PGWORKBENCH_ENGINE_COMMIT
 }
 
 capture_env_overrides() {
@@ -61,7 +176,7 @@ capture_env_overrides() {
   local name
   while IFS= read -r name; do
     case "$name" in
-      ENV_FILE|COMPOSE|GOCACHE|GOMODCACHE|POSTGRES_*|PGBOUNCER_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|LOGICAL_REPLICATION_*|PG_CONFIG|PROFILE_*|DATASET_*|METRICS_*|WORKLOAD_*|EXPERIMENT_*)
+      ENV_FILE|COMPOSE|GOCACHE|GOMODCACHE|POSTGRES_*|PGBOUNCER_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|LOGICAL_REPLICATION_*|PG_CONFIG|PROFILE_*|DATASET_*|METRICS_*|WORKLOAD_*|PGBENCH_*|EXPERIMENT_*|PGWORKBENCH_*)
         PRESERVED_ENV_NAMES+=("$name")
         PRESERVED_ENV_VALUES+=("${!name}")
         ;;
@@ -77,6 +192,81 @@ restore_env_overrides() {
   done
 }
 
+activate_experiment_target_guard() {
+  # This exported mode follows every experiment-owned subprocess. Generic
+  # utility/workload commands keep their existing explicit external-target
+  # contract when the marker is absent.
+  export PGWORKBENCH_EXPERIMENT_MODE=1
+  "$REPO_DIR/scripts/guard_local_pg.sh"
+
+  # Materialize the complete disposable target contract before nested dataset
+  # and workload specs are sourced. Their loaders restore these values in
+  # experiment mode, including ports, so a nested spec cannot retarget a local
+  # client to another server on the same host.
+  export POSTGRES_HOST="${POSTGRES_HOST:-127.0.0.1}"
+  export POSTGRES_PORT="${POSTGRES_PORT:-55433}"
+  export POSTGRES_REPLICA_HOST="${POSTGRES_REPLICA_HOST:-127.0.0.1}"
+  export POSTGRES_REPLICA_PORT="${POSTGRES_REPLICA_PORT:-55434}"
+  export POSTGRES_LOGICAL_SUBSCRIBER_HOST="${POSTGRES_LOGICAL_SUBSCRIBER_HOST:-127.0.0.1}"
+  export POSTGRES_LOGICAL_SUBSCRIBER_PORT="${POSTGRES_LOGICAL_SUBSCRIBER_PORT:-55435}"
+  export POSTGRES_UPGRADE_OLD_HOST="${POSTGRES_UPGRADE_OLD_HOST:-127.0.0.1}"
+  export POSTGRES_UPGRADE_OLD_PORT="${POSTGRES_UPGRADE_OLD_PORT:-55436}"
+  export POSTGRES_UPGRADE_NEW_HOST="${POSTGRES_UPGRADE_NEW_HOST:-127.0.0.1}"
+  export POSTGRES_UPGRADE_NEW_PORT="${POSTGRES_UPGRADE_NEW_PORT:-55437}"
+  export PGBOUNCER_HOST="${PGBOUNCER_HOST:-127.0.0.1}"
+  export PGBOUNCER_PORT="${PGBOUNCER_PORT:-56432}"
+  export POSTGRES_DB="${POSTGRES_DB:-pg_experiment_workbench}"
+  export POSTGRES_USER="${POSTGRES_USER:-postgres}"
+  export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-postgres}"
+  export ALLOW_NONLOCAL_PG=0
+  export ALLOW_SYSTEM_DB=0
+
+  # Explicit -h/-p arguments do not override every libpq environment route:
+  # PGHOSTADDR and service files can still redirect the socket. Experiment
+  # clients must derive their complete target only from the owned contract.
+  unset PGHOSTADDR PGSERVICE PGSERVICEFILE PGPASSFILE PGOPTIONS \
+    PGTARGETSESSIONATTRS PGSSLMODE PGSSLROOTCERT PGSSLCERT PGSSLKEY \
+    PGREQUIRESSL PGREQUIREAUTH PGCHANNELBINDING
+
+  # Container-only adapters must stay on the Compose network's owned primary.
+  export WORKLOAD_PGHOST=postgres
+  export WORKLOAD_PGPORT=5432
+  export NOISIA_CONNINFO="host=postgres port=5432 dbname=$POSTGRES_DB user=$POSTGRES_USER password=$POSTGRES_PASSWORD sslmode=disable"
+}
+
+reject_experiment_target_overrides() {
+  pgworkbench_reject_experiment_target_args
+}
+
+prepare_runs_root() {
+  local canonical_repo canonical_runs
+  local runs_root="$REPO_DIR/runs"
+
+  canonical_repo="$(realpath "$REPO_DIR")"
+  if [[ -L "$runs_root" ]]; then
+    echo "Refusing symlinked experiment runs root: $runs_root" >&2
+    return 2
+  fi
+  if [[ -e "$runs_root" && ! -d "$runs_root" ]]; then
+    echo "Experiment runs root is not a directory: $runs_root" >&2
+    return 2
+  fi
+  if [[ ! -e "$runs_root" ]]; then
+    mkdir "$runs_root"
+  fi
+  if [[ -L "$runs_root" || ! -d "$runs_root" ]]; then
+    echo "Refusing unsafe experiment runs root: $runs_root" >&2
+    return 2
+  fi
+
+  canonical_runs="$(realpath "$runs_root")"
+  if [[ "$canonical_runs" != "$canonical_repo/runs" ]]; then
+    echo "Experiment runs root escaped the scenario pack: $canonical_runs" >&2
+    return 2
+  fi
+  RUNS_ROOT="$canonical_runs"
+}
+
 list_specs() {
   find "$REPO_DIR/experiments" -type f -name '*.env' 2>/dev/null | sort | while read -r spec; do
     spec="${spec#"$REPO_DIR/experiments/"}"
@@ -84,30 +274,259 @@ list_specs() {
   done
 }
 
+validate_standard_spec_capability() {
+  if [[ -n "${PGWORKBENCH_EXPERIMENT_SPEC_SCOPE:-}" ]]; then
+    echo "Unsupported PGWORKBENCH_EXPERIMENT_SPEC_SCOPE: ${PGWORKBENCH_EXPERIMENT_SPEC_SCOPE}" >&2
+    return 2
+  fi
+  if [[ -n "${PGWORKBENCH_DERIVED_EXPERIMENT_ID:-}" ||
+        -n "${PGWORKBENCH_SOURCE_SPEC_KIND:-}" ||
+        -n "${PGWORKBENCH_SOURCE_SPEC_ID:-}" ||
+        -n "${PGWORKBENCH_SOURCE_SPEC_REF:-}" ||
+        -n "${PGWORKBENCH_SOURCE_SPEC_DIGEST:-}" ]]; then
+    if [[ -z "${PGWORKBENCH_DERIVED_EXPERIMENT_ID:-}" && "${PGWORKBENCH_SOURCE_SPEC_KIND:-}" = "benchmark" ]]; then
+      validate_benchmark_source_spec "$(realpath "$REPO_DIR")"
+      return
+    fi
+    echo "Source-spec provenance is only valid for an authorized utility-derived or benchmark experiment" >&2
+    return 2
+  fi
+}
+
+validate_benchmark_source_spec() {
+  local pack_root="$1"
+  local source_id="${PGWORKBENCH_SOURCE_SPEC_ID:-}"
+  local expected_ref="benchmarks/$source_id.env"
+  local source_ref="${PGWORKBENCH_SOURCE_SPEC_REF:-}"
+  local source_file current component info_index actual_digest
+  local -a components=()
+
+  if ! is_safe_utility_source_id "$source_id"; then
+    echo "Invalid benchmark source spec id: ${source_id:-<empty>}" >&2
+    return 2
+  fi
+  if [[ "$source_ref" != "$expected_ref" ]]; then
+    echo "Benchmark source spec ref must be $expected_ref" >&2
+    return 2
+  fi
+  if [[ ! "${PGWORKBENCH_SOURCE_SPEC_DIGEST:-}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "Benchmark source spec digest must be canonical sha256" >&2
+    return 2
+  fi
+
+  if benchmark_capsule_active; then
+    source_file="$(benchmark_capsule_resolve "$expected_ref" "$PGWORKBENCH_SOURCE_SPEC_DIGEST")" || return
+    return 0
+  fi
+
+  IFS='/' read -r -a components <<< "$source_ref"
+  current="$pack_root"
+  for ((info_index = 0; info_index < ${#components[@]}; info_index++)); do
+    component="${components[$info_index]}"
+    current="$current/$component"
+    if [[ -L "$current" ]]; then
+      echo "Benchmark source path must not contain symlinks: $current" >&2
+      return 2
+    fi
+    if (( info_index + 1 < ${#components[@]} )); then
+      if [[ ! -d "$current" ]]; then
+        echo "Benchmark source path component is not a directory: $current" >&2
+        return 2
+      fi
+    elif [[ ! -f "$current" ]]; then
+      echo "Benchmark source spec is not a regular file: $current" >&2
+      return 2
+    fi
+  done
+  source_file="$(realpath "$current")"
+  if [[ "$source_file" != "$pack_root/$expected_ref" ]]; then
+    echo "Benchmark source spec escaped its canonical path: $source_file" >&2
+    return 2
+  fi
+  actual_digest="$(sha256_digest_file "$source_file")"
+  if [[ "$actual_digest" != "$PGWORKBENCH_SOURCE_SPEC_DIGEST" ]]; then
+    echo "Benchmark source spec digest mismatch for $expected_ref" >&2
+    return 2
+  fi
+}
+
+validate_utility_source_spec() {
+  local pack_root="$1"
+  local source_id="${PGWORKBENCH_SOURCE_SPEC_ID:-}"
+  local expected_ref="utility-tests/$source_id.env"
+  local source_ref="${PGWORKBENCH_SOURCE_SPEC_REF:-}"
+  local source_file current component info_index actual_digest
+  local -a components=()
+
+  if ! is_safe_utility_source_id "$source_id"; then
+    echo "Invalid utility-derived source spec id: ${source_id:-<empty>}" >&2
+    return 2
+  fi
+  if [[ "${PGWORKBENCH_SOURCE_SPEC_KIND:-}" != "utility-test" ]]; then
+    echo "Utility-derived source spec kind must be utility-test" >&2
+    return 2
+  fi
+  if [[ "$source_ref" != "$expected_ref" ]]; then
+    echo "Utility-derived source spec ref must be $expected_ref" >&2
+    return 2
+  fi
+  if [[ ! "${PGWORKBENCH_SOURCE_SPEC_DIGEST:-}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "Utility-derived source spec digest must be canonical sha256" >&2
+    return 2
+  fi
+
+  IFS='/' read -r -a components <<< "$source_ref"
+  current="$pack_root"
+  for ((info_index = 0; info_index < ${#components[@]}; info_index++)); do
+    component="${components[$info_index]}"
+    current="$current/$component"
+    if [[ -L "$current" ]]; then
+      echo "Utility-derived source path must not contain symlinks: $current" >&2
+      return 2
+    fi
+    if (( info_index + 1 < ${#components[@]} )); then
+      if [[ ! -d "$current" ]]; then
+        echo "Utility-derived source path component is not a directory: $current" >&2
+        return 2
+      fi
+    elif [[ ! -f "$current" ]]; then
+      echo "Utility-derived source spec is not a regular file: $current" >&2
+      return 2
+    fi
+  done
+  source_file="$(realpath "$current")"
+  if [[ "$source_file" != "$pack_root/$expected_ref" ]]; then
+    echo "Utility-derived source spec escaped its canonical path: $source_file" >&2
+    return 2
+  fi
+  actual_digest="$(sha256_digest_file "$source_file")"
+  if [[ "$actual_digest" != "$PGWORKBENCH_SOURCE_SPEC_DIGEST" ]]; then
+    echo "Utility-derived source spec digest mismatch for $expected_ref" >&2
+    return 2
+  fi
+}
+
+canonical_utility_derived_spec() {
+  local candidate="${1:?experiment spec candidate is required}"
+  local pack_root generated_root resolved expected_id base
+
+  pack_root="$(realpath "$REPO_DIR")"
+  generated_root="$pack_root/.tmp/utility-tests"
+  if [[ -L "$pack_root/.tmp" || -L "$generated_root" || ! -d "$generated_root" ]]; then
+    echo "Refusing unsafe generated utility spec directory: $generated_root" >&2
+    return 2
+  fi
+  if [[ -L "$candidate" || ! -f "$candidate" ]]; then
+    echo "Generated utility experiment spec must be a regular non-symlink file: $candidate" >&2
+    return 2
+  fi
+  resolved="$(realpath "$candidate")"
+  if [[ "$(dirname "$resolved")" != "$generated_root" ]]; then
+    echo "Generated utility experiment spec escaped $generated_root: $resolved" >&2
+    return 2
+  fi
+  base="$(basename "$resolved")"
+  if [[ "$base" != *.env || "$base" = ".env" ]]; then
+    echo "Generated utility experiment spec must be a flat named .env file: $base" >&2
+    return 2
+  fi
+
+  validate_utility_source_spec "$pack_root"
+  expected_id="utility/${PGWORKBENCH_SOURCE_SPEC_ID}"
+  if [[ "${PGWORKBENCH_DERIVED_EXPERIMENT_ID:-}" != "$expected_id" ]]; then
+    echo "Utility-derived experiment id must be $expected_id" >&2
+    return 2
+  fi
+  if [[ -n "${PGWORKBENCH_PACK_ID:-}" ||
+        -n "${PGWORKBENCH_PACK_VERSION:-}" ||
+        -n "${PGWORKBENCH_PACK_DIGEST:-}" ]]; then
+    echo "Utility-derived experiment specs must not claim scenario-pack identity" >&2
+    return 2
+  fi
+  printf '%s\n' "$resolved"
+}
+
+canonical_experiment_spec() {
+  local candidate="${1:?experiment spec candidate is required}"
+  local pack_root experiment_root resolved
+
+  case "${PGWORKBENCH_EXPERIMENT_SPEC_SCOPE:-}" in
+    utility-derived)
+      canonical_utility_derived_spec "$candidate"
+      return
+      ;;
+    "")
+      validate_standard_spec_capability
+      ;;
+    *)
+      echo "Unsupported PGWORKBENCH_EXPERIMENT_SPEC_SCOPE: ${PGWORKBENCH_EXPERIMENT_SPEC_SCOPE}" >&2
+      return 2
+      ;;
+  esac
+
+  if benchmark_capsule_active; then
+    local expected_id="${PGWORKBENCH_BENCHMARK_EXPERIMENT_SPEC_ID:-}"
+    local expected_digest="${PGWORKBENCH_BENCHMARK_EXPERIMENT_SPEC_DIGEST:-}"
+    local expected_path
+    if ! is_safe_utility_source_id "$expected_id"; then
+      echo "Invalid benchmark capsule experiment spec id: ${expected_id:-<empty>}" >&2
+      return 2
+    fi
+    expected_path="$(benchmark_capsule_resolve "experiments/$expected_id.env" "$expected_digest")" || return
+    resolved="$(realpath "$candidate")"
+    if [[ "$resolved" != "$expected_path" ]]; then
+      echo "Benchmark execution must consume its exact experiment-spec snapshot" >&2
+      return 2
+    fi
+    printf '%s\n' "$resolved"
+    return 0
+  fi
+
+  pack_root="$(realpath "$REPO_DIR")"
+  experiment_root="$pack_root/experiments"
+  resolved="$(realpath "$candidate")"
+  case "$resolved" in
+    "$experiment_root"/*)
+      printf '%s\n' "$resolved"
+      ;;
+    *)
+      echo "Experiment spec resolves outside scenario pack experiments: $resolved" >&2
+      return 2
+      ;;
+  esac
+}
+
 resolve_spec() {
   local input="${1:?experiment spec is required}"
   local candidate
 
+  case "/$input/" in
+    *'/../'*)
+      echo "Experiment spec path must not contain parent traversal: $input" >&2
+      return 2
+      ;;
+  esac
+
   if [[ -f "$input" ]]; then
-    realpath "$input"
+    canonical_experiment_spec "$input"
     return 0
   fi
 
   candidate="$REPO_DIR/$input"
   if [[ -f "$candidate" ]]; then
-    realpath "$candidate"
+    canonical_experiment_spec "$candidate"
     return 0
   fi
 
   candidate="$REPO_DIR/experiments/$input"
   if [[ -f "$candidate" ]]; then
-    realpath "$candidate"
+    canonical_experiment_spec "$candidate"
     return 0
   fi
 
   candidate="$REPO_DIR/experiments/$input.env"
   if [[ -f "$candidate" ]]; then
-    realpath "$candidate"
+    canonical_experiment_spec "$candidate"
     return 0
   fi
 
@@ -120,7 +539,7 @@ resolve_spec() {
   done)
 
   if (( ${#matches[@]} == 1 )); then
-    realpath "${matches[0]}"
+    canonical_experiment_spec "${matches[0]}"
     return 0
   fi
 
@@ -159,40 +578,76 @@ load_repo_env() {
 }
 
 load_spec() {
-  EXPERIMENT_SPEC_FILE="$(resolve_spec "$1")"
-  EXPERIMENT_SPEC_ID="${EXPERIMENT_SPEC_FILE#"$REPO_DIR/experiments/"}"
-  EXPERIMENT_SPEC_ID="${EXPERIMENT_SPEC_ID%.env}"
+  local desired_spec_id desired_spec_ref
 
+  EXPERIMENT_SPEC_FILE="$(resolve_spec "$1")"
+  case "${PGWORKBENCH_EXPERIMENT_SPEC_SCOPE:-}" in
+    utility-derived)
+      desired_spec_id="$PGWORKBENCH_DERIVED_EXPERIMENT_ID"
+      desired_spec_ref=".tmp/utility-tests/$(basename "$EXPERIMENT_SPEC_FILE")"
+      ;;
+    "")
+      if benchmark_capsule_active; then
+        desired_spec_id="${PGWORKBENCH_BENCHMARK_EXPERIMENT_SPEC_ID:-}"
+      else
+        desired_spec_id="${EXPERIMENT_SPEC_FILE#"$(realpath "$REPO_DIR")/experiments/"}"
+        desired_spec_id="${desired_spec_id%.env}"
+      fi
+      desired_spec_ref="experiments/$desired_spec_id.env"
+      ;;
+    *)
+      echo "Unsupported PGWORKBENCH_EXPERIMENT_SPEC_SCOPE: ${PGWORKBENCH_EXPERIMENT_SPEC_SCOPE}" >&2
+      return 2
+      ;;
+  esac
+
+  capture_env_overrides
   set -a
   # shellcheck disable=SC1090
   source "$EXPERIMENT_SPEC_FILE"
   set +a
   restore_env_overrides
+
+  if benchmark_capsule_active; then
+    # The env spec is executable shell. Re-check the immutable capability after
+    # sourcing so a spec that rewrites itself cannot pass the pre-source digest
+    # check and then leave different bytes for provenance or later consumers.
+    benchmark_capsule_resolve \
+      "experiments/$desired_spec_id.env" \
+      "${PGWORKBENCH_BENCHMARK_EXPERIMENT_SPEC_DIGEST:-}" >/dev/null
+  fi
+
+  case "${PGWORKBENCH_EXPERIMENT_SPEC_SCOPE:-}" in
+    utility-derived)
+      canonical_utility_derived_spec "$EXPERIMENT_SPEC_FILE" >/dev/null
+      ;;
+    "")
+      validate_standard_spec_capability
+      ;;
+  esac
+  EXPERIMENT_SPEC_ID="$desired_spec_id"
+  EXPERIMENT_SPEC_REF="$desired_spec_ref"
+  EXPERIMENT_SPEC_SHA256="$(sha256_digest_file "$EXPERIMENT_SPEC_FILE")"
+  unset EXPERIMENT_SPEC_DIGEST
+  export EXPERIMENT_SPEC_FILE EXPERIMENT_SPEC_ID EXPERIMENT_SPEC_REF EXPERIMENT_SPEC_SHA256
 }
 
 write_manifest_shell() {
-  {
-    printf 'run_id=%s\n' "$RUN_ID"
-    printf 'started_at=%s\n' "$STARTED_AT"
-    printf 'experiment_spec=%s\n' "$EXPERIMENT_SPEC_FILE"
-    printf 'experiment_spec_id=%s\n' "$EXPERIMENT_SPEC_ID"
-    printf 'experiment_name=%s\n' "${EXPERIMENT_NAME:-$EXPERIMENT_SPEC_ID}"
-    printf 'experiment_topology=%s\n' "${EXPERIMENT_TOPOLOGY:-single}"
-    printf 'experiment_pg_config=%s\n' "${EXPERIMENT_PG_CONFIG:-${PG_CONFIG:-default}}"
-    printf 'profile=%s\n' "${EXPERIMENT_PROFILE:-}"
-    printf 'dataset_spec=%s\n' "${EXPERIMENT_DATASET_SPEC:-}"
-    printf 'profile_size=%s\n' "${EXPERIMENT_PROFILE_SIZE:-${PROFILE_SIZE:-small}}"
-    printf 'workload_spec=%s\n' "${EXPERIMENT_WORKLOAD_SPEC:-}"
-    printf 'background_specs=%s\n' "${EXPERIMENT_BACKGROUND_SPECS:-}"
-    printf 'run_dir=%s\n' "$RUN_DIR"
-  } > "$RUN_DIR/manifest.env"
+	echo "EXPERIMENT_STATE_WRITER=shell is legacy and cannot write the v1 evidence contract; use go" >&2
+	return 2
 }
 
 write_manifest_go() {
+  local spec_id="$EXPERIMENT_SPEC_ID"
+  local spec_ref="${EXPERIMENT_SPEC_REF:-experiments/$EXPERIMENT_SPEC_ID.env}"
+  local run_dir="$RUN_DIR"
+
   RUN_ID="$RUN_ID" \
   STARTED_AT="$STARTED_AT" \
   EXPERIMENT_SPEC_FILE="$EXPERIMENT_SPEC_FILE" \
-  EXPERIMENT_SPEC_ID="$EXPERIMENT_SPEC_ID" \
+	EXPERIMENT_SPEC_ID="$spec_id" \
+	EXPERIMENT_SPEC_REF="$spec_ref" \
+	EXPERIMENT_SPEC_SHA256="${EXPERIMENT_SPEC_SHA256:-}" \
   EXPERIMENT_NAME="${EXPERIMENT_NAME:-}" \
   EXPERIMENT_TOPOLOGY="${EXPERIMENT_TOPOLOGY:-}" \
   EXPERIMENT_PG_CONFIG="${EXPERIMENT_PG_CONFIG:-}" \
@@ -203,8 +658,27 @@ write_manifest_go() {
   PROFILE_SIZE="${PROFILE_SIZE:-}" \
   EXPERIMENT_WORKLOAD_SPEC="${EXPERIMENT_WORKLOAD_SPEC:-}" \
   EXPERIMENT_BACKGROUND_SPECS="${EXPERIMENT_BACKGROUND_SPECS:-}" \
-  RUN_DIR="$RUN_DIR" \
-    run_pgworkbench run write-manifest --run-dir "$RUN_DIR"
+	EXPERIMENT_METRICS="${EXPERIMENT_METRICS:-1}" \
+	PGWORKBENCH_RUNTIME="${PGWORKBENCH_RUNTIME:-docker}" \
+	PGWORKBENCH_ENGINE_VERSION="${PGWORKBENCH_ENGINE_VERSION:-unverified}" \
+	PGWORKBENCH_ENGINE_COMMIT="${PGWORKBENCH_ENGINE_COMMIT:-unverified}" \
+	PGWORKBENCH_PACK_ID="${PGWORKBENCH_PACK_ID:-}" \
+	PGWORKBENCH_PACK_VERSION="${PGWORKBENCH_PACK_VERSION:-}" \
+	PGWORKBENCH_PACK_DIGEST="${PGWORKBENCH_PACK_DIGEST:-}" \
+	PGWORKBENCH_SOURCE_SPEC_KIND="${PGWORKBENCH_SOURCE_SPEC_KIND:-}" \
+	PGWORKBENCH_SOURCE_SPEC_ID="${PGWORKBENCH_SOURCE_SPEC_ID:-}" \
+	PGWORKBENCH_SOURCE_SPEC_REF="${PGWORKBENCH_SOURCE_SPEC_REF:-}" \
+	PGWORKBENCH_SOURCE_SPEC_DIGEST="${PGWORKBENCH_SOURCE_SPEC_DIGEST:-}" \
+	PGWORKBENCH_RUNTIME_FINGERPRINT_STATUS="${PGWORKBENCH_RUNTIME_FINGERPRINT_STATUS:-unavailable}" \
+	PGWORKBENCH_RUNTIME_FINGERPRINT_TARGET="${PGWORKBENCH_RUNTIME_FINGERPRINT_TARGET:-primary}" \
+	PGWORKBENCH_RUNTIME_OS="${PGWORKBENCH_RUNTIME_OS:-}" \
+	PGWORKBENCH_RUNTIME_ARCH="${PGWORKBENCH_RUNTIME_ARCH:-}" \
+	PGWORKBENCH_POSTGRES_SERVER_VERSION_NUM="${PGWORKBENCH_POSTGRES_SERVER_VERSION_NUM:-}" \
+	PGWORKBENCH_POSTGRES_SERVER_MAJOR="${PGWORKBENCH_POSTGRES_SERVER_MAJOR:-}" \
+	PGWORKBENCH_RUNTIME_FINGERPRINT_OBSERVED_AT="${PGWORKBENCH_RUNTIME_FINGERPRINT_OBSERVED_AT:-}" \
+	REPO_DIR="$REPO_DIR" \
+	RUN_DIR="$run_dir" \
+    run_pgworkbench run write-manifest --run-dir "$run_dir"
 }
 
 write_manifest() {
@@ -218,6 +692,78 @@ write_manifest() {
     *)
       echo "Unsupported EXPERIMENT_STATE_WRITER: ${EXPERIMENT_STATE_WRITER:-}" >&2
       exit 2
+      ;;
+  esac
+}
+
+# Publish the smallest independently verifiable failed-run envelope before any
+# benchmark-owned preflight input is sourced. It is replaced by the complete
+# manifest only after the repository/spec guards have passed. Keeping metrics
+# and source provenance disabled here is deliberate: neither exists yet, and a
+# preflight failure must not claim evidence that was never collected.
+write_benchmark_preflight_manifest() {
+  local runtime="${PGWORKBENCH_RUNTIME:-docker}"
+  local spec_file="${EXPERIMENT_SPEC_FILE:-}"
+  local spec_id="${EXPERIMENT_SPEC_ID:-benchmark-preflight}"
+  local spec_ref="${EXPERIMENT_SPEC_REF:-experiments/benchmark-preflight.env}"
+  local spec_digest="${EXPERIMENT_SPEC_SHA256:-}"
+
+  case "$runtime" in
+    docker|native) ;;
+    *) runtime=docker ;;
+  esac
+  if [[ ! "$spec_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    spec_digest=""
+  fi
+
+  EXPERIMENT_SPEC_FILE="$spec_file" \
+  EXPERIMENT_SPEC_ID="$spec_id" \
+  EXPERIMENT_SPEC_REF="$spec_ref" \
+  EXPERIMENT_SPEC_SHA256="$spec_digest" \
+  EXPERIMENT_IDENTITY_DIGEST='' \
+  EXPERIMENT_NAME="benchmark preflight" \
+  EXPERIMENT_TOPOLOGY=single \
+  EXPERIMENT_PG_CONFIG=default \
+  PG_CONFIG=default \
+  EXPERIMENT_PROFILE='' \
+  EXPERIMENT_DATASET_SPEC='' \
+  EXPERIMENT_PROFILE_SIZE=small \
+  PROFILE_SIZE=small \
+  EXPERIMENT_WORKLOAD_SPEC='' \
+  EXPERIMENT_BACKGROUND_SPECS='' \
+  EXPERIMENT_METRICS=0 \
+  EXPERIMENT_METRICS_SAMPLES='' \
+  PGWORKBENCH_RUNTIME="$runtime" \
+  PGWORKBENCH_PACK_ID='' \
+  PGWORKBENCH_PACK_VERSION='' \
+  PGWORKBENCH_PACK_DIGEST='' \
+  PGWORKBENCH_SOURCE_SPEC_KIND='' \
+  PGWORKBENCH_SOURCE_SPEC_ID='' \
+  PGWORKBENCH_SOURCE_SPEC_REF='' \
+  PGWORKBENCH_SOURCE_SPEC_DIGEST='' \
+  PGWORKBENCH_RUNTIME_FINGERPRINT_STATUS=unavailable \
+  PGWORKBENCH_RUNTIME_FINGERPRINT_TARGET=primary \
+  PGWORKBENCH_RUNTIME_OS='' \
+  PGWORKBENCH_RUNTIME_ARCH='' \
+  PGWORKBENCH_POSTGRES_SERVER_VERSION_NUM='' \
+  PGWORKBENCH_POSTGRES_SERVER_MAJOR='' \
+  PGWORKBENCH_RUNTIME_FINGERPRINT_OBSERVED_AT='' \
+    write_manifest_go
+}
+
+validate_state_writer() {
+  case "${EXPERIMENT_STATE_WRITER:-go}" in
+    go|auto)
+      EXPERIMENT_STATE_WRITER=go
+      export EXPERIMENT_STATE_WRITER
+      ;;
+    shell)
+      echo "EXPERIMENT_STATE_WRITER=shell is legacy and cannot write the v1 evidence contract; use go" >&2
+      return 2
+      ;;
+    *)
+      echo "Unsupported EXPERIMENT_STATE_WRITER: ${EXPERIMENT_STATE_WRITER:-}" >&2
+      return 2
       ;;
   esac
 }
@@ -244,11 +790,56 @@ run_inline_sql() {
   "$REPO_DIR/scripts/psql.sh" -c "$sql"
 }
 
+run_true_sql_assertion() {
+  local sql="$1"
+  local output
+  [[ -z "$sql" ]] && return 0
+
+  output="$("$REPO_DIR/scripts/psql.sh" -Atq -c "$sql")" || return "$?"
+  if [[ "$output" != "t" ]]; then
+    echo "Boolean SQL assertion must return exactly one true row; got: ${output:-<empty>}" >&2
+    return 1
+  fi
+}
+
+validate_shell_hook_trust() {
+  local trusted="${EXPERIMENT_TRUSTED_SHELL:-0}"
+  local -a hooks=()
+  local hook_list
+
+  case "$trusted" in
+    0|1) ;;
+    *)
+      echo "EXPERIMENT_TRUSTED_SHELL must be 0 or 1: $trusted" >&2
+      return 2
+      ;;
+  esac
+
+  [[ -n "${EXPERIMENT_BEFORE_SHELL:-}" ]] && hooks+=(EXPERIMENT_BEFORE_SHELL)
+  [[ -n "${EXPERIMENT_AFTER_SHELL:-}" ]] && hooks+=(EXPERIMENT_AFTER_SHELL)
+  [[ -n "${EXPERIMENT_ASSERT_SHELL:-}" ]] && hooks+=(EXPERIMENT_ASSERT_SHELL)
+  (( ${#hooks[@]} == 0 )) && return 0
+
+  hook_list="$(IFS=,; printf '%s' "${hooks[*]}")"
+  if [[ "$trusted" != "1" ]]; then
+    echo "Host-shell hooks require EXPERIMENT_TRUSTED_SHELL=1: $hook_list" >&2
+    return 2
+  fi
+
+  printf 'trusted_shell_hooks=%s\n' "$hook_list"
+}
+
 run_shell_hook() {
-  local command="$1"
+  local field="$1"
+  local command="$2"
   [[ -z "$command" ]] && return 0
+  if [[ "${EXPERIMENT_TRUSTED_SHELL:-0}" != "1" ]]; then
+    echo "$field requires EXPERIMENT_TRUSTED_SHELL=1" >&2
+    return 2
+  fi
+  printf 'trusted_shell_hook=%s\n' "$field"
   export REPO_DIR RUN_ID RUN_DIR EXPERIMENT_SPEC_FILE EXPERIMENT_SPEC_ID
-  bash -lc "$command"
+  BASH_ENV=/dev/null bash --noprofile --norc -c "$command"
 }
 
 run_assertions() {
@@ -256,9 +847,90 @@ run_assertions() {
 
   run_psql_file_list "${EXPERIMENT_ASSERT_SQL_FILES:-}" || status="$?"
   run_inline_sql "${EXPERIMENT_ASSERT_SQL:-}" || status="$?"
-  run_shell_hook "${EXPERIMENT_ASSERT_SHELL:-}" || status="$?"
+  run_true_sql_assertion "${EXPERIMENT_ASSERT_TRUE_SQL:-}" || status="$?"
+  run_shell_hook EXPERIMENT_ASSERT_SHELL "${EXPERIMENT_ASSERT_SHELL:-}" || status="$?"
 
   return "$status"
+}
+
+capture_evidence_files() {
+  local relative source destination current component index
+  local -a components=()
+
+  for relative in ${EXPERIMENT_CAPTURE_FILES:-}; do
+    if [[ "$relative" = /* || "$relative" == *\\* || "$relative" = */ ]]; then
+      echo "Captured evidence path must be portable and repository-relative: $relative" >&2
+      return 2
+    fi
+    case "$relative" in
+      logs/utility/*|.tmp/utility-output/*) ;;
+      *)
+        echo "Captured evidence path must be under logs/utility/ or .tmp/utility-output/: $relative" >&2
+        return 2
+        ;;
+    esac
+    IFS='/' read -r -a components <<< "$relative"
+    current="$REPO_DIR"
+    for ((index = 0; index < ${#components[@]}; index++)); do
+      component="${components[$index]}"
+      if [[ -z "$component" || "$component" = "." || "$component" = ".." || ! "$component" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        echo "Captured evidence path is not portable: $relative" >&2
+        return 2
+      fi
+      current="$current/$component"
+      if [[ -L "$current" ]]; then
+        echo "Captured evidence path must not contain symlinks: $current" >&2
+        return 2
+      fi
+    done
+    source="$current"
+    if [[ ! -f "$source" || ! -s "$source" ]]; then
+      echo "Captured evidence file is missing or empty: $relative" >&2
+      return 1
+    fi
+    destination="$RUN_DIR/artifacts/utility/$relative"
+    mkdir -p "$(dirname "$destination")"
+    if [[ -e "$destination" || -L "$destination" ]]; then
+      echo "Refusing to overwrite captured evidence: $destination" >&2
+      return 2
+    fi
+    cp -p -- "$source" "$destination"
+  done
+}
+
+capture_spec_provenance() {
+  local source destination actual_digest source_kind source_snapshot
+  destination="$RUN_DIR/artifacts/provenance/experiment-spec.env"
+  mkdir -p "$(dirname "$destination")"
+  cp -p -- "$EXPERIMENT_SPEC_FILE" "$destination"
+  actual_digest="$(sha256_digest_file "$destination")"
+  if [[ "$actual_digest" != "$EXPERIMENT_SPEC_SHA256" ]]; then
+    echo "Captured experiment spec digest changed during execution" >&2
+    return 1
+  fi
+  if [[ -n "${PGWORKBENCH_SOURCE_SPEC_REF:-}" ]]; then
+    source_kind="${PGWORKBENCH_SOURCE_SPEC_KIND:-}"
+    case "$source_kind" in
+      utility-test|benchmark)
+        ;;
+      *)
+        echo "Unsupported source spec kind for provenance: $source_kind" >&2
+        return 2
+        ;;
+    esac
+    if benchmark_capsule_active && [[ "$source_kind" = "benchmark" ]]; then
+      source="$(benchmark_capsule_resolve "$PGWORKBENCH_SOURCE_SPEC_REF" "$PGWORKBENCH_SOURCE_SPEC_DIGEST")" || return
+    else
+      source="$REPO_DIR/$PGWORKBENCH_SOURCE_SPEC_REF"
+    fi
+    source_snapshot="$RUN_DIR/artifacts/provenance/source-$source_kind.env"
+    cp -p -- "$source" "$source_snapshot"
+    actual_digest="$(sha256_digest_file "$source_snapshot")"
+    if [[ "$actual_digest" != "$PGWORKBENCH_SOURCE_SPEC_DIGEST" ]]; then
+      echo "Captured source spec digest changed during execution" >&2
+      return 1
+    fi
+  fi
 }
 
 snapshot() {
@@ -274,19 +946,115 @@ start_metrics() {
     return 0
   fi
 
-  METRICS_INTERVAL="${EXPERIMENT_METRICS_INTERVAL:-${METRICS_INTERVAL:-1}}" \
-  METRICS_DURATION="${EXPERIMENT_METRICS_DURATION:-${METRICS_DURATION:-30}}" \
-  METRICS_SAMPLES="${EXPERIMENT_METRICS_SAMPLES:-${METRICS_SAMPLES:-}}" \
-  METRICS_OUT="$RUN_DIR/metrics.csv" \
-    "$REPO_DIR/scripts/sample_metrics.sh" > "$RUN_DIR/metrics.log" 2>&1 &
+  if benchmark_control_v2_active; then
+    local -a sampler_args=(
+      --run-dir "$RUN_DIR"
+      --interval-seconds "${EXPERIMENT_METRICS_INTERVAL:-${METRICS_INTERVAL:-1}}"
+    )
+    if [[ -z "${PGWORKBENCH_BIN:-}" || ! -x "$PGWORKBENCH_BIN" ]]; then
+      echo "Benchmark contract v2 requires the exact executable pgworkbench sampler" >&2
+      return 2
+    fi
+    if [[ -n "${EXPERIMENT_METRICS_SAMPLES:-${METRICS_SAMPLES:-}}" ]]; then
+      sampler_args+=(--samples "${EXPERIMENT_METRICS_SAMPLES:-${METRICS_SAMPLES:-}}")
+    else
+      sampler_args+=(--duration-seconds "${EXPERIMENT_METRICS_DURATION:-${METRICS_DURATION:-30}}")
+    fi
+    "$PGWORKBENCH_BIN" benchmark sample-metrics-v2 "${sampler_args[@]}" > "$RUN_DIR/metrics.log" 2>&1 &
+  else
+    METRICS_INTERVAL="${EXPERIMENT_METRICS_INTERVAL:-${METRICS_INTERVAL:-1}}" \
+    METRICS_DURATION="${EXPERIMENT_METRICS_DURATION:-${METRICS_DURATION:-30}}" \
+    METRICS_SAMPLES="${EXPERIMENT_METRICS_SAMPLES:-${METRICS_SAMPLES:-}}" \
+    METRICS_OUT="$RUN_DIR/metrics.csv" \
+      "$REPO_DIR/scripts/sample_metrics.sh" > "$RUN_DIR/metrics.log" 2>&1 &
+  fi
   METRICS_PID="$!"
 }
 
-stop_metrics() {
-  if [[ -n "${METRICS_PID:-}" ]] && kill -0 "$METRICS_PID" >/dev/null 2>&1; then
-    kill "$METRICS_PID" >/dev/null 2>&1 || true
-    wait "$METRICS_PID" >/dev/null 2>&1 || true
+wait_after_termination() {
+  local pid="${1:?pid is required}"
+  local grace="${PGWORKBENCH_CLEANUP_GRACE_SECONDS:-15}"
+  local watchdog status=0
+
+  if [[ ! "$grace" =~ ^[1-9][0-9]*$ ]]; then
+    grace=15
   fi
+  (
+    # This watchdog is only the shell-side cleanup backstop. The Go runner
+    # independently terminates the entire process group at the same deadline.
+    # Keep the timer as an explicit child and reap it from the signal trap.
+    # Otherwise terminating the watchdog shell can orphan `sleep` in the
+    # experiment process group and make an otherwise successful run fail the
+    # runner's live-descendant check.
+    watchdog_sleep=""
+    stop_watchdog() {
+      if [[ -n "$watchdog_sleep" ]]; then
+        kill "$watchdog_sleep" >/dev/null 2>&1 || true
+        wait "$watchdog_sleep" >/dev/null 2>&1 || true
+      fi
+      exit 0
+    }
+    trap stop_watchdog HUP INT TERM
+    sleep "$grace" &
+    watchdog_sleep="$!"
+    wait "$watchdog_sleep" >/dev/null 2>&1 || exit 0
+    kill -KILL "$pid" >/dev/null 2>&1 || true
+  ) &
+  watchdog="$!"
+  if wait "$pid" >/dev/null 2>&1; then
+    status=0
+  else
+    status="$?"
+  fi
+  kill "$watchdog" >/dev/null 2>&1 || true
+  wait "$watchdog" >/dev/null 2>&1 || true
+  return "$status"
+}
+
+stop_metrics() {
+  local samples="${EXPERIMENT_METRICS_SAMPLES:-${METRICS_SAMPLES:-}}"
+  local status=0
+  local terminated_by_runner=0
+  if [[ -n "${METRICS_PID:-}" ]]; then
+    # A bounded sampler is evidence-producing foreground work: let it finish
+    # and preserve its real exit status. Duration-based sampling is stopped
+    # when the experiment completes because it intentionally has no fixed
+    # sample count.
+    if [[ -z "$samples" ]] && kill -0 "$METRICS_PID" >/dev/null 2>&1; then
+      if kill "$METRICS_PID" >/dev/null 2>&1; then
+        terminated_by_runner=1
+      fi
+    fi
+    if [[ "$terminated_by_runner" = "1" || "${PGWORKBENCH_TERMINATING:-0}" = "1" ]]; then
+      wait_after_termination "$METRICS_PID" || status="$?"
+    else
+      # A fixed-sample metrics collector is declared evidence work and may
+      # legitimately outlive the foreground workload. The outer execution
+      # deadline still bounds this wait.
+      wait "$METRICS_PID" >/dev/null 2>&1 || status="$?"
+    fi
+    # SIGTERM is the expected stop for a still-running sampler. Any other
+    # nonzero status means metrics failed before the experiment completed.
+    if [[ "$status" != "0" ]] && ! [[ "$status" = "143" && "$terminated_by_runner" = "1" ]]; then
+      METRICS_EXIT="$status"
+    fi
+    METRICS_PID=""
+  fi
+}
+
+wait_background_specs() {
+  local pid status
+  for pid in "${BACKGROUND_PIDS[@]}"; do
+    status=0
+    # The runner-owned process-group deadline bounds this intentional wait.
+    # Do not reuse cleanup grace here: a declared background workload may be
+    # longer than cleanup itself.
+    wait "$pid" >/dev/null 2>&1 || status="$?"
+    if [[ "$status" != "0" ]]; then
+      BACKGROUND_EXIT="$status"
+    fi
+  done
+  BACKGROUND_PIDS=()
 }
 
 start_background_specs() {
@@ -299,6 +1067,7 @@ start_background_specs() {
     log="$RUN_DIR/background/$safe.log"
     WORKLOAD_RUN_LOG=0 \
     WORKLOAD_LOG_DIR="$RUN_DIR/background" \
+    PGWORKBENCH_BENCHMARK_PHASE_FILE='' \
     PROFILE_SIZE="${EXPERIMENT_PROFILE_SIZE:-${PROFILE_SIZE:-small}}" \
     PROFILE_SECONDS="${EXPERIMENT_PROFILE_SECONDS:-${PROFILE_SECONDS:-30}}" \
       "$REPO_DIR/scripts/run_workload.sh" run "$spec" > "$log" 2>&1 &
@@ -312,64 +1081,72 @@ start_background_specs() {
 }
 
 stop_background_specs() {
-  local pid
-  for pid in "${BACKGROUND_PIDS[@]:-}"; do
+  local pid status
+  local -A terminated_by_runner=()
+  for pid in "${BACKGROUND_PIDS[@]}"; do
     if kill -0 "$pid" >/dev/null 2>&1; then
-      kill "$pid" >/dev/null 2>&1 || true
+      if kill "$pid" >/dev/null 2>&1; then
+        terminated_by_runner["$pid"]=1
+      fi
     fi
   done
 
-  for pid in "${BACKGROUND_PIDS[@]:-}"; do
-    wait "$pid" >/dev/null 2>&1 || true
+  for pid in "${BACKGROUND_PIDS[@]}"; do
+    status=0
+    wait_after_termination "$pid" || status="$?"
+    # SIGTERM is expected only when this cleanup actually sent it to this PID.
+    # A child that independently exits 143 is still a workload failure.
+    if [[ "$status" != "0" ]] && ! [[ "$status" = "143" && "${terminated_by_runner[$pid]:-0}" = "1" ]]; then
+      BACKGROUND_EXIT="$status"
+    fi
   done
+  BACKGROUND_PIDS=()
+}
+
+verify_finalized_manifest() {
+  local current_digest
+  if [[ -z "${MANIFEST_FINALIZED_DIGEST:-}" ]]; then
+    echo "Finalized manifest digest is unavailable" >&2
+    return 1
+  fi
+  if [[ ! -f "$RUN_DIR/manifest.env" || -L "$RUN_DIR/manifest.env" ]]; then
+    echo "Finalized manifest is missing or not a regular owned file" >&2
+    return 1
+  fi
+  current_digest="$(sha256_digest_file "$RUN_DIR/manifest.env")"
+  if [[ "$current_digest" != "$MANIFEST_FINALIZED_DIGEST" ]]; then
+    echo "Finalized manifest changed during experiment execution" >&2
+    return 1
+  fi
 }
 
 write_verdict_shell() {
-  local status="$1"
-  local message="$2"
-  local finished_at
-  finished_at="$(iso_now)"
-
-  {
-    printf 'status=%s\n' "$status"
-    printf 'message=%s\n' "$message"
-    printf 'finished_at=%s\n' "$finished_at"
-    printf 'workload_exit=%s\n' "${WORKLOAD_EXIT:-0}"
-    printf 'assert_exit=%s\n' "${ASSERT_EXIT:-0}"
-    printf 'scan_exit=%s\n' "${SCAN_EXIT:-0}"
-  } > "$RUN_DIR/verdict.env"
-
-  cat > "$RUN_DIR/verdict.json" <<JSON
-{
-  "run_id": "$(json_escape "$RUN_ID")",
-  "status": "$(json_escape "$status")",
-  "message": "$(json_escape "$message")",
-  "started_at": "$(json_escape "$STARTED_AT")",
-  "finished_at": "$(json_escape "$finished_at")",
-  "experiment_spec": "$(json_escape "$EXPERIMENT_SPEC_ID")",
-  "run_dir": "$(json_escape "$RUN_DIR")",
-  "workload_exit": ${WORKLOAD_EXIT:-0},
-  "assert_exit": ${ASSERT_EXIT:-0},
-  "scan_exit": ${SCAN_EXIT:-0}
-}
-JSON
+	echo "EXPERIMENT_STATE_WRITER=shell is legacy and cannot write the v1 evidence contract; use go" >&2
+	return 2
 }
 
 write_verdict_go() {
   local status="$1"
   local message="$2"
   local finished_at
-  finished_at="$(iso_now)"
+  local run_dir="$RUN_DIR"
+  if [[ -n "${VERDICT_FINISHED_AT:-}" ]]; then
+    finished_at="$VERDICT_FINISHED_AT"
+  elif [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" = "1" ]]; then
+    finished_at="$(benchmark_phase_now)"
+  else
+    finished_at="$(iso_now)"
+  fi
 
   RUN_ID="$RUN_ID" \
   STARTED_AT="$STARTED_AT" \
   EXPERIMENT_SPEC_ID="$EXPERIMENT_SPEC_ID" \
-  RUN_DIR="$RUN_DIR" \
+  RUN_DIR="$run_dir" \
   WORKLOAD_EXIT="${WORKLOAD_EXIT:-0}" \
   ASSERT_EXIT="${ASSERT_EXIT:-0}" \
   SCAN_EXIT="${SCAN_EXIT:-0}" \
     run_pgworkbench run write-verdict \
-      --run-dir "$RUN_DIR" \
+      --run-dir "$run_dir" \
       --status "$status" \
       --message "$message" \
       --finished-at "$finished_at"
@@ -390,42 +1167,490 @@ write_verdict() {
   esac
 }
 
-cleanup() {
-  stop_metrics
-  stop_background_specs
+write_terminal_failed_verdict() {
+  if [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" = "1" ]]; then
+    # The preflight failure may be the rejected state-writer setting itself.
+    # Use the same Go writer that published the minimal manifest instead of
+    # delegating to an already rejected EXPERIMENT_STATE_WRITER value.
+    write_verdict_go failed "$1"
+  else
+    write_verdict failed "$1"
+  fi
 }
 
-run_experiment() {
-  STARTED_AT="$(iso_now)"
-  RUN_ID="${EXPERIMENT_RUN_ID:-$(sanitize_id "${EXPERIMENT_SPEC_ID}")-$(timestamp)}"
-  RUN_DIR="$REPO_DIR/runs/$RUN_ID"
+materialize_benchmark_controls_v2() {
+  benchmark_control_v2_active || return 0
+  if [[ -z "${PGWORKBENCH_BIN:-}" || ! -x "$PGWORKBENCH_BIN" || -z "${RUN_DIR:-}" ]]; then
+    echo "Benchmark contract v2 requires the exact executable control materializer" >&2
+    return 2
+  fi
+  "$PGWORKBENCH_BIN" benchmark materialize-controls-v2 --run-dir "$RUN_DIR" >/dev/null
+}
+
+write_intermediate_failed_verdict() {
+  local reason="${1:?failed verdict reason is required}"
+  if [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" = "1" ]]; then
+    # The terminal handler still owns cleanup and the final lifecycle-bound
+    # control materialization. Publishing a verdict before those gates would
+    # make a transient, incomplete run look immutable.
+    return 0
+  fi
+  write_verdict failed "$reason"
+  VERDICT_WRITTEN=1
+}
+
+terminal_cleanup() {
+  local exit_code="$?"
+  local cleanup_started cleanup_finished cleanup_status="passed" cleanup_reason="" cleanup_exit=0 phase_status=0 controls_exit=0 terminal_failure=0 preflight_passed=0
+  local phase_run_id phase_trial phase_sequence phase_name phase_result
+  trap - EXIT
+  trap - HUP INT TERM
+  if [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" = "1" ]]; then
+    PGWORKBENCH_BENCHMARK_PHASE_FILE="$BENCHMARK_PREFLIGHT_PHASE_FILE"
+    PGWORKBENCH_BENCHMARK_PHASE_MIRROR_FILE="${BENCHMARK_PREFLIGHT_PHASE_MIRROR_FILE:-}"
+    PGWORKBENCH_BENCHMARK_RUN_ID="$BENCHMARK_PREFLIGHT_RUN_ID"
+    PGWORKBENCH_BENCHMARK_TRIAL="$BENCHMARK_PREFLIGHT_TRIAL"
+    RUN_ID="$BENCHMARK_PREFLIGHT_RUN_ID"
+    STARTED_AT="$BENCHMARK_PREFLIGHT_STARTED_AT"
+    PGWORKBENCH_BIN="$BENCHMARK_PREFLIGHT_PGWORKBENCH_BIN"
+    if [[ -n "${BENCHMARK_PREFLIGHT_OWNED_RUN_DIR:-}" ]]; then
+      RUN_DIR="$BENCHMARK_PREFLIGHT_OWNED_RUN_DIR"
+      RUN_DIRECTORY_OWNED=1
+    else
+      RUN_DIR=""
+      RUN_DIRECTORY_OWNED=0
+    fi
+    if [[ -s "$PGWORKBENCH_BENCHMARK_PHASE_FILE" ]] &&
+       IFS=$'\t' read -r phase_run_id phase_trial phase_sequence phase_name phase_result _ < "$PGWORKBENCH_BENCHMARK_PHASE_FILE" &&
+       [[ "$phase_run_id" = "$BENCHMARK_PREFLIGHT_RUN_ID" && "$phase_trial" = "$BENCHMARK_PREFLIGHT_TRIAL" &&
+          "$phase_sequence" = "1" && "$phase_name" = "preflight" && "$phase_result" = "passed" ]]; then
+      preflight_passed=1
+    else
+      EXPERIMENT_SPEC_FILE="${BENCHMARK_PREFLIGHT_SPEC_FILE:-}"
+      EXPERIMENT_SPEC_ID="${BENCHMARK_PREFLIGHT_SPEC_ID:-benchmark-preflight}"
+      EXPERIMENT_SPEC_REF="${BENCHMARK_PREFLIGHT_SPEC_REF:-experiments/benchmark-preflight.env}"
+      EXPERIMENT_SPEC_SHA256="${BENCHMARK_PREFLIGHT_SPEC_SHA256:-}"
+      METRICS_PID=""
+      BACKGROUND_PIDS=()
+      EXPERIMENT_WORKLOAD_LIFECYCLE_STARTED=0
+    fi
+  fi
+  if [[ "${BENCHMARK_TERMINAL_CLEANUP_DONE:-0}" != "1" ]]; then
+    if ! benchmark_phase_complete_before_cleanup "$exit_code"; then
+      phase_status=1
+    elif [[ "${BENCHMARK_PHASE_BACKFILLED_FAILURE:-0}" = "1" ]]; then
+      phase_status=1
+    fi
+    if [[ "$phase_status" != "0" ]]; then
+      terminal_failure=1
+    fi
+    if [[ "$exit_code" = "0" && "$phase_status" != "0" ]]; then
+      exit_code=1
+    fi
+    cleanup_started="$(benchmark_phase_now)"
+    cleanup || {
+      cleanup_exit="$?"
+      cleanup_status="failed"
+      cleanup_reason="cleanup exited $cleanup_exit"
+    }
+    cleanup_finished="$(benchmark_phase_now)"
+    if ! benchmark_phase_append 11 cleanup "$cleanup_status" "$cleanup_started" "$cleanup_finished" "$cleanup_reason"; then
+      cleanup_status=failed
+    fi
+    if [[ "${RUN_DIRECTORY_OWNED:-0}" = "1" && -n "${RUN_DIR:-}" ]]; then
+      if materialize_benchmark_controls_v2; then
+        :
+      else
+        controls_exit="$?"
+        terminal_failure=1
+        if [[ "$exit_code" = "0" ]]; then
+          exit_code="$controls_exit"
+        fi
+      fi
+    fi
+    if [[ "$cleanup_status" = "failed" ]]; then
+      terminal_failure=1
+    fi
+    if [[ "$exit_code" = "0" && "$cleanup_status" = "failed" ]]; then
+      exit_code=1
+    fi
+  else
+    cleanup_finished="$BENCHMARK_TERMINAL_CLEANUP_FINISHED_AT"
+  fi
+  VERDICT_FINISHED_AT="$cleanup_finished"
+  if [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" = "1" && "$preflight_passed" != "1" &&
+        "${RUN_DIRECTORY_OWNED:-0}" = "1" && -n "${RUN_DIR:-}" ]]; then
+    # A full manifest may have been partially advanced before a preflight
+    # operation failed. Restore the conservative preflight envelope so the
+    # terminal artifact remains truthful and independently verifiable.
+    set +e
+    write_benchmark_preflight_manifest
+    set -e
+  fi
+  if [[ "$terminal_failure" = "1" && "${VERDICT_WRITTEN:-0}" = "1" &&
+        "${RUN_DIRECTORY_OWNED:-0}" = "1" && -n "${RUN_DIR:-}" && -f "$RUN_DIR/manifest.env" ]]; then
+    set +e
+    WORKLOAD_EXIT="$exit_code"
+    write_terminal_failed_verdict "benchmark lifecycle or cleanup failed (runner exit $exit_code)"
+    set -e
+  fi
+  if [[ "${VERDICT_WRITTEN:-0}" != "1" && "${RUN_DIRECTORY_OWNED:-0}" = "1" &&
+        -n "${RUN_DIR:-}" && -f "$RUN_DIR/manifest.env" ]]; then
+    set +e
+    WORKLOAD_EXIT="${WORKLOAD_EXIT:-$exit_code}"
+    if [[ "$WORKLOAD_EXIT" = "0" ]]; then
+      WORKLOAD_EXIT="$exit_code"
+    fi
+    write_terminal_failed_verdict "experiment aborted before terminal verdict (runner exit $exit_code)"
+    set -e
+  elif [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" != "1" && "${RUN_DIRECTORY_OWNED:-0}" = "1" &&
+          -n "${RUN_DIR:-}" && ! -e "$RUN_DIR/manifest.env" && ! -L "$RUN_DIR/manifest.env" ]]; then
+    # A state-writer failure is still pre-publication: remove only the empty
+    # directories this invocation created so it cannot masquerade as a run
+    # without a terminal verdict. rmdir is deliberately fail-closed and never
+    # removes unexpected content.
+    rmdir "$RUN_DIR/hooks" "$RUN_DIR/snapshots" "$RUN_DIR/artifacts" "$RUN_DIR" >/dev/null 2>&1 || true
+  fi
+  exit "$exit_code"
+}
+
+handle_termination() {
+  local signal="${1:?signal is required}"
+  local exit_code=143
+  case "$signal" in
+    INT) exit_code=130 ;;
+    HUP) exit_code=129 ;;
+  esac
+  trap - HUP INT TERM
+  PGWORKBENCH_TERMINATING=1
+  if [[ "${WORKLOAD_EXIT:-0}" = "0" ]]; then
+    WORKLOAD_EXIT="$exit_code"
+  fi
+  echo "Experiment runner received $signal; beginning bounded terminal cleanup" >&2
+  exit "$exit_code"
+}
+
+experiment_workload_action() {
+  local action="${1:?workload lifecycle action is required}"
+  local benchmark_prepared=0
+
+  [[ -n "${EXPERIMENT_WORKLOAD_SPEC:-}" ]] || return 0
+  if [[ -n "${PGWORKBENCH_BENCHMARK_PHASE_FILE:-}" ]]; then
+    benchmark_prepared=1
+  fi
+  WORKLOAD_LOG_FILE="$RUN_DIR/workload.log" \
+  WORKLOAD_LOG_DIR="$RUN_DIR" \
+  PGBENCH_RESULT_FILE="${PGBENCH_RESULT_FILE:-$RUN_DIR/driver/pgbench-summary.log}" \
+  PGBENCH_RAW_LOG_DIR="${PGBENCH_RAW_LOG_DIR:-$RUN_DIR/driver/pgbench-raw}" \
+  PGWORKBENCH_BENCHMARK_PREPARED="$benchmark_prepared" \
+  PGWORKBENCH_BENCHMARK_CONTROL_RUN_DIR="$RUN_DIR" \
+  PROFILE_SIZE="${EXPERIMENT_PROFILE_SIZE:-${PROFILE_SIZE:-small}}" \
+  PROFILE_SECONDS="${EXPERIMENT_PROFILE_SECONDS:-${PROFILE_SECONDS:-30}}" \
+    "$REPO_DIR/scripts/run_workload.sh" "$action" "$EXPERIMENT_WORKLOAD_SPEC"
+}
+
+cleanup() {
+  local status=0 current_status=0
+
+  stop_metrics || status="$?"
+  stop_background_specs || status="$?"
+  if [[ "${EXPERIMENT_WORKLOAD_LIFECYCLE_STARTED:-0}" = "1" &&
+        -n "${RUN_DIR:-}" && -n "${EXPERIMENT_WORKLOAD_SPEC:-}" ]]; then
+    current_status=0
+    experiment_workload_action cleanup || current_status="$?"
+    if [[ "$current_status" != "0" ]]; then
+      status="$current_status"
+    fi
+  fi
+  return "$status"
+}
+
+runtime_fingerprint_target() {
+	case "$1" in
+		multi-version-upgrade)
+			printf '%s\n' upgrade-new
+			;;
+		*)
+			printf '%s\n' primary
+			;;
+	esac
+}
+
+capture_runtime_fingerprint() {
+	local topology="$1"
+	local psql_script version_num numeric_version major
+
+	psql_script="$REPO_DIR/scripts/psql.sh"
+	if [[ "$topology" = "multi-version-upgrade" ]]; then
+		psql_script="$REPO_DIR/scripts/psql_upgrade_new.sh"
+	fi
+
+	if ! version_num="$("$psql_script" -Atq -c "SHOW server_version_num")"; then
+		echo "Failed to observe PostgreSQL server_version_num at fingerprint target ${PGWORKBENCH_RUNTIME_FINGERPRINT_TARGET}" >&2
+		return 1
+	fi
+	if [[ ! "$version_num" =~ ^[0-9]+$ ]]; then
+		echo "Invalid PostgreSQL server_version_num observation: $version_num" >&2
+		return 1
+	fi
+
+	numeric_version=$((10#$version_num))
+	if (( numeric_version < 10000 )); then
+		echo "Invalid PostgreSQL server_version_num observation: $version_num" >&2
+		return 1
+	fi
+	if (( numeric_version >= 100000 )); then
+		major="$((numeric_version / 10000))"
+	else
+		major="$((numeric_version / 10000)).$(((numeric_version / 100) % 100))"
+	fi
+
+	PGWORKBENCH_RUNTIME_FINGERPRINT_STATUS=observed
+	PGWORKBENCH_RUNTIME_OS=
+	PGWORKBENCH_RUNTIME_ARCH=
+	PGWORKBENCH_POSTGRES_SERVER_VERSION_NUM="$version_num"
+	PGWORKBENCH_POSTGRES_SERVER_MAJOR="$major"
+	PGWORKBENCH_RUNTIME_FINGERPRINT_OBSERVED_AT="$(iso_now)"
+	write_manifest
+}
+
+benchmark_preflight_requested() {
+  [[ -n "${PGWORKBENCH_BENCHMARK_PHASE_FILE:-}" && -n "${EXPERIMENT_RUN_ID:-}" ]]
+}
+
+seed_benchmark_preflight_spec() {
+  local input="${1:-}"
+  local pack_root experiment_root candidate="" resolved relative
+
+  pack_root="$(realpath "$REPO_DIR")"
+  experiment_root="$pack_root/experiments"
+  case "$input" in
+    /*) candidate="$input" ;;
+    experiments/*) candidate="$pack_root/$input" ;;
+    *.env) candidate="$experiment_root/$input" ;;
+    "") candidate="" ;;
+    *) candidate="$experiment_root/$input.env" ;;
+  esac
+
+  EXPERIMENT_SPEC_FILE=""
+  EXPERIMENT_SPEC_ID=benchmark-preflight
+  EXPERIMENT_SPEC_REF=experiments/benchmark-preflight.env
+  if [[ -n "$candidate" && ! -L "$candidate" && -f "$candidate" ]]; then
+    resolved="$(realpath "$candidate")"
+    case "$resolved" in
+      "$experiment_root"/*)
+        relative="${resolved#"$experiment_root/"}"
+        if [[ "$relative" = *.env && "$relative" != ".env" ]]; then
+          EXPERIMENT_SPEC_FILE="$resolved"
+          EXPERIMENT_SPEC_ID="${relative%.env}"
+          EXPERIMENT_SPEC_REF="experiments/$relative"
+        fi
+        ;;
+    esac
+  fi
+  export EXPERIMENT_SPEC_FILE EXPERIMENT_SPEC_ID EXPERIMENT_SPEC_REF
+}
+
+begin_benchmark_preflight() {
+  local input="${1:-}"
+  local journal="${PGWORKBENCH_BENCHMARK_PHASE_FILE:-}"
+  local primary_journal
+
+  benchmark_preflight_requested || return 0
+  BENCHMARK_PREFLIGHT_ACTIVE=1
+  readonly BENCHMARK_PREFLIGHT_ACTIVE
+  RUN_DIRECTORY_OWNED=0
+  RUN_DIR=""
   METRICS_PID=""
   BACKGROUND_PIDS=()
   BACKGROUND_LOGS=()
+  BACKGROUND_EXIT=0
+  METRICS_EXIT=0
+  MANIFEST_FINALIZED_DIGEST=
   WORKLOAD_EXIT=0
   ASSERT_EXIT=0
   SCAN_EXIT=0
+  VERDICT_WRITTEN=0
+  PGWORKBENCH_RUNTIME_FINGERPRINT_STATUS=unavailable
+  PGWORKBENCH_RUNTIME_FINGERPRINT_TARGET=primary
+  PGWORKBENCH_RUNTIME_OS=
+  PGWORKBENCH_RUNTIME_ARCH=
+  PGWORKBENCH_POSTGRES_SERVER_VERSION_NUM=
+  PGWORKBENCH_POSTGRES_SERVER_MAJOR=
+  PGWORKBENCH_RUNTIME_FINGERPRINT_OBSERVED_AT=
 
-  mkdir -p "$RUN_DIR" "$RUN_DIR/hooks" "$RUN_DIR/snapshots" "$RUN_DIR/artifacts"
+  BENCHMARK_PREFLIGHT_PHASE_FILE="$journal"
+  BENCHMARK_PREFLIGHT_PHASE_MIRROR_FILE=""
+  BENCHMARK_PREFLIGHT_RUN_ID="$EXPERIMENT_RUN_ID"
+  BENCHMARK_PREFLIGHT_TRIAL="${PGWORKBENCH_BENCHMARK_TRIAL:-}"
+  BENCHMARK_PREFLIGHT_PGWORKBENCH_BIN="${PGWORKBENCH_BIN:-}"
+  BENCHMARK_PREFLIGHT_STARTED_AT="$(benchmark_phase_now)"
+  readonly BENCHMARK_PREFLIGHT_RUN_ID BENCHMARK_PREFLIGHT_TRIAL BENCHMARK_PREFLIGHT_PGWORKBENCH_BIN BENCHMARK_PREFLIGHT_STARTED_AT
+
+  trap terminal_cleanup EXIT
+  trap 'handle_termination HUP' HUP
+  trap 'handle_termination INT' INT
+  trap 'handle_termination TERM' TERM
+
+  if [[ "$journal" != /* || -L "$journal" || ! -f "$journal" || -s "$journal" ]]; then
+    echo "Benchmark phase journal must be an empty regular absolute file: $journal" >&2
+    return 2
+  fi
+  STARTED_AT="$BENCHMARK_PREFLIGHT_STARTED_AT"
+  RUN_ID="$BENCHMARK_PREFLIGHT_RUN_ID"
+  if [[ -z "$RUN_ID" || "$RUN_ID" = "." || "$RUN_ID" = ".." || "$(sanitize_id "$RUN_ID")" != "$RUN_ID" || ${#RUN_ID} -gt 200 ]]; then
+    echo "Invalid EXPERIMENT_RUN_ID: $RUN_ID" >&2
+    return 2
+  fi
+  if [[ "${PGWORKBENCH_BENCHMARK_RUN_ID:-}" != "$RUN_ID" || ! "$BENCHMARK_PREFLIGHT_TRIAL" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Benchmark phase journal run/trial binding is missing or inconsistent" >&2
+    return 2
+  fi
+
+  seed_benchmark_preflight_spec "$input"
+  BENCHMARK_PREFLIGHT_SPEC_FILE="$EXPERIMENT_SPEC_FILE"
+  BENCHMARK_PREFLIGHT_SPEC_ID="$EXPERIMENT_SPEC_ID"
+  BENCHMARK_PREFLIGHT_SPEC_REF="$EXPERIMENT_SPEC_REF"
+  BENCHMARK_PREFLIGHT_SPEC_SHA256="${EXPERIMENT_SPEC_SHA256:-}"
+  readonly BENCHMARK_PREFLIGHT_SPEC_FILE BENCHMARK_PREFLIGHT_SPEC_ID BENCHMARK_PREFLIGHT_SPEC_REF BENCHMARK_PREFLIGHT_SPEC_SHA256
+  prepare_runs_root
+  RUN_DIR="$RUNS_ROOT/$RUN_ID"
+  if [[ -e "$RUN_DIR" || -L "$RUN_DIR" ]]; then
+    echo "Refusing to overwrite existing immutable run: $RUN_DIR" >&2
+    return 2
+  fi
+  mkdir "$RUN_DIR"
+  BENCHMARK_PREFLIGHT_OWNED_RUN_DIR="$RUN_DIR"
+  readonly BENCHMARK_PREFLIGHT_OWNED_RUN_DIR
+  RUN_DIRECTORY_OWNED=1
+  mkdir "$RUN_DIR/hooks" "$RUN_DIR/snapshots" "$RUN_DIR/artifacts"
+  mkdir "$RUN_DIR/artifacts/benchmark"
+  if benchmark_control_v2_active; then
+    mkdir "$RUN_DIR/artifacts/benchmark/controls"
+  fi
+  primary_journal="$RUN_DIR/artifacts/benchmark/phases.tsv"
+  mv -- "$journal" "$primary_journal"
+  ( set -o noclobber; umask 077; : > "$journal" )
+  BENCHMARK_PREFLIGHT_PHASE_FILE="$primary_journal"
+  BENCHMARK_PREFLIGHT_PHASE_MIRROR_FILE="$journal"
+  PGWORKBENCH_BENCHMARK_PHASE_FILE="$primary_journal"
+  PGWORKBENCH_BENCHMARK_PHASE_MIRROR_FILE="$journal"
+  export PGWORKBENCH_BENCHMARK_PHASE_FILE PGWORKBENCH_BENCHMARK_PHASE_MIRROR_FILE
+  resolve_engine_identity
+  write_benchmark_preflight_manifest
+}
+
+restore_benchmark_preflight_ownership() {
+  [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" = "1" ]] || return 0
+  PGWORKBENCH_BENCHMARK_PHASE_FILE="$BENCHMARK_PREFLIGHT_PHASE_FILE"
+  PGWORKBENCH_BENCHMARK_PHASE_MIRROR_FILE="${BENCHMARK_PREFLIGHT_PHASE_MIRROR_FILE:-}"
+  PGWORKBENCH_BENCHMARK_RUN_ID="$BENCHMARK_PREFLIGHT_RUN_ID"
+  PGWORKBENCH_BENCHMARK_TRIAL="$BENCHMARK_PREFLIGHT_TRIAL"
+  PGWORKBENCH_BIN="$BENCHMARK_PREFLIGHT_PGWORKBENCH_BIN"
+  RUN_ID="$BENCHMARK_PREFLIGHT_RUN_ID"
+  STARTED_AT="$BENCHMARK_PREFLIGHT_STARTED_AT"
+  RUN_DIR="$BENCHMARK_PREFLIGHT_OWNED_RUN_DIR"
+  RUN_DIRECTORY_OWNED=1
+  export PGWORKBENCH_BENCHMARK_PHASE_FILE PGWORKBENCH_BENCHMARK_PHASE_MIRROR_FILE PGWORKBENCH_BENCHMARK_RUN_ID PGWORKBENCH_BENCHMARK_TRIAL PGWORKBENCH_BIN RUN_ID STARTED_AT RUN_DIR
+}
+
+run_selected_experiment() {
+  local input="${1:-}"
+
+  begin_benchmark_preflight "$input"
+  if [[ -z "$input" ]]; then
+    echo "experiment spec is required" >&2
+    return 2
+  fi
+  load_repo_env
+  restore_benchmark_preflight_ownership
+  load_spec "$input"
+  restore_benchmark_preflight_ownership
+  run_experiment
+}
+
+run_experiment() {
+  local topology="${EXPERIMENT_TOPOLOGY:-${TOPOLOGY:-single}}"
+  local -a scan_paths=()
+  local phase_started phase_finished phase_status phase_reason prior_failed_phase
+  local cleanup_started cleanup_finished cleanup_status cleanup_reason cleanup_exit controls_exit
+
+  validate_state_writer
+  activate_experiment_target_guard
+  reject_experiment_target_overrides
+  validate_shell_hook_trust
+  if [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" != "1" ]]; then
+    STARTED_AT="$(iso_now)"
+    RUN_ID="${EXPERIMENT_RUN_ID:-$(sanitize_id "${EXPERIMENT_SPEC_ID}")-$(timestamp)}"
+    if [[ -z "$RUN_ID" || "$RUN_ID" = "." || "$RUN_ID" = ".." || "$(sanitize_id "$RUN_ID")" != "$RUN_ID" || ${#RUN_ID} -gt 200 ]]; then
+      echo "Invalid EXPERIMENT_RUN_ID: $RUN_ID" >&2
+      return 2
+    fi
+    prepare_runs_root
+    RUN_DIR="$RUNS_ROOT/$RUN_ID"
+    METRICS_PID=""
+    BACKGROUND_PIDS=()
+    BACKGROUND_LOGS=()
+    BACKGROUND_EXIT=0
+    METRICS_EXIT=0
+    MANIFEST_FINALIZED_DIGEST=
+    WORKLOAD_EXIT=0
+    ASSERT_EXIT=0
+    SCAN_EXIT=0
+    VERDICT_WRITTEN=0
+    PGWORKBENCH_RUNTIME_FINGERPRINT_STATUS=unavailable
+    PGWORKBENCH_RUNTIME_OS=
+    PGWORKBENCH_RUNTIME_ARCH=
+    PGWORKBENCH_POSTGRES_SERVER_VERSION_NUM=
+    PGWORKBENCH_POSTGRES_SERVER_MAJOR=
+    PGWORKBENCH_RUNTIME_FINGERPRINT_OBSERVED_AT=
+    if [[ -e "$RUN_DIR" || -L "$RUN_DIR" ]]; then
+      echo "Refusing to overwrite existing immutable run: $RUN_DIR" >&2
+      return 2
+    fi
+    mkdir -p "$RUN_DIR" "$RUN_DIR/hooks" "$RUN_DIR/snapshots" "$RUN_DIR/artifacts"
+    RUN_DIRECTORY_OWNED=1
+    trap terminal_cleanup EXIT
+  fi
+  PGWORKBENCH_RUNTIME_FINGERPRINT_TARGET="$(runtime_fingerprint_target "$topology")"
+  resolve_engine_identity
+  trap 'handle_termination HUP' HUP
+  trap 'handle_termination INT' INT
+  trap 'handle_termination TERM' TERM
   write_manifest
+  capture_spec_provenance
+  benchmark_control_prepare_directory
 
-  exec > >(tee -a "$RUN_DIR/stdout.log") 2>&1
-  trap cleanup EXIT
+  # Keep the canonical transcript without relying on Bash process substitution
+  # or /dev/fd. Some macOS sandboxes reject opening the synthetic descriptor;
+  # direct append works for both native and Docker runtimes.
+  exec >> "$RUN_DIR/stdout.log" 2>&1
 
   echo "run_id=$RUN_ID"
   echo "run_dir=$RUN_DIR"
   echo "started_at=$STARTED_AT"
 
-  local topology="${EXPERIMENT_TOPOLOGY:-${TOPOLOGY:-single}}"
-
-  if [[ "${EXPERIMENT_DOCKER_RESET:-0}" = "1" ]]; then
-    make -C "$REPO_DIR" docker-reset TOPOLOGY="$topology" PG_CONFIG="${EXPERIMENT_PG_CONFIG:-${PG_CONFIG:-default}}"
-  else
-    make -C "$REPO_DIR" docker-up TOPOLOGY="$topology"
-    if [[ -n "${EXPERIMENT_PG_CONFIG:-}" && "${EXPERIMENT_PG_CONFIG:-default}" != "default" ]]; then
-      "$REPO_DIR/scripts/apply_pg_config.sh" "$EXPERIMENT_PG_CONFIG"
-    fi
+  if [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" = "1" ]]; then
+    phase_finished="$(benchmark_phase_now)"
+    benchmark_phase_append 1 preflight passed "$BENCHMARK_PREFLIGHT_STARTED_AT" "$phase_finished" ""
   fi
+  phase_started="$(benchmark_phase_now)"
+  if [[ "${EXPERIMENT_RUNTIME_RESET:-${EXPERIMENT_DOCKER_RESET:-0}}" = "1" ]]; then
+	PGWORKBENCH_RUNTIME="${PGWORKBENCH_RUNTIME:-docker}" \
+	  "$REPO_DIR/scripts/runtime.sh" reset "$topology"
+  else
+	PGWORKBENCH_RUNTIME="${PGWORKBENCH_RUNTIME:-docker}" \
+	  "$REPO_DIR/scripts/runtime.sh" up "$topology"
+  fi
+	capture_runtime_fingerprint "$topology"
+	MANIFEST_FINALIZED_DIGEST="$(sha256_digest_file "$RUN_DIR/manifest.env")"
+	TOPOLOGY="$topology" PGWORKBENCH_RUNTIME="${PGWORKBENCH_RUNTIME:-docker}" \
+	  "$REPO_DIR/scripts/apply_pg_config.sh" "${EXPERIMENT_PG_CONFIG:-${PG_CONFIG:-default}}"
+	capture_effective_pg_settings
+	# Applying a profile restarts PostgreSQL. Enforce and inspect the final
+	# server/driver container only after that restart so the recorded limits
+	# cover the process that actually executes pgbench.
+	benchmark_control_enforce_resource_budget
 
   if [[ -n "${EXPERIMENT_DATASET_SPEC:-}" ]]; then
     DATASET_SIZE="${EXPERIMENT_DATASET_SIZE:-${DATASET_SIZE:-small}}" \
@@ -448,35 +1673,67 @@ run_experiment() {
 
   run_psql_file_list "${EXPERIMENT_BEFORE_SQL_FILES:-}"
   run_inline_sql "${EXPERIMENT_BEFORE_SQL:-}"
-  run_shell_hook "${EXPERIMENT_BEFORE_SHELL:-}"
+  run_shell_hook EXPERIMENT_BEFORE_SHELL "${EXPERIMENT_BEFORE_SHELL:-}"
+  if [[ -n "${PGWORKBENCH_BENCHMARK_PHASE_FILE:-}" && -n "${EXPERIMENT_WORKLOAD_SPEC:-}" ]]; then
+    EXPERIMENT_WORKLOAD_LIFECYCLE_STARTED=1
+    WORKLOAD_RUN_LOG=0 experiment_workload_action prepare
+  fi
+  benchmark_control_run_statistics_reset before-trial
+  benchmark_control_prepare_statistics_none
+  phase_finished="$(benchmark_phase_now)"
+  benchmark_phase_append 2 prepare passed "$phase_started" "$phase_finished" ""
 
+  phase_started="$(benchmark_phase_now)"
   snapshot before
+  benchmark_control_prepare_overhead_unquantified
   start_metrics
   start_background_specs
+  phase_finished="$(benchmark_phase_now)"
+  if [[ -n "${EXPERIMENT_BACKGROUND_SPECS:-}" || "${EXPERIMENT_BACKGROUND_WARMUP:-0}" != "0" ]]; then
+    benchmark_phase_append 3 stabilize passed "$phase_started" "$phase_finished" ""
+  else
+    benchmark_phase_append 3 stabilize skipped "$phase_started" "$phase_finished" "no stabilization gate declared"
+  fi
 
   if [[ -n "${EXPERIMENT_WORKLOAD_SPEC:-}" ]]; then
+    EXPERIMENT_WORKLOAD_LIFECYCLE_STARTED=1
     set +e
-    WORKLOAD_LOG_FILE="$RUN_DIR/workload.log" \
-    WORKLOAD_LOG_DIR="$RUN_DIR" \
-    PROFILE_SIZE="${EXPERIMENT_PROFILE_SIZE:-${PROFILE_SIZE:-small}}" \
-    PROFILE_SECONDS="${EXPERIMENT_PROFILE_SECONDS:-${PROFILE_SECONDS:-30}}" \
-      "$REPO_DIR/scripts/run_workload.sh" run "$EXPERIMENT_WORKLOAD_SPEC"
+    experiment_workload_action run
     WORKLOAD_EXIT="$?"
     set -e
   fi
 
+  phase_started="$(benchmark_phase_now)"
   if [[ "${EXPERIMENT_BACKGROUND_WAIT:-0}" = "1" ]]; then
-    for pid in "${BACKGROUND_PIDS[@]:-}"; do
-      wait "$pid" || true
-    done
+    wait_background_specs
   fi
 
   stop_background_specs
   stop_metrics
+  phase_finished="$(benchmark_phase_now)"
+  phase_status=passed
+  phase_reason=""
+  prior_failed_phase="$(benchmark_phase_first_failure_name_or_empty)"
+  if [[ -n "$prior_failed_phase" ]]; then
+    phase_status=skipped
+    phase_reason="not reached after failed $prior_failed_phase phase"
+  elif [[ "$BACKGROUND_EXIT" != "0" || "$METRICS_EXIT" != "0" ]]; then
+    phase_status=failed
+    phase_reason="background or metrics collector failed (background=$BACKGROUND_EXIT metrics=$METRICS_EXIT)"
+  fi
+  benchmark_phase_append 8 cooldown "$phase_status" "$phase_started" "$phase_finished" "$phase_reason"
 
+  if [[ "$BACKGROUND_EXIT" != "0" && "$WORKLOAD_EXIT" = "0" ]]; then
+    WORKLOAD_EXIT="$BACKGROUND_EXIT"
+  fi
+  if [[ "$METRICS_EXIT" != "0" && "$WORKLOAD_EXIT" = "0" ]]; then
+    WORKLOAD_EXIT="$METRICS_EXIT"
+  fi
+
+  phase_started="$(benchmark_phase_now)"
   run_psql_file_list "${EXPERIMENT_AFTER_SQL_FILES:-}"
   run_inline_sql "${EXPERIMENT_AFTER_SQL:-}"
-  run_shell_hook "${EXPERIMENT_AFTER_SHELL:-}"
+  run_shell_hook EXPERIMENT_AFTER_SHELL "${EXPERIMENT_AFTER_SHELL:-}"
 
   snapshot after
 
@@ -484,28 +1741,148 @@ run_experiment() {
   run_assertions
   ASSERT_EXIT="$?"
   set -e
+  phase_finished="$(benchmark_phase_now)"
+  phase_status=passed
+  phase_reason=""
+  prior_failed_phase="$(benchmark_phase_first_failure_name_or_empty)"
+  if [[ -n "$prior_failed_phase" ]]; then
+    phase_status=skipped
+    phase_reason="not reached after failed $prior_failed_phase phase"
+  elif [[ "$ASSERT_EXIT" != "0" ]]; then
+    phase_status=failed
+    phase_reason="assertions exited $ASSERT_EXIT"
+  fi
+  benchmark_phase_append 9 validate "$phase_status" "$phase_started" "$phase_finished" "$phase_reason"
+
+  phase_started="$(benchmark_phase_now)"
+  prior_failed_phase="$(benchmark_phase_first_failure_name_or_empty)"
+  if [[ -z "$prior_failed_phase" && "$WORKLOAD_EXIT" = "0" && "$ASSERT_EXIT" = "0" && -n "${EXPERIMENT_WORKLOAD_SPEC:-}" ]]; then
+    set +e
+    experiment_workload_action collect
+    WORKLOAD_COLLECT_EXIT="$?"
+    set -e
+    if [[ "$WORKLOAD_COLLECT_EXIT" != "0" ]]; then
+      WORKLOAD_EXIT="$WORKLOAD_COLLECT_EXIT"
+    fi
+  fi
+  if [[ "$ASSERT_EXIT" = "0" ]]; then
+    set +e
+    capture_evidence_files
+    ASSERT_EXIT="$?"
+    set -e
+  fi
 
   set +e
-  "$REPO_DIR/scripts/scan_pg_failures.sh" "$RUN_DIR" ${EXPERIMENT_SCAN_PATHS:-} > "$RUN_DIR/scan.log" 2>&1
+  read -r -a scan_paths <<< "${EXPERIMENT_SCAN_PATHS:-}"
+  "$REPO_DIR/scripts/scan_pg_failures.sh" "$RUN_DIR" "${scan_paths[@]}" > "$RUN_DIR/scan.log" 2>&1
   SCAN_EXIT="$?"
   set -e
+  if ! verify_finalized_manifest; then
+    if [[ "$ASSERT_EXIT" = "0" ]]; then
+      ASSERT_EXIT=1
+    fi
+    SCAN_EXIT="${SCAN_EXIT:-0}"
+  fi
+
+  phase_finished="$(benchmark_phase_now)"
+  prior_failed_phase="$(benchmark_phase_first_failure_name_or_empty)"
 
   if [[ "$WORKLOAD_EXIT" != "0" ]]; then
-    write_verdict failed "workload failed"
+    if [[ -n "$prior_failed_phase" ]]; then
+      benchmark_phase_append 10 collect skipped "$phase_started" "$phase_finished" "not reached after failed $prior_failed_phase phase"
+    else
+      benchmark_phase_append 10 collect failed "$phase_started" "$phase_finished" "workload or post-measure artifact collection failed"
+    fi
+    write_intermediate_failed_verdict "workload failed"
     exit "$WORKLOAD_EXIT"
   fi
 
   if [[ "$ASSERT_EXIT" != "0" ]]; then
-    write_verdict failed "assertion failed"
+    if [[ -n "$prior_failed_phase" ]]; then
+      benchmark_phase_append 10 collect skipped "$phase_started" "$phase_finished" "not reached after failed $prior_failed_phase phase"
+    else
+      benchmark_phase_append 10 collect failed "$phase_started" "$phase_finished" "assertion or manifest validation failed"
+    fi
+    write_intermediate_failed_verdict "assertion failed"
     exit "$ASSERT_EXIT"
   fi
 
   if [[ "$SCAN_EXIT" != "0" ]]; then
-    write_verdict failed "failure evidence found"
+    if [[ -n "$prior_failed_phase" ]]; then
+      benchmark_phase_append 10 collect skipped "$phase_started" "$phase_finished" "not reached after failed $prior_failed_phase phase"
+    else
+      benchmark_phase_append 10 collect failed "$phase_started" "$phase_finished" "failure scan found evidence"
+    fi
+    write_intermediate_failed_verdict "failure evidence found"
     exit "$SCAN_EXIT"
   fi
 
-  write_verdict passed "experiment passed"
+  if [[ -n "$prior_failed_phase" ]]; then
+    benchmark_phase_append 10 collect skipped "$phase_started" "$phase_finished" "not reached after failed $prior_failed_phase phase"
+    write_intermediate_failed_verdict "benchmark lifecycle failed"
+    exit 1
+  fi
+
+  if [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" = "1" ]]; then
+    phase_finished="$(benchmark_phase_now)"
+    benchmark_phase_append 10 collect passed "$phase_started" "$phase_finished" ""
+    cleanup_started="$(benchmark_phase_now)"
+    cleanup_status=passed
+    cleanup_reason=""
+    cleanup_exit=0
+    cleanup || {
+      cleanup_exit="$?"
+      cleanup_status=failed
+      cleanup_reason="cleanup exited $cleanup_exit"
+    }
+    cleanup_finished="$(benchmark_phase_now)"
+    benchmark_phase_append 11 cleanup "$cleanup_status" "$cleanup_started" "$cleanup_finished" "$cleanup_reason"
+    BENCHMARK_TERMINAL_CLEANUP_DONE=1
+    BENCHMARK_TERMINAL_CLEANUP_FINISHED_AT="$cleanup_finished"
+    controls_exit=0
+    if materialize_benchmark_controls_v2; then
+      :
+    else
+      controls_exit="$?"
+    fi
+    if [[ "$controls_exit" != "0" ]]; then
+      WORKLOAD_EXIT="$controls_exit"
+      VERDICT_FINISHED_AT="$cleanup_finished"
+      write_verdict failed "benchmark control materialization failed"
+      VERDICT_WRITTEN=1
+      exit "$controls_exit"
+    fi
+    if [[ "$cleanup_status" = "failed" ]]; then
+      WORKLOAD_EXIT="$cleanup_exit"
+      write_verdict failed "benchmark cleanup failed"
+      VERDICT_WRITTEN=1
+      exit "$cleanup_exit"
+    fi
+    VERDICT_FINISHED_AT="$cleanup_finished"
+    write_verdict passed "experiment passed"
+    VERDICT_WRITTEN=1
+  else
+    write_verdict passed "experiment passed"
+  fi
+  set +e
+  run_pgworkbench run verify "$RUN_DIR"
+  EVIDENCE_VERIFY_EXIT="$?"
+  set -e
+  if [[ "$EVIDENCE_VERIFY_EXIT" != "0" ]]; then
+    ASSERT_EXIT="$EVIDENCE_VERIFY_EXIT"
+    if [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" != "1" ]]; then
+      phase_finished="$(benchmark_phase_now)"
+      benchmark_phase_append 10 collect failed "$phase_started" "$phase_finished" "post-run evidence verification failed"
+    fi
+    write_verdict failed "post-run evidence verification failed"
+    VERDICT_WRITTEN=1
+    exit "$EVIDENCE_VERIFY_EXIT"
+  fi
+  if [[ "${BENCHMARK_PREFLIGHT_ACTIVE:-0}" != "1" ]]; then
+    phase_finished="$(benchmark_phase_now)"
+    benchmark_phase_append 10 collect passed "$phase_started" "$phase_finished" ""
+  fi
+  VERDICT_WRITTEN=1
   echo "verdict=passed"
 }
 
@@ -525,13 +1902,9 @@ case "$ACTION" in
     sed -n '1,220p' "$(resolve_spec "${1:?experiment spec is required}")"
     ;;
   run)
-    load_repo_env
-    load_spec "${1:?experiment spec is required}"
-    run_experiment
+    run_selected_experiment "${1:-}"
     ;;
   *)
-    load_repo_env
-    load_spec "$ACTION"
-    run_experiment
+    run_selected_experiment "$ACTION"
     ;;
 esac

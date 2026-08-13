@@ -1,0 +1,21 @@
+{
+  "schema_version": "pgworkbench.operation-benchmark-spec/v1",
+  "id": "maintenance/vacuum-bloat-manual",
+  "name": "Manual VACUUM ANALYZE after dead-tuple churn",
+  "description": "Repeated disposable manual vacuum over a fixed medium profile rebuilt before every trial.",
+  "classification": "descriptive-engineering",
+  "decision_eligible": false,
+  "experiment_spec": "vacuum-bloat-benchmark",
+  "trials": 5,
+  "max_cv_pct": 25,
+  "supported_runtimes": ["docker", "native"],
+  "measurement": {
+    "basis": "operation-result",
+    "result_path": "artifacts/operation-result.json",
+    "metric": "vacuum_elapsed_ms",
+    "unit": "milliseconds",
+    "direction": "lower-is-better",
+    "scope": "PostgreSQL server-clock interval bracketing VACUUM (ANALYZE); includes client/server protocol gaps between the bracketing SELECT commands and VACUUM; excludes dead-tuple churn."
+  },
+  "assurance": "A passing series proves repeat execution, linked-run integrity, the declared bracketed vacuum interval, churn correctness, and aggregate reproducibility in this disposable environment. It does not isolate pure server execution time, predict production autovacuum, measure retained bloat reclamation, or establish a causal comparison."
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-import-bundle-inventory.schema.json",
+  "title": "pgworkbench descriptive benchmark import bundle inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "import_ref",
+    "artifact_digest",
+    "driver",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.benchmark-import-bundle/v1"},
+    "artifact_type": {"const": "pgworkbench.benchmark-import-bundle"},
+    "import_ref": {
+      "type": "string",
+      "pattern": "^imports/[0-9a-f]{64}$"
+    },
+    "artifact_digest": {"$ref": "#/$defs/digest"},
+    "driver": {"enum": ["hammerdb", "sysbench", "benchbase"]},
+    "files": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/file"}
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "portable_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))(?!.*\\\\)(?!.*:).+$"
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "digest"],
+      "properties": {
+        "path": {"$ref": "#/$defs/portable_path"},
+        "size": {"type": "integer", "minimum": 0},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/operation-benchmark-bundle-inventory.schema.json",
+  "title": "pgworkbench operation benchmark bundle inventory v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "series_run_id", "series_ref", "files"],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.operation-benchmark-bundle/v1"},
+    "artifact_type": {"const": "pgworkbench.operation-benchmark-bundle"},
+    "series_run_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+    "series_ref": {"type": "string", "pattern": "^runs/operation-benchmarks/[A-Za-z0-9_.-]+$"},
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "size", "digest"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "size": {"type": "integer", "minimum": 0},
+          "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

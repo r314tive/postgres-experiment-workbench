@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-driver-execution.schema.json",
+  "title": "pgworkbench immutable native external benchmark execution",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_type", "contract_version", "classification",
+    "analysis_design", "conclusion", "status", "runtime", "workload",
+    "registry", "invocation", "target_safety", "inputs", "outputs", "started_at", "finished_at",
+    "exit_code", "normalized_import", "assurance", "digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.benchmark-driver-execution/v2"},
+    "artifact_type": {"const": "pgworkbench.benchmark-driver-execution"},
+    "contract_version": {"const": "2.0.0"},
+    "classification": {"const": "descriptive-external-single-trial"},
+    "analysis_design": {"const": "native-single-trial"},
+    "conclusion": {"const": "descriptive"},
+    "status": {"const": "completed"},
+    "runtime": {"const": "native"},
+    "workload": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,159}$"},
+    "registry": {"$ref": "#/$defs/registry_binding"},
+    "invocation": {"$ref": "#/$defs/invocation"},
+    "target_safety": {"$ref": "#/$defs/target_safety"},
+    "inputs": {"$ref": "#/$defs/inputs"},
+    "outputs": {"$ref": "#/$defs/outputs"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "exit_code": {"const": 0},
+    "normalized_import": {"$ref": "#/$defs/normalized_import"},
+    "assurance": {"$ref": "#/$defs/assurance"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "file_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest", "size_bytes"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^[A-Za-z0-9._/-]+$"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "adapter", "display_version", "repository", "ref_type", "ref",
+        "commit", "entrypoint", "result_format", "parser", "runtime_support",
+        "workloads", "binary_distributed_by_project", "source_to_binary_attested",
+        "decision_eligible"
+      ],
+      "properties": {
+        "id": {"type": "string"},
+        "adapter": {"enum": ["benchbase", "hammerdb6", "sysbench1"]},
+        "display_version": {"type": "string"},
+        "repository": {"type": "string"},
+        "ref_type": {"enum": ["commit", "tag"]},
+        "ref": {"type": "string"},
+        "tag_object": {"$ref": "#/$defs/sha1"},
+        "commit": {"$ref": "#/$defs/sha1"},
+        "entrypoint": {"type": "string"},
+        "result_format": {"type": "string"},
+        "parser": {"type": "string"},
+        "runtime_support": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["native", "docker"]}},
+        "workloads": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+        "binary_distributed_by_project": {"const": false},
+        "source_to_binary_attested": {"const": false},
+        "decision_eligible": {"const": false}
+      }
+    },
+    "registry_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lock", "driver"],
+      "properties": {
+        "lock": {"$ref": "#/$defs/file_ref"},
+        "driver": {"$ref": "#/$defs/driver"}
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executable_mode", "driver_runtime_mode", "argv", "environment_policy", "secret_environment", "timeout_seconds"],
+      "properties": {
+        "executable_mode": {"const": "adapter-owned-staged-driver-runtime-v2"},
+        "driver_runtime_mode": {"const": "staged-copy-with-pre-post-tree-match"},
+        "argv": {"type": "array", "minItems": 2, "items": {"type": "string", "minLength": 1}},
+        "environment_policy": {"const": "minimal-fixed-v2"},
+        "secret_environment": {"type": "array", "maxItems": 1, "uniqueItems": true, "items": {"const": "PGWORKBENCH_DRIVER_PASSWORD"}},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 86400}
+      }
+    },
+    "target_safety": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy", "acknowledged", "acknowledgement", "endpoint_source",
+        "host", "port", "database", "loopback_only",
+        "system_databases_denied", "target_ownership_verified",
+        "target_identity_attested"
+      ],
+      "properties": {
+        "policy": {"const": "loopback-nonsystem-explicit-disposable-ack/v1"},
+        "acknowledged": {"const": true},
+        "acknowledgement": {"const": "operator-asserted-external-disposable-non-production"},
+        "endpoint_source": {"const": "retained-driver-config"},
+        "host": {"enum": ["127.0.0.1", "::1"]},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "database": {"type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,62}$"},
+        "loopback_only": {"const": true},
+        "system_databases_denied": {"const": true},
+        "target_ownership_verified": {"const": false},
+        "target_identity_attested": {"const": false}
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binary", "config", "script", "driver_runtime"],
+      "properties": {
+        "binary": {"$ref": "#/$defs/file_ref"},
+        "config": {"$ref": "#/$defs/file_ref"},
+        "script": {"$ref": "#/$defs/file_ref"},
+        "driver_runtime": {"$ref": "#/$defs/driver_runtime"}
+      }
+    },
+    "runtime_file_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest", "size_bytes", "mode"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^inputs/runtime/[A-Za-z0-9._/-]+$"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "size_bytes": {"type": "integer", "minimum": 0, "maximum": 536870912},
+        "mode": {"enum": [292, 365]}
+      }
+    },
+    "driver_runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy", "root", "entrypoint", "files", "file_count", "total_size_bytes", "tree_digest"],
+      "properties": {
+        "strategy": {"enum": ["jar-manifest-transitive-closure/v1", "hammerdb-self-contained-launcher/v1", "sysbench-pinned-lua-closure/v1"]},
+        "root": {"const": "inputs/runtime"},
+        "entrypoint": {"type": "string", "pattern": "^inputs/runtime/[A-Za-z0-9._/-]+$"},
+        "files": {"type": "array", "minItems": 1, "maxItems": 16384, "items": {"$ref": "#/$defs/runtime_file_ref"}},
+        "file_count": {"type": "integer", "minimum": 1, "maximum": 16384},
+        "total_size_bytes": {"type": "integer", "minimum": 1, "maximum": 4294967296},
+        "tree_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stdout", "stderr", "driver_result"],
+      "properties": {
+        "stdout": {"$ref": "#/$defs/file_ref"},
+        "stderr": {"$ref": "#/$defs/file_ref"},
+        "driver_result": {"$ref": "#/$defs/file_ref"}
+      }
+    },
+    "normalized_import": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["result", "artifact_digest"],
+      "properties": {
+        "result": {"$ref": "#/$defs/file_ref"},
+        "artifact_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "assurance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_origin", "verification_scope", "binary_distributed_by_project",
+        "source_to_binary_attested", "decision_eligible", "pgbench_series_eligible",
+        "cross_system_comparison_eligible", "tpc_compliance_claim",
+        "driver_runtime_closure_attested", "host_runtime_dependencies_attested"
+      ],
+      "properties": {
+        "evidence_origin": {"const": "native-driver-execution"},
+        "verification_scope": {"const": "retained-runtime-closure-fixed-argv-and-strict-result-rederivation"},
+        "binary_distributed_by_project": {"const": false},
+        "source_to_binary_attested": {"const": false},
+        "decision_eligible": {"const": false},
+        "pgbench_series_eligible": {"const": false},
+        "cross_system_comparison_eligible": {"const": false},
+        "tpc_compliance_claim": {"const": false},
+        "driver_runtime_closure_attested": {"const": true},
+        "host_runtime_dependencies_attested": {"const": false}
+      }
+    }
+  }
+}

@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${POSTGRES_PORT:-55433}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-55433}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     command:
@@ -44,7 +44,7 @@ services:
       POSTGRES_REPLICA_SLOT: ${POSTGRES_REPLICA_SLOT:-workbench_replica_slot}
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${POSTGRES_REPLICA_PORT:-55434}:5432"
+      - "127.0.0.1:${POSTGRES_REPLICA_PORT:-55434}:5432"
     volumes:
       - replica-data:/var/lib/postgresql/data
     depends_on:
@@ -93,7 +93,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${POSTGRES_LOGICAL_SUBSCRIBER_PORT:-55435}:5432"
+      - "127.0.0.1:${POSTGRES_LOGICAL_SUBSCRIBER_PORT:-55435}:5432"
     volumes:
       - logical-subscriber-data:/var/lib/postgresql/data
     command:
@@ -139,7 +139,7 @@ services:
       ADMIN_USERS: ${PGBOUNCER_ADMIN_USERS:-postgres}
       STATS_USERS: ${PGBOUNCER_STATS_USERS:-postgres}
     ports:
-      - "${PGBOUNCER_PORT:-56432}:5432"
+      - "127.0.0.1:${PGBOUNCER_PORT:-56432}:5432"
     healthcheck:
       test:
         - CMD-SHELL
@@ -159,7 +159,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${POSTGRES_UPGRADE_OLD_PORT:-55436}:5432"
+      - "127.0.0.1:${POSTGRES_UPGRADE_OLD_PORT:-55436}:5432"
     volumes:
       - postgres-upgrade-old-data:/var/lib/postgresql/data
     healthcheck:
@@ -181,7 +181,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${POSTGRES_UPGRADE_NEW_PORT:-55437}:5432"
+      - "127.0.0.1:${POSTGRES_UPGRADE_NEW_PORT:-55437}:5432"
     volumes:
       - postgres-upgrade-new-data:/var/lib/postgresql/data
     healthcheck:

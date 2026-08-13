@@ -3,8 +3,10 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="$REPO_DIR/.tmp/report/run-a"
+REPORT_DIR="$REPO_DIR/.tmp/report-output"
 
 rm -rf "$REPO_DIR/.tmp/report"
+rm -rf "$REPORT_DIR"
 mkdir -p "$RUN_DIR"
 
 cat > "$RUN_DIR/manifest.env" <<'ENV'
@@ -39,8 +41,12 @@ grep -q '# Experiment Run Report' <<< "$OUT"
 grep -q '| Status | `passed` |' <<< "$OUT"
 grep -q '| `wal_bytes` | `100` | `250` | `150` |' <<< "$OUT"
 
-"$REPO_DIR/scripts/report_run.sh" "$RUN_DIR" "$RUN_DIR/report.md" >/dev/null
-grep -q '# Experiment Run Report' "$RUN_DIR/report.md"
+"$REPO_DIR/scripts/report_run.sh" "$RUN_DIR" "$REPORT_DIR/report.md" >/dev/null
+grep -q '# Experiment Run Report' "$REPORT_DIR/report.md"
+if "$REPO_DIR/scripts/report_run.sh" "$RUN_DIR" "$RUN_DIR/report.md" >/dev/null 2>&1; then
+  echo 'FAIL: legacy report writer mutated its immutable run input' >&2
+  exit 1
+fi
 
 GO_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" go run ./cmd/pgworkbench report run "$RUN_DIR")"
 grep -q '# Experiment Run Report' <<< "$GO_OUT"
@@ -48,7 +54,7 @@ grep -q '| Status | `passed` |' <<< "$GO_OUT"
 grep -q '| `wal_bytes` | `100` | `250` | `150` |' <<< "$GO_OUT"
 
 (cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
-  go run ./cmd/pgworkbench report run "$RUN_DIR" "$RUN_DIR/report-go.md") >/dev/null
-grep -q '# Experiment Run Report' "$RUN_DIR/report-go.md"
+  go run ./cmd/pgworkbench report run "$RUN_DIR" "$REPORT_DIR/report-go.md") >/dev/null
+grep -q '# Experiment Run Report' "$REPORT_DIR/report-go.md"
 
 echo "PASS: run reports"

@@ -1,0 +1,20 @@
+{
+  "job": {
+    "id": "67FD74F96B4E03E293334323",
+    "status": "FINISHED SUCCESS",
+    "started_at": "2026-08-12T09:00:00Z",
+    "finished_at": "2026-08-12T09:10:00Z"
+  },
+  "driver_version": "6.0",
+  "database": "PostgreSQL",
+  "workload": "tprocc/postgresql",
+  "result": {
+    "nopm": 125000,
+    "tpm": 310000
+  },
+  "runtime_seconds": 600,
+  "errors": {
+    "total": 0,
+    "messages": []
+  }
+}

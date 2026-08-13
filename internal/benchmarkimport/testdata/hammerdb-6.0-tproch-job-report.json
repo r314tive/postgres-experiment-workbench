@@ -1,0 +1,48 @@
+{
+  "schema": "hammerdb-job-report-v1",
+  "description": "HammerDB benchmark result artifact. Machine-readable data, report_hints and analysis_hints are included for reproducible reporting, summary tables and chart generation.",
+  "artifact": {
+    "type": "hammerdb-result-json",
+    "schema": "hammerdb-job-report-v1",
+    "source": "HammerDB",
+    "generated_by": "HammerDB jobs summaryjson",
+    "visibility": "public",
+    "redacted": true
+  },
+  "disclaimer": {
+    "result_type": "HammerDB result artifact",
+    "audited": false,
+    "text": "This is a HammerDB result artifact. HammerDB TPROC-C and TPROC-H workloads are derived from the TPC-C and TPC-H specifications respectively. This result is not audited by the TPC-Council and is not a TPC result.",
+    "tpc_trademarks": "TPC-C, tpmC, TPC-H and QphH are trademarks of the Transaction Processing Performance Council. Unauthorised and unaudited use of official TPC result trademarks is not permitted.",
+    "hammerdb_copyright": "HammerDB is open source software distributed under the GNU General Public License (GPL). HammerDB source code, TPROC-C and TPROC-H workload implementations, documentation and related materials are copyright HammerDB Ltd. NOPM, TPROC-C and TPROC-H are HammerDB benchmark terminology.",
+    "learn_more_tpc": "https://www.tpc.org/",
+    "learn_more_hammerdb": "https://www.hammerdb.com/"
+  },
+  "report_hints": {"primary_metric": "Geomean"},
+  "analysis_hints": {"shutdown_tail": {"present": true}},
+  "job": {
+    "jobid": "67FD3C792EF803E253533324",
+    "hdb_version": "v6.0",
+    "database": "pg",
+    "database_display": "PostgreSQL",
+    "release": "16.4",
+    "benchmark": "TPROC-H",
+    "timestamp": "2026-06-24 11:15:34"
+  },
+  "benchmark_config": {"scale_factor": 10},
+  "system": {"available": true, "hostname": "benchmark-host", "cpucount": "16"},
+  "result": {
+    "type": "tproc_h_result",
+    "database_display": "PostgreSQL",
+    "queries": 22,
+    "query_sets": 1,
+    "geomean_seconds": 1.742,
+    "total_query_time_seconds": 93.11,
+    "chart_data": [
+      {"metric": "Geomean", "value": 1.742},
+      {"metric": "Query Time", "value": 93.11}
+    ]
+  },
+  "query_times": {"type": "bar", "unit": "milliseconds", "rows": []},
+  "metrics": {"type": "timeseries", "rows": []}
+}

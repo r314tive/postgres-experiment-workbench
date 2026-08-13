@@ -1,0 +1,43 @@
+{
+  "schema_version": "pgworkbench.adoption-pilot-record/v1",
+  "artifact_type": "pgworkbench.adoption-pilot-record",
+  "record_status": "template",
+  "pilot_id": "external-pilot-1",
+  "recorded_at": "2026-08-13T00:00:00Z",
+  "candidate": {
+    "version": "0.2.0",
+    "git_commit": "1111111111111111111111111111111111111111",
+    "pack_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "participant": {
+    "identifier": "replace-with-pseudonymous-external-user-id",
+    "relationship": "external-non-maintainer"
+  },
+  "execution": {
+    "guide_ref": "docs/authoring-tutorial.md@v0.2.0",
+    "scenario": "smoke",
+    "runtime": "native",
+    "os": "linux",
+    "arch": "amd64",
+    "postgres_major": 16,
+    "started_at": "2026-08-13T00:00:00Z",
+    "finished_at": "2026-08-13T00:00:01Z",
+    "authored_or_modified_scenario": false,
+    "maintainer_shell_access": false
+  },
+  "acceptance_predicate": "The released starter reaches a terminal verdict and its relocated bundle verifies independently.",
+  "cleanup": {
+    "status": "not-required",
+    "details": "Template only; record how the disposable runtime was stopped and removed."
+  },
+  "result": {
+    "status": "incomplete",
+    "summary": "Template only; no external pilot has been performed."
+  },
+  "unresolved_friction": [],
+  "assurance": {
+    "production_safety_claim": false,
+    "representative_performance_claim": false,
+    "benchmark_decision_claim": false
+  }
+}

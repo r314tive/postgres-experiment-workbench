@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-resource-budget.schema.json",
+  "title": "pgworkbench benchmark resource budget v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "run_id", "protocol_digest", "trial", "captured_at", "assurance", "mode", "scope", "provider", "provider_constraints", "inspect_source", "enforcement_window", "raw_source", "cgroup_version", "postgres_container_id_digest", "pgbench_container_id_digest", "status", "reasons", "digest"],
+  "properties": {
+    "schema_version": { "const": "pgworkbench.benchmark-resource-budget/v1" },
+    "artifact_type": { "const": "pgworkbench.benchmark-resource-budget" },
+    "run_id": { "$ref": "#/$defs/runID" },
+    "protocol_digest": { "$ref": "#/$defs/digest" },
+    "trial": { "type": "integer", "minimum": 1 },
+    "captured_at": { "$ref": "#/$defs/timestamp" },
+    "assurance": { "$ref": "#/$defs/assurance" },
+    "mode": { "enum": ["unbounded", "runner-enforced"] },
+    "scope": { "type": "string" },
+    "provider": { "type": "string" },
+    "provider_constraints": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "inspect_source": { "enum": ["not-applicable", "docker-inspect-hostconfig-and-container-cgroup-v2-probe/v1"] },
+    "enforcement_window": { "$ref": "#/$defs/window" },
+    "raw_source": { "$ref": "#/$defs/source" },
+    "cpu_millicores": { "type": "integer", "minimum": 1 },
+    "memory_mib": { "type": "integer", "minimum": 1 },
+    "expected_docker_nano_cpus": { "type": "integer", "minimum": 1 },
+    "expected_docker_memory_bytes": { "type": "integer", "minimum": 1 },
+    "observed_docker_nano_cpus": { "type": "integer", "minimum": 0 },
+    "observed_docker_memory_bytes": { "type": "integer", "minimum": 0 },
+    "cgroup_version": { "type": "string" },
+    "postgres_container_id_digest": { "type": "string" },
+    "pgbench_container_id_digest": { "type": "string" },
+    "status": { "enum": ["unbounded", "enforced", "mismatch"] },
+    "reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "digest": { "$ref": "#/$defs/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "mode": { "const": "unbounded" } } },
+      "then": {
+        "properties": { "scope": { "const": "" }, "provider": { "const": "" }, "provider_constraints": { "maxItems": 0 }, "inspect_source": { "const": "not-applicable" }, "cgroup_version": { "const": "" }, "postgres_container_id_digest": { "const": "" }, "pgbench_container_id_digest": { "const": "" }, "status": { "const": "unbounded" } },
+        "not": { "anyOf": [{ "required": ["cpu_millicores"] }, { "required": ["memory_mib"] }, { "required": ["expected_docker_nano_cpus"] }, { "required": ["expected_docker_memory_bytes"] }, { "required": ["observed_docker_nano_cpus"] }, { "required": ["observed_docker_memory_bytes"] }] }
+      },
+      "else": {
+        "required": ["cpu_millicores", "memory_mib", "expected_docker_nano_cpus", "expected_docker_memory_bytes", "observed_docker_nano_cpus", "observed_docker_memory_bytes"],
+        "properties": {
+          "scope": { "const": "postgres-server-and-pgbench-driver" },
+          "provider": { "const": "docker-single-container-linux-cgroup-v2" },
+          "provider_constraints": { "minItems": 4, "maxItems": 4, "prefixItems": [{ "const": "cgroup-v2-required" }, { "const": "docker-engine-required" }, { "const": "linux-only" }, { "const": "postgres-and-driver-share-one-container" }], "items": false },
+          "inspect_source": { "const": "docker-inspect-hostconfig-and-container-cgroup-v2-probe/v1" },
+          "cgroup_version": { "type": "string", "minLength": 1 },
+          "postgres_container_id_digest": { "$ref": "#/$defs/digest" },
+          "pgbench_container_id_digest": { "$ref": "#/$defs/digest" },
+          "status": { "enum": ["enforced", "mismatch"] }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "runID": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "timestamp": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "window": {
+      "type": "object", "additionalProperties": false, "required": ["started_at", "finished_at"],
+      "properties": { "started_at": { "$ref": "#/$defs/timestamp" }, "finished_at": { "$ref": "#/$defs/timestamp" } }
+    },
+    "source": {
+      "type": "object", "additionalProperties": false, "required": ["path", "digest", "size_bytes"],
+      "properties": { "path": { "const": "resource-budget-source.json" }, "digest": { "$ref": "#/$defs/digest" }, "size_bytes": { "type": "integer", "minimum": 1, "maximum": 2097152 } }
+    },
+    "assurance": {
+      "type": "object", "additionalProperties": false, "required": ["evidence_origin", "signed", "digest_purpose", "verification_scope"],
+      "properties": {
+        "evidence_origin": { "const": "runner-recorded" }, "signed": { "const": false }, "digest_purpose": { "const": "content-integrity-only" },
+        "verification_scope": { "const": "structure-digest-raw-source-and-recorded-docker-limit-derivation-only" }
+      }
+    }
+  }
+}

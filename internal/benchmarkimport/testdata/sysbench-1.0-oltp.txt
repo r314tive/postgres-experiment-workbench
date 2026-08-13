@@ -1,0 +1,27 @@
+sysbench 1.0.20 (using system LuaJIT 2.1.0-beta3)
+
+SQL statistics:
+    queries performed:
+        read:                            103376
+        write:                           29536
+        other:                           14768
+        total:                           147680
+    transactions:                        7384   (738.30 per sec.)
+    queries:                             147680 (14766.08 per sec.)
+    ignored errors:                      0      (0.00 per sec.)
+    reconnects:                          0      (0.00 per sec.)
+
+General statistics:
+    total time:                          10.0009s
+    total number of events:              7384
+
+Latency (ms):
+         min:                                    1.21
+         avg:                                    1.35
+         max:                                    1.76
+         95th percentile:                        1.44
+         sum:                                 9992.83
+
+Threads fairness:
+    events (avg/stddev):           7384.0000/0.00
+    execution time (avg/stddev):   9.9928/0.00

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/operation-benchmark-series.schema.json",
+  "title": "pgworkbench descriptive operation benchmark series v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "operation", "name", "description", "classification", "decision_eligible", "assurance", "run_id", "run_dir", "spec_ref", "spec_digest", "experiment_spec", "experiment_ref", "experiment_digest", "engine_version", "engine_commit", "engine_binary_ref", "engine_binary_digest", "execution_parameters_digest", "pack_digest", "inputs_digest", "inputs", "runtime", "topology", "measurement", "trials_planned", "trials_valid", "trials_failed", "max_cv_pct", "started_at", "finished_at", "status", "reasons", "trials"],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.operation-benchmark-series/v1"},
+    "artifact_type": {"const": "pgworkbench.operation-benchmark-series"},
+    "operation": {"type": "string", "minLength": 1},
+    "name": {"type": "string", "minLength": 1},
+    "description": {"type": "string", "minLength": 1},
+    "classification": {"const": "descriptive-engineering"},
+    "decision_eligible": {"const": false},
+    "assurance": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+    "run_dir": {"const": "."},
+    "spec_ref": {"type": "string", "pattern": "^benchmarks/operations/.+\\.json$"},
+    "spec_digest": {"$ref": "#/$defs/digest"},
+    "experiment_spec": {"type": "string", "minLength": 1},
+    "experiment_ref": {"type": "string", "pattern": "^experiments/.+\\.env$"},
+    "experiment_digest": {"$ref": "#/$defs/digest"},
+    "engine_version": {"type": "string", "minLength": 1},
+    "engine_commit": {"type": "string", "minLength": 1},
+    "engine_binary_ref": {"const": "protocol/engine/pgworkbench"},
+    "engine_binary_digest": {"$ref": "#/$defs/digest"},
+    "native_toolchain_digest": {"$ref": "#/$defs/digest"},
+    "native_toolchain_manifest_ref": {"const": "protocol/native-toolchain/manifest.json"},
+    "native_toolchain_provenance": {"const": "unattested"},
+    "execution_parameters_digest": {"$ref": "#/$defs/digest"},
+    "pack_digest": {"$ref": "#/$defs/digest"},
+    "inputs_digest": {"$ref": "#/$defs/digest"},
+    "inputs": {"type": "array", "minItems": 1, "maxItems": 1024, "items": {"$ref": "#/$defs/input_file"}},
+    "runtime": {"enum": ["docker", "native"]},
+    "topology": {"type": "string"},
+    "measurement": {"$ref": "operation-benchmark-spec.schema.json#/$defs/measurement"},
+    "trials_planned": {"type": "integer", "minimum": 2},
+    "trials_valid": {"type": "integer", "minimum": 0},
+    "trials_failed": {"type": "integer", "minimum": 0},
+    "max_cv_pct": {"type": "number", "exclusiveMinimum": 0},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "status": {"enum": ["passed", "failed", "inconclusive"]},
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "stats": {"$ref": "benchmark-series.schema.json#/$defs/trialStats"},
+    "trials": {"type": "array", "items": {"$ref": "#/$defs/trial"}}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"runtime": {"const": "native"}}, "required": ["runtime"]},
+      "then": {"required": ["native_toolchain_digest", "native_toolchain_manifest_ref", "native_toolchain_provenance"]},
+      "else": {"not": {"anyOf": [
+        {"required": ["native_toolchain_digest"]},
+        {"required": ["native_toolchain_manifest_ref"]},
+        {"required": ["native_toolchain_provenance"]}
+      ]}}
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "trial": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trial", "run_id", "run_ref", "run_digest", "started_at", "finished_at", "duration_ms", "status", "reasons", "experiment_verified", "execution_parameters_digest", "experiment_identity_digest", "pack_digest"],
+      "properties": {
+        "trial": {"type": "integer", "minimum": 1},
+        "run_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+        "run_ref": {"type": "string", "pattern": "^runs/[A-Za-z0-9_.-]+$"},
+        "run_digest": {"$ref": "#/$defs/digest"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": "string", "format": "date-time"},
+        "duration_ms": {"type": "integer", "minimum": 0},
+        "status": {"enum": ["passed", "failed"]},
+        "reasons": {"type": "array", "items": {"type": "string"}},
+        "experiment_verified": {"type": "boolean"},
+        "execution_parameters_digest": {"$ref": "#/$defs/digest"},
+        "experiment_identity_digest": {"$ref": "#/$defs/digest"},
+        "pack_digest": {"$ref": "#/$defs/digest"},
+        "result_ref": {"type": "string"},
+        "result_digest": {"$ref": "#/$defs/digest"},
+        "operation_result": {"$ref": "operation-result.schema.json"},
+        "primary_value": {"type": "number", "minimum": 0}
+      }
+    },
+    "input_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "digest"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^(?!(?:\\.git|\\.tmp|generated|logs|releases|runs)(?:/|$))(?!\\.env$)(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"},
+        "size": {"type": "integer", "minimum": 0, "maximum": 67108864},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

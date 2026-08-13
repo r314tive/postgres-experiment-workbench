@@ -18,3 +18,9 @@ make monitor
 
 Autovacuum is disabled on the profile table so the run remains deterministic.
 This is for local disposable experiments only.
+
+The descriptive operation pack `maintenance/vacuum-bloat-manual` rebuilds a
+medium profile for every exact trial, creates committed churn, and records a
+server-clock interval bracketing `VACUUM (ANALYZE)`. Its documented scope
+includes the psql protocol gaps between the bracketing commands and excludes
+churn; it is not a pure executor timer or production-autovacuum claim.

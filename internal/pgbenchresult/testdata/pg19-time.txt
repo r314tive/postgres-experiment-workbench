@@ -1,0 +1,15 @@
+pgbench (19devel, server 19devel)
+transaction type: workloads/pgbench/scripts/simple-transfer.sql
+scaling factor: 1
+query mode: prepared
+number of clients: 10
+number of threads: 10
+maximum number of tries: 1
+duration: 60 s
+progress: 30.0 s, 69100.0 tps, lat 0.145 ms stddev 0.118, 0 failed
+number of transactions actually processed: 4153490
+number of failed transactions: 0 (0.000%)
+latency average = 0.144 ms
+latency stddev = 0.117 ms
+initial connection time = 23.128 ms
+tps = 69224.826220 (without initial connection time)

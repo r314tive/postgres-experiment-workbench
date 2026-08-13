@@ -116,6 +116,36 @@ func Build(root string, catalog speccatalog.Catalog, id string) (Plan, error) {
 		}
 		command = append(command, "${POSTGRES_DB:-pg_experiment_workbench}")
 		plan.Steps = append(plan.Steps, Step{Name: "Run pgbench", Command: command})
+	case "pg-dump":
+		plan.Steps = append(plan.Steps, Step{
+			Name:    "Run pg_dump adapter",
+			Command: []string{"./scripts/run_workload.sh", "run", spec.ID},
+			Notes: []string{
+				"Runtime selects the utility from the owned PostgreSQL container or PGWORKBENCH_NATIVE_BINDIR.",
+				"Source schema: " + defaultValue(values["UTILITY_SOURCE_SCHEMA"], "all schemas"),
+				"Output: " + values["UTILITY_OUTPUT_FILE"],
+			},
+		})
+	case "pg-dumpall":
+		plan.Steps = append(plan.Steps, Step{
+			Name:    "Run pg_dumpall adapter",
+			Command: []string{"./scripts/run_workload.sh", "run", spec.ID},
+			Notes: []string{
+				"Runtime selects the utility from the owned PostgreSQL container or PGWORKBENCH_NATIVE_BINDIR.",
+				"Output: " + values["UTILITY_OUTPUT_FILE"],
+			},
+		})
+	case "pg-restore":
+		plan.Steps = append(plan.Steps, Step{
+			Name:    "Run pg_restore round-trip adapter",
+			Command: []string{"./scripts/run_workload.sh", "run", spec.ID},
+			Notes: []string{
+				"Runtime selects the utilities from the owned PostgreSQL container or PGWORKBENCH_NATIVE_BINDIR.",
+				"Round trip: " + values["UTILITY_SOURCE_SCHEMA"] + " -> " + values["UTILITY_TARGET_SCHEMA"],
+				"Archive: " + values["UTILITY_ARCHIVE_FILE"],
+				"Output: " + values["UTILITY_OUTPUT_FILE"],
+			},
+		})
 	case "pg-source-check":
 		plan.Steps = append(plan.Steps, Step{
 			Name:    "Run PostgreSQL source check",
@@ -135,7 +165,7 @@ func Build(root string, catalog speccatalog.Catalog, id string) (Plan, error) {
 	case "shell":
 		plan.Steps = append(plan.Steps, Step{
 			Name:    "Run shell command",
-			Command: []string{"bash", "-lc", shellQuote(values["WORKLOAD_CMD"])},
+			Command: []string{"env", "BASH_ENV=/dev/null", "bash", "--noprofile", "--norc", "-c", shellQuote(values["WORKLOAD_CMD"])},
 			Notes:   []string{"DATABASE_URL and PG* environment variables are exported before execution."},
 		})
 	case "compose-run":

@@ -1,0 +1,414 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-ab-run.schema.json",
+  "title": "pgworkbench counterbalanced benchmark A/B run v3",
+  "description": "Portable AB/BA execution result with paired analysis and unsigned operator-recorded qualification bookends.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "scheduler_version",
+    "run_id",
+    "run_dir",
+    "protocol",
+    "started_at",
+    "finished_at",
+    "baseline",
+    "candidate",
+    "blocks",
+    "qualification",
+    "effective_settings",
+    "analysis",
+    "status",
+    "decision",
+    "reasons",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "pgworkbench.benchmark-ab-run/v3" },
+    "artifact_type": { "const": "pgworkbench.benchmark-ab-run" },
+    "scheduler_version": { "const": "3.0.0" },
+    "run_id": { "$ref": "#/$defs/run_id" },
+    "run_dir": { "const": "." },
+    "protocol": { "$ref": "#/$defs/file_ref" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "baseline": { "$ref": "#/$defs/baseline_series" },
+    "candidate": { "$ref": "#/$defs/candidate_series" },
+    "blocks": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/block" }
+    },
+    "qualification": { "$ref": "#/$defs/qualification_bookends" },
+    "effective_settings": { "$ref": "#/$defs/effective_settings_assessment" },
+    "analysis": { "$ref": "#/$defs/paired_analysis" },
+    "status": { "enum": ["passed", "failed", "invalid", "inconclusive"] },
+    "decision": {
+      "enum": [
+        "improved",
+        "equivalent-within-threshold",
+        "no-regression",
+        "regressed",
+        "inconclusive",
+        "invalid"
+      ]
+    },
+    "reasons": { "$ref": "#/$defs/reasons" },
+    "digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "portable_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "file_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest", "size"],
+      "properties": {
+        "path": { "$ref": "#/$defs/portable_path" },
+        "digest": { "$ref": "#/$defs/digest" },
+        "size": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "series_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "run_id", "ref", "result_digest"],
+      "properties": {
+        "role": { "enum": ["baseline", "candidate"] },
+        "run_id": { "$ref": "#/$defs/run_id" },
+        "ref": { "$ref": "#/$defs/portable_path" },
+        "result_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "baseline_series": {
+      "allOf": [
+        { "$ref": "#/$defs/series_ref" },
+        {
+          "type": "object",
+          "properties": { "role": { "const": "baseline" } }
+        }
+      ]
+    },
+    "candidate_series": {
+      "allOf": [
+        { "$ref": "#/$defs/series_ref" },
+        {
+          "type": "object",
+          "properties": { "role": { "const": "candidate" } }
+        }
+      ]
+    },
+    "block_execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "role",
+        "series_run_id",
+        "trial",
+        "trial_run_id",
+        "status"
+      ],
+      "properties": {
+        "position": { "type": "integer", "minimum": 1, "maximum": 2 },
+        "role": { "enum": ["baseline", "candidate"] },
+        "series_run_id": { "$ref": "#/$defs/run_id" },
+        "trial": { "type": "integer", "minimum": 1 },
+        "trial_run_id": { "$ref": "#/$defs/run_id" },
+        "status": { "enum": ["passed", "failed", "invalid"] },
+        "phase_digest": { "$ref": "#/$defs/digest" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "passed" } } },
+          "then": { "required": ["phase_digest"] }
+        }
+      ]
+    },
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "number",
+        "unit",
+        "planned_order",
+        "executions",
+        "status",
+        "reasons"
+      ],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1 },
+        "unit": { "type": "integer", "minimum": 1 },
+        "planned_order": { "enum": ["AB", "BA"] },
+        "executions": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/block_execution" }
+        },
+        "status": { "enum": ["passed", "failed", "invalid"] },
+        "reasons": { "$ref": "#/$defs/reasons" },
+        "baseline_value": { "type": "number" },
+        "candidate_value": { "type": "number" },
+        "effect_pct": { "type": "number" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": { "const": "passed" },
+              "planned_order": { "const": "AB" }
+            }
+          },
+          "then": {
+            "properties": {
+              "executions": {
+                "prefixItems": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "position": { "const": 1 },
+                      "role": { "const": "baseline" },
+                      "status": { "const": "passed" }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "position": { "const": 2 },
+                      "role": { "const": "candidate" },
+                      "status": { "const": "passed" }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": { "const": "passed" },
+              "planned_order": { "const": "BA" }
+            }
+          },
+          "then": {
+            "properties": {
+              "executions": {
+                "prefixItems": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "position": { "const": 1 },
+                      "role": { "const": "candidate" },
+                      "status": { "const": "passed" }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "position": { "const": 2 },
+                      "role": { "const": "baseline" },
+                      "status": { "const": "passed" }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "passed" } } },
+          "then": {
+            "required": ["baseline_value", "candidate_value", "effect_pct"],
+            "properties": { "executions": { "minItems": 2 } }
+          }
+        }
+      ]
+    },
+    "bookend_assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reasons",
+        "before_artifact_digest",
+        "after_artifact_digest",
+        "before_policy_digest",
+        "after_policy_digest",
+        "before_stable_host_class_digest",
+        "after_stable_host_class_digest"
+      ],
+      "properties": {
+        "status": { "enum": ["recorded-policy-passed", "unqualified"] },
+        "reasons": { "$ref": "#/$defs/reasons" },
+        "before_artifact_digest": { "$ref": "#/$defs/digest" },
+        "after_artifact_digest": { "$ref": "#/$defs/digest" },
+        "before_policy_digest": { "$ref": "#/$defs/digest" },
+        "after_policy_digest": { "$ref": "#/$defs/digest" },
+        "before_stable_host_class_digest": { "$ref": "#/$defs/digest" },
+        "after_stable_host_class_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "qualification_bookends": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after", "assessment"],
+      "properties": {
+        "before": { "$ref": "#/$defs/file_ref" },
+        "after": { "$ref": "#/$defs/file_ref" },
+        "assessment": { "$ref": "#/$defs/bookend_assessment" }
+      }
+    },
+    "effective_settings_assessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "names", "effective_differences", "reasons"],
+      "properties": {
+        "status": { "enum": ["verified-different", "verified-stable", "equivalent", "unstable", "invalid"] },
+        "names": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 512,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.]*$" }
+        },
+        "baseline_server_version_num": { "type": "string", "pattern": "^[1-9][0-9]{4,}$" },
+        "candidate_server_version_num": { "type": "string", "pattern": "^[1-9][0-9]{4,}$" },
+        "effective_differences": {
+          "type": "array",
+          "maxItems": 512,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_.]*$" }
+        },
+        "reasons": { "$ref": "#/$defs/reasons" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "verified-different" } }, "required": ["status"] },
+          "then": { "required": ["baseline_server_version_num", "candidate_server_version_num"], "properties": { "effective_differences": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "verified-stable" } }, "required": ["status"] },
+          "then": { "required": ["baseline_server_version_num", "candidate_server_version_num"] }
+        }
+      ]
+    },
+    "unit_effect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit_index", "eligible"],
+      "properties": {
+        "unit_index": { "type": "integer", "minimum": 1 },
+        "eligible": { "type": "boolean" },
+        "ab_effect_pct": { "type": "number" },
+        "ba_effect_pct": { "type": "number" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "eligible": { "const": true } } },
+          "then": { "required": ["ab_effect_pct", "ba_effect_pct"] }
+        }
+      ]
+    },
+    "paired_analysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "design",
+        "direction",
+        "bootstrap_method",
+        "bootstrap_resamples",
+        "bootstrap_seed",
+        "confidence_level",
+        "regression_threshold_pct",
+        "min_units",
+        "total_units",
+        "units_n",
+        "blocks_n",
+        "unit_effects",
+        "status",
+        "decision",
+        "reasons"
+      ],
+      "properties": {
+        "design": { "const": "paired-counterbalanced-ab-ba" },
+        "direction": { "enum": ["higher", "lower"] },
+        "bootstrap_method": { "const": "percentile-cluster-bootstrap-of-block-median" },
+        "bootstrap_resamples": { "type": "integer", "minimum": 1000, "maximum": 1000000 },
+        "bootstrap_seed": { "type": "integer", "minimum": 0 },
+        "confidence_level": { "type": "number", "exclusiveMinimum": 0.5, "exclusiveMaximum": 1 },
+        "regression_threshold_pct": { "type": "number", "minimum": 0 },
+        "min_units": { "type": "integer", "minimum": 5 },
+        "total_units": { "type": "integer", "minimum": 0 },
+        "units_n": { "type": "integer", "minimum": 0 },
+        "blocks_n": { "type": "integer", "minimum": 0 },
+        "unit_effects": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/unit_effect" }
+        },
+        "median_effect_pct": { "type": "number" },
+        "ci_low_pct": { "type": "number" },
+        "ci_high_pct": { "type": "number" },
+        "status": { "enum": ["passed", "failed", "invalid", "inconclusive"] },
+        "decision": {
+          "enum": [
+            "improved",
+            "equivalent-within-threshold",
+            "no-regression",
+            "regressed",
+            "inconclusive",
+            "invalid"
+          ]
+        },
+        "reasons": { "$ref": "#/$defs/reasons" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "passed" } } },
+          "then": {
+            "properties": {
+              "decision": {
+                "enum": ["improved", "equivalent-within-threshold", "no-regression"]
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "failed" } } },
+          "then": {
+            "properties": { "decision": { "const": "regressed" } }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "invalid" } } },
+          "then": { "properties": { "decision": { "const": "invalid" } } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "inconclusive" } } },
+          "then": { "properties": { "decision": { "const": "inconclusive" } } }
+        }
+      ]
+    }
+  }
+}

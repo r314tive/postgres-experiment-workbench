@@ -1,6 +1,7 @@
 SHELL := /usr/bin/env bash
 
 COMPOSE ?= docker compose
+PGWORKBENCH_RUNTIME ?= docker
 ENV_FILE ?= $(if $(wildcard .env),.env,.env.example)
 PROFILE ?= smoke
 PROFILE_SIZE ?= small
@@ -12,6 +13,8 @@ WORKLOAD_SQL ?= 10_run.sql
 WORKLOAD ?= wait-xacts
 WORKLOAD_SPEC ?= workloads/sql/smoke-run.env
 UTILITY_TEST_SPEC ?= pg-dump/smoke
+UTILITY_TEST_RUN_ID ?=
+UTILITY_RUN_ID_ARG = $(if $(strip $(UTILITY_TEST_RUN_ID)),--run-id "$(UTILITY_TEST_RUN_ID)",)
 UTILITY_SUITE ?= native-dump
 UTILITY_SUITE_RUN ?=
 UTILITY_SUITE_RUN_INPUTS ?=
@@ -19,6 +22,53 @@ UTILITY_SUITE_BUNDLE_OUT ?=
 EXPERIMENT_SPEC ?= smoke
 EXPERIMENT_REPEAT_COUNT ?= 3
 EXPERIMENT_REPEAT_ID ?=
+BENCHMARK_SPEC ?= pgbench/smoke
+BENCHMARK_RUN_ID ?=
+BENCHMARK_RUN_ID_ARG = $(if $(strip $(BENCHMARK_RUN_ID)),--run-id "$(BENCHMARK_RUN_ID)",)
+BENCHMARK_SUBJECT ?= default
+BENCHMARK_SERIES ?=
+BENCHMARK_BASELINE ?=
+BENCHMARK_CANDIDATE ?=
+BENCHMARK_BUNDLE_OUT ?=
+BENCHMARK_HISTORY_ID ?=
+BENCHMARK_HISTORY ?=
+BENCHMARK_HISTORY_INPUTS ?=
+BENCHMARK_HISTORY_BUNDLE_OUT ?=
+BENCHMARK_IMPORT ?=
+BENCHMARK_IMPORT_BUNDLE_OUT ?=
+BENCHMARK_CAMPAIGN_ID ?=
+BENCHMARK_CAMPAIGN ?=
+BENCHMARK_CAMPAIGN_INPUTS ?=
+BENCHMARK_CAMPAIGN_SUBJECT ?= default
+BENCHMARK_CAMPAIGN_BUNDLE_OUT ?=
+BENCHMARK_AB_BASELINE ?=
+BENCHMARK_AB_CANDIDATE ?=
+BENCHMARK_AB_RUN_ID ?=
+BENCHMARK_AB_RUN ?=
+BENCHMARK_AB_OPTIONS ?=
+BENCHMARK_AB_BUNDLE_OUT ?=
+BENCHMARK_DRIVER_ID ?=
+BENCHMARK_DRIVER_RUNTIME_ROOT ?=
+BENCHMARK_DRIVER_BINARY ?=
+BENCHMARK_DRIVER_CONFIG ?=
+BENCHMARK_DRIVER_SCRIPT ?=
+BENCHMARK_DRIVER_WORKLOAD ?=
+BENCHMARK_DRIVER_TIMEOUT ?= 1h
+BENCHMARK_DRIVER_OUTPUT ?=
+BENCHMARK_DRIVER_EXECUTION ?=
+BENCHMARK_DRIVER_ACKNOWLEDGE ?= 0
+BENCHMARK_HOST_OUTPUT ?= generated/host-qualification.json
+BENCHMARK_HOST_INPUT ?=
+BENCHMARK_HOST_OPTIONS ?=
+OPERATION_BENCHMARK_SPEC ?= maintenance/vacuum-bloat-manual
+OPERATION_BENCHMARK_RUN_ID ?=
+OPERATION_BENCHMARK_RUN_ID_ARG = $(if $(strip $(OPERATION_BENCHMARK_RUN_ID)),--run-id "$(OPERATION_BENCHMARK_RUN_ID)",)
+OPERATION_BENCHMARK_SERIES ?=
+OPERATION_BENCHMARK_BUNDLE_OUT ?=
+PGDRILL_SOURCE ?=
+PGDRILL_BASELINE ?=
+PGDRILL_PREDICATE_FILE ?=
+PGDRILL_REQUIRE_BUNDLE ?= 1
 MATRIX_SPEC ?= smoke
 PATCHSET ?= chaos/master
 SOURCE_WORKLOAD_SPEC ?= pg-source/check
@@ -56,24 +106,31 @@ GO ?= go
 GO_CACHE ?= $(CURDIR)/.tmp/go-cache
 GO_MOD_CACHE ?= $(CURDIR)/.tmp/go-mod-cache
 VERSION ?= 0.0.0-dev
-BUILD_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BUILD_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+SOURCE_DATE_EPOCH ?= $(shell git show -s --format=%ct HEAD 2>/dev/null || echo 0)
+BUILD_DATE ?= $(shell git show -s --format=%cI HEAD 2>/dev/null || echo 1970-01-01T00:00:00Z)
 RELEASE_DIR ?= generated/release
 RELEASE_PLATFORMS ?= darwin/amd64 darwin/arm64 linux/amd64 linux/arm64
 RELEASE_CHECKSUM_FILE ?= $(RELEASE_DIR)/pgworkbench-$(VERSION)-SHA256SUMS.txt
+RELEASE_MANIFEST_FILE ?= $(RELEASE_DIR)/pgworkbench-$(VERSION)-release-manifest.json
 PGWORKBENCH_LDFLAGS ?= -s -w -X main.version=$(VERSION) -X main.commit=$(BUILD_COMMIT) -X main.builtAt=$(BUILD_DATE)
+PGWORKBENCH_CLI ?= $(GO) run ./cmd/pgworkbench
 
 .DEFAULT_GOAL := help
 
 .PHONY: help
 help:
 	@printf '%s\n' 'Targets:'
+	@printf '  %-24s %s\n' 'make runtime-up' 'Start selected PGWORKBENCH_RUNTIME'
+	@printf '  %-24s %s\n' 'make runtime-reset' 'Reset selected disposable runtime'
+	@printf '  %-24s %s\n' 'make runtime-down' 'Stop selected runtime'
 	@printf '  %-24s %s\n' 'make docker-up' 'Start PostgreSQL workbench'
 	@printf '  %-24s %s\n' 'make docker-down' 'Stop PostgreSQL workbench, keep volume'
 	@printf '  %-24s %s\n' 'make docker-reset' 'Recreate PostgreSQL volume'
 	@printf '  %-24s %s\n' 'make quickstart-plan' 'Preview the smoke experiment quickstart'
 	@printf '  %-24s %s\n' 'make quickstart' 'Run smoke quickstart and write report.md'
 	@printf '  %-24s %s\n' 'make doctor' 'Check local workbench prerequisites'
+	@printf '  %-24s %s\n' 'make compatibility' 'Render declared candidate support cells'
 	@printf '  %-24s %s\n' 'make topology-list' 'List topology specs'
 	@printf '  %-24s %s\n' 'make topology-show' 'Show TOPOLOGY'
 	@printf '  %-24s %s\n' 'make topology-inspect' 'Inspect TOPOLOGY runtime shape with Go CLI'
@@ -129,6 +186,7 @@ help:
 	@printf '  %-24s %s\n' 'make run-show-json' 'Show RUN_DIR artifact summary as JSON'
 	@printf '  %-24s %s\n' 'make run-bundle' 'Bundle RUN_DIR artifact into tar.gz'
 	@printf '  %-24s %s\n' 'make run-bundle-json' 'Bundle RUN_DIR artifact and print JSON metadata'
+	@printf '  %-24s %s\n' 'make experiment-verify-bundle' 'Verify extracted RUN_DIR with required inventory'
 	@printf '  %-24s %s\n' 'make experiment-verify' 'Verify RUN_DIR artifact integrity'
 	@printf '  %-24s %s\n' 'make experiment-verify-json' 'Verify RUN_DIR artifact integrity as JSON'
 	@printf '  %-24s %s\n' 'make experiment-report' 'Render Markdown report with Go CLI'
@@ -140,6 +198,51 @@ help:
 	@printf '  %-24s %s\n' 'make experiment-repeat' 'Run EXPERIMENT_SPEC repeatedly'
 	@printf '  %-24s %s\n' 'make experiment-compare' 'Compare runs with Go CLI'
 	@printf '  %-24s %s\n' 'make experiment-compare-shell' 'Compare runs with shell script'
+	@printf '  %-24s %s\n' 'make benchmark-list' 'List benchmark specs'
+	@printf '  %-24s %s\n' 'make benchmark-show' 'Show BENCHMARK_SPEC'
+	@printf '  %-24s %s\n' 'make benchmark-validate' 'Validate all benchmark specs'
+	@printf '  %-24s %s\n' 'make benchmark-plan' 'Render BENCHMARK_SPEC protocol plan'
+	@printf '  %-24s %s\n' 'make benchmark-plan-json' 'Render BENCHMARK_SPEC protocol plan as JSON'
+	@printf '  %-24s %s\n' 'make benchmark-drivers' 'Show exact pinned external benchmark drivers'
+	@printf '  %-24s %s\n' 'make benchmark-driver-show' 'Show BENCHMARK_DRIVER_ID pin'
+	@printf '  %-24s %s\n' 'make benchmark-driver-run' 'Run a pinned driver with explicit disposable-target ack'
+	@printf '  %-24s %s\n' 'make benchmark-driver-verify' 'Verify BENCHMARK_DRIVER_EXECUTION'
+	@printf '  %-24s %s\n' 'make benchmark-host-inspect' 'Record strict BENCHMARK_HOST_OPTIONS qualification'
+	@printf '  %-24s %s\n' 'make benchmark-host-verify' 'Verify BENCHMARK_HOST_INPUT qualification'
+	@printf '  %-24s %s\n' 'make operation-list' 'List descriptive operation benchmark specs'
+	@printf '  %-24s %s\n' 'make operation-show' 'Show OPERATION_BENCHMARK_SPEC'
+	@printf '  %-24s %s\n' 'make operation-run' 'Run OPERATION_BENCHMARK_SPEC'
+	@printf '  %-24s %s\n' 'make operation-run-show' 'Show OPERATION_BENCHMARK_SERIES artifact'
+	@printf '  %-24s %s\n' 'make operation-verify' 'Verify OPERATION_BENCHMARK_SERIES artifact'
+	@printf '  %-24s %s\n' 'make operation-verify-bundle' 'Verify an extracted operation bundle'
+	@printf '  %-24s %s\n' 'make operation-bundle' 'Bundle operation series and linked runs'
+	@printf '  %-24s %s\n' 'make benchmark-run' 'Run BENCHMARK_SPEC on PGWORKBENCH_RUNTIME'
+	@printf '  %-24s %s\n' 'make benchmark-run-json' 'Run BENCHMARK_SPEC and print JSON result'
+	@printf '  %-24s %s\n' 'make benchmark-run-show' 'Show BENCHMARK_SERIES artifact'
+	@printf '  %-24s %s\n' 'make benchmark-run-verify' 'Verify BENCHMARK_SERIES artifact'
+	@printf '  %-24s %s\n' 'make benchmark-run-verify-bundle' 'Verify an extracted benchmark bundle'
+	@printf '  %-24s %s\n' 'make benchmark-run-bundle' 'Bundle BENCHMARK_SERIES and linked runs'
+	@printf '  %-24s %s\n' 'make benchmark-compare' 'Compare BENCHMARK_BASELINE and BENCHMARK_CANDIDATE'
+	@printf '  %-24s %s\n' 'make benchmark-history-create' 'Create bounded history from BENCHMARK_HISTORY_INPUTS'
+	@printf '  %-24s %s\n' 'make benchmark-history-show' 'Show BENCHMARK_HISTORY artifact'
+	@printf '  %-24s %s\n' 'make benchmark-history-verify' 'Verify BENCHMARK_HISTORY artifact'
+	@printf '  %-24s %s\n' 'make benchmark-history-verify-bundle' 'Verify an extracted history bundle'
+	@printf '  %-24s %s\n' 'make benchmark-history-bundle' 'Bundle BENCHMARK_HISTORY and transitive evidence'
+	@printf '  %-24s %s\n' 'make benchmark-import-verify' 'Verify BENCHMARK_IMPORT artifact'
+	@printf '  %-24s %s\n' 'make benchmark-import-verify-bundle' 'Verify an extracted import bundle'
+	@printf '  %-24s %s\n' 'make benchmark-import-bundle' 'Bundle BENCHMARK_IMPORT and raw evidence'
+	@printf '  %-24s %s\n' 'make benchmark-campaign-run' 'Run ordered BENCHMARK_CAMPAIGN_INPUTS'
+	@printf '  %-24s %s\n' 'make benchmark-campaign-show' 'Show BENCHMARK_CAMPAIGN artifact'
+	@printf '  %-24s %s\n' 'make benchmark-campaign-verify' 'Verify BENCHMARK_CAMPAIGN artifact'
+	@printf '  %-24s %s\n' 'make benchmark-campaign-verify-bundle' 'Verify an extracted campaign bundle'
+	@printf '  %-24s %s\n' 'make benchmark-campaign-bundle' 'Bundle BENCHMARK_CAMPAIGN and transitive evidence'
+	@printf '  %-24s %s\n' 'make benchmark-ab-run' 'Run qualified counterbalanced A/B protocol'
+	@printf '  %-24s %s\n' 'make benchmark-ab-show' 'Show BENCHMARK_AB_RUN artifact'
+	@printf '  %-24s %s\n' 'make benchmark-ab-verify' 'Verify BENCHMARK_AB_RUN artifact'
+	@printf '  %-24s %s\n' 'make benchmark-ab-verify-bundle' 'Verify an extracted A/B bundle'
+	@printf '  %-24s %s\n' 'make benchmark-ab-bundle' 'Bundle BENCHMARK_AB_RUN and transitive evidence'
+	@printf '  %-24s %s\n' 'make pgdrill-baseline-export' 'Export bounded provenance from PGDRILL_SOURCE'
+	@printf '  %-24s %s\n' 'make pgdrill-baseline-verify' 'Verify PGDRILL_BASELINE, optionally against source'
 	@printf '  %-24s %s\n' 'make matrix-list' 'List experiment matrix specs'
 	@printf '  %-24s %s\n' 'make matrix-show' 'Show MATRIX_SPEC'
 	@printf '  %-24s %s\n' 'make matrix-plan' 'Preview MATRIX_SPEC combinations'
@@ -150,6 +253,7 @@ help:
 	@printf '  %-24s %s\n' 'make spec-show' 'Show SPEC_KIND/SPEC_ID with Go CLI'
 	@printf '  %-24s %s\n' 'make spec-reference' 'Render env spec reference with Go CLI'
 	@printf '  %-24s %s\n' 'make spec-schema' 'Render env spec JSON Schema with Go CLI'
+	@printf '  %-24s %s\n' 'make schema-check' 'Compile Draft 2020-12 schemas and validate fixtures'
 	@printf '  %-24s %s\n' 'make spec-docs-check' 'Check tracked env spec docs/schema are current'
 	@printf '  %-24s %s\n' 'make spec-validate' 'Validate env specs with Go CLI'
 	@printf '  %-24s %s\n' 'make workload-list' 'List workload specs'
@@ -167,7 +271,7 @@ help:
 	@printf '  %-24s %s\n' 'make utility-plan' 'Render UTILITY_TEST_SPEC plan'
 	@printf '  %-24s %s\n' 'make utility-plan-json' 'Render UTILITY_TEST_SPEC plan as JSON'
 	@printf '  %-24s %s\n' 'make utility-plan-expanded' 'Render expanded UTILITY_TEST_SPEC plan'
-	@printf '  %-24s %s\n' 'make utility-run' 'Run UTILITY_TEST_SPEC through experiment runner'
+	@printf '  %-24s %s\n' 'make utility-run' 'Run UTILITY_TEST_SPEC on PGWORKBENCH_RUNTIME'
 	@printf '  %-24s %s\n' 'make utility-run-json' 'Run UTILITY_TEST_SPEC and print JSON result'
 	@printf '  %-24s %s\n' 'make utility-suite-list' 'List utility suite specs'
 	@printf '  %-24s %s\n' 'make utility-suite-show' 'Show UTILITY_SUITE'
@@ -198,22 +302,50 @@ help:
 	@printf '  %-24s %s\n' 'make go-test' 'Run Go unit tests'
 	@printf '  %-24s %s\n' 'make pgworkbench' 'Build Go CLI into generated/bin'
 	@printf '  %-24s %s\n' 'make release-snapshot' 'Build pgworkbench release archives'
+	@printf '  %-24s %s\n' 'make release-smoke' 'Smoke-test the current-platform standalone archive'
+	@printf '  %-24s %s\n' 'make candidate-preflight' 'Require one clean, versioned immutable release candidate'
 	@printf '  %-24s %s\n' 'make check' 'Run static and no-Docker checks'
 	@printf '  %-24s %s\n' 'make test' 'Run profile and workload verification'
 	@printf '  %-24s %s\n' 'make release-check' 'Run release readiness checks'
+	@printf '  %-24s %s\n' 'make native-test' 'Run native backend contract tests'
+
+.PHONY: runtime-up
+runtime-up:
+	PGWORKBENCH_RUNTIME="$(PGWORKBENCH_RUNTIME)" COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/runtime.sh up "$(TOPOLOGY)"
+
+.PHONY: runtime-down
+runtime-down:
+	PGWORKBENCH_RUNTIME="$(PGWORKBENCH_RUNTIME)" COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/runtime.sh down "$(TOPOLOGY)"
+
+.PHONY: runtime-reset
+runtime-reset:
+	PGWORKBENCH_RUNTIME="$(PGWORKBENCH_RUNTIME)" COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/runtime.sh reset "$(TOPOLOGY)"
+	@PGWORKBENCH_RUNTIME="$(PGWORKBENCH_RUNTIME)" ./scripts/apply_pg_config.sh "$(PG_CONFIG)"
+
+.PHONY: runtime-restart
+runtime-restart:
+	PGWORKBENCH_RUNTIME="$(PGWORKBENCH_RUNTIME)" COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/runtime.sh restart "$(TOPOLOGY)"
+
+.PHONY: runtime-status
+runtime-status:
+	PGWORKBENCH_RUNTIME="$(PGWORKBENCH_RUNTIME)" COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/runtime.sh status "$(TOPOLOGY)"
+
+.PHONY: runtime-wait
+runtime-wait:
+	PGWORKBENCH_RUNTIME="$(PGWORKBENCH_RUNTIME)" COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/runtime.sh wait "$(TOPOLOGY)"
 
 .PHONY: docker-up
 docker-up:
-	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh up "$(TOPOLOGY)"
+	PGWORKBENCH_RUNTIME=docker COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/runtime.sh up "$(TOPOLOGY)"
 
 .PHONY: docker-down
 docker-down:
-	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh down "$(TOPOLOGY)"
+	PGWORKBENCH_RUNTIME=docker COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/runtime.sh down "$(TOPOLOGY)"
 
 .PHONY: docker-reset
 docker-reset:
-	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh reset "$(TOPOLOGY)"
-	@if [[ "$(PG_CONFIG)" != "default" ]]; then ./scripts/apply_pg_config.sh "$(PG_CONFIG)"; fi
+	PGWORKBENCH_RUNTIME=docker COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/runtime.sh reset "$(TOPOLOGY)"
+	@PGWORKBENCH_RUNTIME=docker ./scripts/apply_pg_config.sh "$(PG_CONFIG)"
 
 .PHONY: quickstart-plan
 quickstart-plan:
@@ -221,15 +353,19 @@ quickstart-plan:
 
 .PHONY: quickstart
 quickstart:
-	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" EXPERIMENT_RUN_ID="$(QUICKSTART_RUN_ID)" ./scripts/run_experiment.sh run smoke
-	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run verify "runs/$(QUICKSTART_RUN_ID)"
-	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report run "runs/$(QUICKSTART_RUN_ID)" > "runs/$(QUICKSTART_RUN_ID)/report.md"
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) experiment run --runtime "$(PGWORKBENCH_RUNTIME)" --run-id "$(QUICKSTART_RUN_ID)" smoke
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) run verify "runs/$(QUICKSTART_RUN_ID)"
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) report run "runs/$(QUICKSTART_RUN_ID)" > "runs/$(QUICKSTART_RUN_ID)/report.md"
 	@printf 'Quickstart run: %s\n' "runs/$(QUICKSTART_RUN_ID)"
 	@printf 'Quickstart report: %s\n' "runs/$(QUICKSTART_RUN_ID)/report.md"
 
 .PHONY: doctor
 doctor:
-	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench doctor $(DOCTOR_FLAGS)
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench doctor --runtime "$(PGWORKBENCH_RUNTIME)" $(DOCTOR_FLAGS)
+
+.PHONY: compatibility
+compatibility:
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench compatibility show
 
 .PHONY: topology-list
 topology-list:
@@ -249,30 +385,30 @@ topology-ps:
 
 .PHONY: topology-up
 topology-up:
-	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh up "$(TOPOLOGY)"
+	$(MAKE) runtime-up
 
 .PHONY: topology-reset
 topology-reset:
-	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh reset "$(TOPOLOGY)"
+	$(MAKE) runtime-reset
 
 .PHONY: topology-status
 topology-status:
-	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh status "$(TOPOLOGY)"
+	$(MAKE) runtime-status
 
 .PHONY: topology-down
 topology-down:
-	COMPOSE="$(COMPOSE)" ENV_FILE="$(ENV_FILE)" ./scripts/topology.sh down "$(TOPOLOGY)"
+	$(MAKE) runtime-down
 
 .PHONY: psql
-psql: docker-up
+psql: runtime-up
 	./scripts/psql.sh
 
 .PHONY: pg-config-apply
-pg-config-apply: docker-up
+pg-config-apply: runtime-up
 	./scripts/apply_pg_config.sh "$(PG_CONFIG)"
 
 .PHONY: snapshot
-snapshot: docker-up
+snapshot: runtime-up
 	./scripts/snapshot_pg.sh
 
 .PHONY: profile-list
@@ -316,22 +452,22 @@ source-classify:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench source classify "$(SOURCE_CHECK_PATH)"
 
 .PHONY: profile-setup
-profile-setup: docker-up
+profile-setup: runtime-up
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" ./scripts/run_profile_sql.sh "$(PROFILE)" 00_setup.sql
 
 .PHONY: profile-run
-profile-run: docker-up
+profile-run: runtime-up
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" ./scripts/run_profile_sql.sh "$(PROFILE)" "$(WORKLOAD_SQL)"
 
 .PHONY: profile-reset
 profile-reset: profile-setup profile-run
 
 .PHONY: monitor
-monitor: docker-up
+monitor: runtime-up
 	./scripts/psql.sh -f sql/monitor.sql
 
 .PHONY: metrics-sample
-metrics-sample: docker-up
+metrics-sample: runtime-up
 	METRICS_INTERVAL="$(METRICS_INTERVAL)" METRICS_DURATION="$(METRICS_DURATION)" METRICS_SAMPLES="$(METRICS_SAMPLES)" METRICS_OUT="$(METRICS_OUT)" METRICS_APPEND="$(METRICS_APPEND)" ./scripts/sample_metrics.sh
 
 .PHONY: metrics-plan
@@ -351,7 +487,7 @@ diagnostics-show:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench diagnostics show "$(DIAGNOSTIC)"
 
 .PHONY: diagnostics-run
-diagnostics-run: docker-up
+diagnostics-run: runtime-up
 	./scripts/run_diagnostic.sh run "$(DIAGNOSTIC)"
 
 .PHONY: workload-list
@@ -407,7 +543,7 @@ dataset-show:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench dataset show --raw "$(DATASET_SPEC)"
 
 .PHONY: dataset-load
-dataset-load: docker-up
+dataset-load: runtime-up
 	DATASET_SIZE="$(DATASET_SIZE)" DATASET_SEED="$(DATASET_SEED)" DATASET_SCHEMA="$(DATASET_SCHEMA)" ./scripts/load_dataset.sh load "$(DATASET_SPEC)"
 
 .PHONY: experiment-list
@@ -436,7 +572,7 @@ experiment-plan-expanded-json:
 
 .PHONY: experiment-run
 experiment-run:
-	./scripts/run_experiment.sh run "$(EXPERIMENT_SPEC)"
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) experiment run --runtime "$(PGWORKBENCH_RUNTIME)" "$(EXPERIMENT_SPEC)"
 
 .PHONY: run-list
 run-list:
@@ -493,6 +629,16 @@ experiment-verify:
 experiment-verify-json:
 	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-verify-json RUN_DIR=runs/<run-id>' >&2; exit 2; }
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run verify --json "$(RUN_DIR)"
+
+.PHONY: experiment-verify-bundle
+experiment-verify-bundle:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-verify-bundle RUN_DIR=<extracted-run-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run verify --bundle "$(RUN_DIR)"
+
+.PHONY: experiment-verify-bundle-json
+experiment-verify-bundle-json:
+	@test -n "$(RUN_DIR)" || { echo 'Usage: make experiment-verify-bundle-json RUN_DIR=<extracted-run-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench run verify --json --bundle "$(RUN_DIR)"
 
 .PHONY: experiment-report-go
 experiment-report-go:
@@ -574,6 +720,241 @@ experiment-compare-go:
 	@test -n "$(BASELINE_RUN)" || { echo 'Usage: make experiment-compare-go BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
 	@test -n "$(CANDIDATE_RUN)" || { echo 'Usage: make experiment-compare-go BASELINE_RUN=runs/a CANDIDATE_RUN=runs/b' >&2; exit 2; }
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench report compare "$(BASELINE_RUN)" "$(CANDIDATE_RUN)"
+
+.PHONY: benchmark-list
+benchmark-list:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark list --raw
+
+.PHONY: benchmark-show
+benchmark-show:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark show --raw "$(BENCHMARK_SPEC)"
+
+.PHONY: benchmark-validate
+benchmark-validate:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark validate
+
+.PHONY: benchmark-plan
+benchmark-plan:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark plan "$(BENCHMARK_SPEC)"
+
+.PHONY: benchmark-plan-json
+benchmark-plan-json:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark plan --json "$(BENCHMARK_SPEC)"
+
+.PHONY: benchmark-drivers
+benchmark-drivers:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark drivers
+
+.PHONY: benchmark-driver-show
+benchmark-driver-show:
+	@test -n "$(BENCHMARK_DRIVER_ID)" || { echo 'Usage: make benchmark-driver-show BENCHMARK_DRIVER_ID=<pinned-id>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark driver-show "$(BENCHMARK_DRIVER_ID)"
+
+.PHONY: benchmark-driver-run
+benchmark-driver-run:
+	@test "$(BENCHMARK_DRIVER_ACKNOWLEDGE)" = 1 || { echo 'Set BENCHMARK_DRIVER_ACKNOWLEDGE=1 only after confirming the loopback non-system target is disposable and non-production.' >&2; exit 2; }
+	@test -n "$(BENCHMARK_DRIVER_ID)" || { echo 'BENCHMARK_DRIVER_ID is required' >&2; exit 2; }
+	@test -n "$(BENCHMARK_DRIVER_RUNTIME_ROOT)" || { echo 'BENCHMARK_DRIVER_RUNTIME_ROOT is required' >&2; exit 2; }
+	@test -n "$(BENCHMARK_DRIVER_BINARY)" || { echo 'BENCHMARK_DRIVER_BINARY is required' >&2; exit 2; }
+	@test -n "$(BENCHMARK_DRIVER_CONFIG)" || { echo 'BENCHMARK_DRIVER_CONFIG is required' >&2; exit 2; }
+	@test -n "$(BENCHMARK_DRIVER_SCRIPT)" || { echo 'BENCHMARK_DRIVER_SCRIPT is required' >&2; exit 2; }
+	@test -n "$(BENCHMARK_DRIVER_WORKLOAD)" || { echo 'BENCHMARK_DRIVER_WORKLOAD is required' >&2; exit 2; }
+	@test -n "$(BENCHMARK_DRIVER_OUTPUT)" || { echo 'BENCHMARK_DRIVER_OUTPUT is required' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark driver-run \
+		--acknowledge-external-disposable-target \
+		--driver "$(BENCHMARK_DRIVER_ID)" --runtime-root "$(BENCHMARK_DRIVER_RUNTIME_ROOT)" \
+		--binary "$(BENCHMARK_DRIVER_BINARY)" \
+		--config "$(BENCHMARK_DRIVER_CONFIG)" --script "$(BENCHMARK_DRIVER_SCRIPT)" \
+		--workload "$(BENCHMARK_DRIVER_WORKLOAD)" --timeout "$(BENCHMARK_DRIVER_TIMEOUT)" \
+		"$(BENCHMARK_DRIVER_OUTPUT)"
+
+.PHONY: benchmark-driver-verify
+benchmark-driver-verify:
+	@test -n "$(BENCHMARK_DRIVER_EXECUTION)" || { echo 'Usage: make benchmark-driver-verify BENCHMARK_DRIVER_EXECUTION=<artifact-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark driver-run-verify "$(BENCHMARK_DRIVER_EXECUTION)"
+
+.PHONY: benchmark-host-inspect
+benchmark-host-inspect:
+	@test -n "$(BENCHMARK_HOST_OPTIONS)" || { echo 'BENCHMARK_HOST_OPTIONS must supply storage-path, storage-label, client-placement, and the intended strict policy; see docs/benchmark-host-qualification.md' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark host-inspect --output "$(BENCHMARK_HOST_OUTPUT)" $(BENCHMARK_HOST_OPTIONS)
+
+.PHONY: benchmark-host-verify
+benchmark-host-verify:
+	@test -n "$(BENCHMARK_HOST_INPUT)" || { echo 'Usage: make benchmark-host-verify BENCHMARK_HOST_INPUT=<host-qualification.json>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark host-verify "$(BENCHMARK_HOST_INPUT)"
+
+.PHONY: operation-list
+operation-list:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark operation list
+
+.PHONY: operation-show
+operation-show:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark operation show "$(OPERATION_BENCHMARK_SPEC)"
+
+.PHONY: operation-run
+operation-run:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark operation run --runtime "$(PGWORKBENCH_RUNTIME)" $(OPERATION_BENCHMARK_RUN_ID_ARG) "$(OPERATION_BENCHMARK_SPEC)"
+
+.PHONY: operation-run-show
+operation-run-show:
+	@test -n "$(OPERATION_BENCHMARK_SERIES)" || { echo 'Usage: make operation-run-show OPERATION_BENCHMARK_SERIES=<series-id-or-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark operation run-show "$(OPERATION_BENCHMARK_SERIES)"
+
+.PHONY: operation-verify
+operation-verify:
+	@test -n "$(OPERATION_BENCHMARK_SERIES)" || { echo 'Usage: make operation-verify OPERATION_BENCHMARK_SERIES=<series-id-or-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark operation verify "$(OPERATION_BENCHMARK_SERIES)"
+
+.PHONY: operation-verify-bundle
+operation-verify-bundle:
+	@test -n "$(OPERATION_BENCHMARK_SERIES)" || { echo 'Usage: make operation-verify-bundle OPERATION_BENCHMARK_SERIES=<extracted-series-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark operation verify --bundle "$(OPERATION_BENCHMARK_SERIES)"
+
+.PHONY: operation-bundle
+operation-bundle:
+	@test -n "$(OPERATION_BENCHMARK_SERIES)" || { echo 'Usage: make operation-bundle OPERATION_BENCHMARK_SERIES=<series-id-or-dir> [OPERATION_BENCHMARK_BUNDLE_OUT=generated/operation-benchmark.tar.gz]' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark operation bundle "$(OPERATION_BENCHMARK_SERIES)" $(if $(strip $(OPERATION_BENCHMARK_BUNDLE_OUT)),"$(OPERATION_BENCHMARK_BUNDLE_OUT)",)
+
+.PHONY: benchmark-run
+benchmark-run:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark run --runtime "$(PGWORKBENCH_RUNTIME)" $(BENCHMARK_RUN_ID_ARG) --subject "$(BENCHMARK_SUBJECT)" "$(BENCHMARK_SPEC)"
+
+.PHONY: benchmark-run-json
+benchmark-run-json:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark run --json --runtime "$(PGWORKBENCH_RUNTIME)" $(BENCHMARK_RUN_ID_ARG) --subject "$(BENCHMARK_SUBJECT)" "$(BENCHMARK_SPEC)"
+
+.PHONY: benchmark-run-show
+benchmark-run-show:
+	@test -n "$(BENCHMARK_SERIES)" || { echo 'Usage: make benchmark-run-show BENCHMARK_SERIES=<series-id-or-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark run-show "$(BENCHMARK_SERIES)"
+
+.PHONY: benchmark-run-verify
+benchmark-run-verify:
+	@test -n "$(BENCHMARK_SERIES)" || { echo 'Usage: make benchmark-run-verify BENCHMARK_SERIES=<series-id-or-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark run-verify "$(BENCHMARK_SERIES)"
+
+.PHONY: benchmark-run-verify-bundle
+benchmark-run-verify-bundle:
+	@test -n "$(BENCHMARK_SERIES)" || { echo 'Usage: make benchmark-run-verify-bundle BENCHMARK_SERIES=<extracted-series-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark run-verify --bundle "$(BENCHMARK_SERIES)"
+
+.PHONY: benchmark-run-bundle
+benchmark-run-bundle:
+	@test -n "$(BENCHMARK_SERIES)" || { echo 'Usage: make benchmark-run-bundle BENCHMARK_SERIES=<series-id-or-dir> [BENCHMARK_BUNDLE_OUT=generated/benchmark.tar.gz]' >&2; exit 2; }
+	@if [[ -n "$(BENCHMARK_BUNDLE_OUT)" ]]; then \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark run-bundle "$(BENCHMARK_SERIES)" "$(BENCHMARK_BUNDLE_OUT)"; \
+	else \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark run-bundle "$(BENCHMARK_SERIES)"; \
+	fi
+
+.PHONY: benchmark-compare
+benchmark-compare:
+	@test -n "$(BENCHMARK_BASELINE)" || { echo 'Usage: make benchmark-compare BENCHMARK_BASELINE=<series-a> BENCHMARK_CANDIDATE=<series-b>' >&2; exit 2; }
+	@test -n "$(BENCHMARK_CANDIDATE)" || { echo 'Usage: make benchmark-compare BENCHMARK_BASELINE=<series-a> BENCHMARK_CANDIDATE=<series-b>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark compare "$(BENCHMARK_BASELINE)" "$(BENCHMARK_CANDIDATE)"
+
+.PHONY: benchmark-history-create
+benchmark-history-create:
+	@test -n "$(BENCHMARK_HISTORY_INPUTS)" || { echo 'Usage: make benchmark-history-create BENCHMARK_HISTORY_INPUTS="<series-a> <series-b> [...]" [BENCHMARK_HISTORY_ID=id]' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark history-create $(if $(strip $(BENCHMARK_HISTORY_ID)),--history-id "$(BENCHMARK_HISTORY_ID)",) $(BENCHMARK_HISTORY_INPUTS)
+
+.PHONY: benchmark-history-show
+benchmark-history-show:
+	@test -n "$(BENCHMARK_HISTORY)" || { echo 'Usage: make benchmark-history-show BENCHMARK_HISTORY=<history-id-or-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark history-show "$(BENCHMARK_HISTORY)"
+
+.PHONY: benchmark-history-verify
+benchmark-history-verify:
+	@test -n "$(BENCHMARK_HISTORY)" || { echo 'Usage: make benchmark-history-verify BENCHMARK_HISTORY=<history-id-or-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark history-verify "$(BENCHMARK_HISTORY)"
+
+.PHONY: benchmark-history-verify-bundle
+benchmark-history-verify-bundle:
+	@test -n "$(BENCHMARK_HISTORY)" || { echo 'Usage: make benchmark-history-verify-bundle BENCHMARK_HISTORY=<extracted-history-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark history-verify --bundle "$(BENCHMARK_HISTORY)"
+
+.PHONY: benchmark-history-bundle
+benchmark-history-bundle:
+	@test -n "$(BENCHMARK_HISTORY)" || { echo 'Usage: make benchmark-history-bundle BENCHMARK_HISTORY=<history-id-or-dir> [BENCHMARK_HISTORY_BUNDLE_OUT=generated/history.tar.gz]' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark history-bundle "$(BENCHMARK_HISTORY)" $(if $(strip $(BENCHMARK_HISTORY_BUNDLE_OUT)),"$(BENCHMARK_HISTORY_BUNDLE_OUT)",)
+
+.PHONY: benchmark-import-verify
+benchmark-import-verify:
+	@test -n "$(BENCHMARK_IMPORT)" || { echo 'Usage: make benchmark-import-verify BENCHMARK_IMPORT=<import-dir-or-result.json>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark import-verify "$(BENCHMARK_IMPORT)"
+
+.PHONY: benchmark-import-verify-bundle
+benchmark-import-verify-bundle:
+	@test -n "$(BENCHMARK_IMPORT)" || { echo 'Usage: make benchmark-import-verify-bundle BENCHMARK_IMPORT=<extracted-import-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark import-verify --bundle "$(BENCHMARK_IMPORT)"
+
+.PHONY: benchmark-import-bundle
+benchmark-import-bundle:
+	@test -n "$(BENCHMARK_IMPORT)" || { echo 'Usage: make benchmark-import-bundle BENCHMARK_IMPORT=<import-dir-or-result.json> [BENCHMARK_IMPORT_BUNDLE_OUT=generated/import.tar.gz]' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark import-bundle "$(BENCHMARK_IMPORT)" $(if $(strip $(BENCHMARK_IMPORT_BUNDLE_OUT)),"$(BENCHMARK_IMPORT_BUNDLE_OUT)",)
+
+.PHONY: benchmark-campaign-run
+benchmark-campaign-run:
+	@test -n "$(BENCHMARK_CAMPAIGN_INPUTS)" || { echo 'Usage: make benchmark-campaign-run BENCHMARK_CAMPAIGN_INPUTS="<benchmark> [...]" [BENCHMARK_CAMPAIGN_ID=id]' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark campaign-run --runtime "$(PGWORKBENCH_RUNTIME)" $(if $(strip $(BENCHMARK_CAMPAIGN_ID)),--campaign-id "$(BENCHMARK_CAMPAIGN_ID)",) --subject "$(BENCHMARK_CAMPAIGN_SUBJECT)" $(BENCHMARK_CAMPAIGN_INPUTS)
+
+.PHONY: benchmark-campaign-show
+benchmark-campaign-show:
+	@test -n "$(BENCHMARK_CAMPAIGN)" || { echo 'Usage: make benchmark-campaign-show BENCHMARK_CAMPAIGN=<campaign-id-or-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark campaign-show "$(BENCHMARK_CAMPAIGN)"
+
+.PHONY: benchmark-campaign-verify
+benchmark-campaign-verify:
+	@test -n "$(BENCHMARK_CAMPAIGN)" || { echo 'Usage: make benchmark-campaign-verify BENCHMARK_CAMPAIGN=<campaign-id-or-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark campaign-verify "$(BENCHMARK_CAMPAIGN)"
+
+.PHONY: benchmark-campaign-verify-bundle
+benchmark-campaign-verify-bundle:
+	@test -n "$(BENCHMARK_CAMPAIGN)" || { echo 'Usage: make benchmark-campaign-verify-bundle BENCHMARK_CAMPAIGN=<extracted-campaign-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark campaign-verify --bundle "$(BENCHMARK_CAMPAIGN)"
+
+.PHONY: benchmark-campaign-bundle
+benchmark-campaign-bundle:
+	@test -n "$(BENCHMARK_CAMPAIGN)" || { echo 'Usage: make benchmark-campaign-bundle BENCHMARK_CAMPAIGN=<campaign-id-or-dir> [BENCHMARK_CAMPAIGN_BUNDLE_OUT=generated/campaign.tar.gz]' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark campaign-bundle "$(BENCHMARK_CAMPAIGN)" $(if $(strip $(BENCHMARK_CAMPAIGN_BUNDLE_OUT)),"$(BENCHMARK_CAMPAIGN_BUNDLE_OUT)",)
+
+.PHONY: benchmark-ab-run
+benchmark-ab-run:
+	@test -n "$(BENCHMARK_AB_BASELINE)" || { echo 'Usage: make benchmark-ab-run BENCHMARK_AB_BASELINE=<spec-a> BENCHMARK_AB_CANDIDATE=<spec-b> BENCHMARK_AB_OPTIONS="<complete qualification options>"' >&2; exit 2; }
+	@test -n "$(BENCHMARK_AB_CANDIDATE)" || { echo 'Usage: make benchmark-ab-run BENCHMARK_AB_BASELINE=<spec-a> BENCHMARK_AB_CANDIDATE=<spec-b> BENCHMARK_AB_OPTIONS="<complete qualification options>"' >&2; exit 2; }
+	@test -n "$(BENCHMARK_AB_OPTIONS)" || { echo 'BENCHMARK_AB_OPTIONS must supply the complete explicit host-qualification policy; see docs/benchmark-ab.md' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark ab-run --runtime "$(PGWORKBENCH_RUNTIME)" $(if $(strip $(BENCHMARK_AB_RUN_ID)),--run-id "$(BENCHMARK_AB_RUN_ID)",) $(BENCHMARK_AB_OPTIONS) "$(BENCHMARK_AB_BASELINE)" "$(BENCHMARK_AB_CANDIDATE)"
+
+.PHONY: benchmark-ab-show
+benchmark-ab-show:
+	@test -n "$(BENCHMARK_AB_RUN)" || { echo 'Usage: make benchmark-ab-show BENCHMARK_AB_RUN=<ab-id-or-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark ab-show "$(BENCHMARK_AB_RUN)"
+
+.PHONY: benchmark-ab-verify
+benchmark-ab-verify:
+	@test -n "$(BENCHMARK_AB_RUN)" || { echo 'Usage: make benchmark-ab-verify BENCHMARK_AB_RUN=<ab-id-or-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark ab-verify "$(BENCHMARK_AB_RUN)"
+
+.PHONY: benchmark-ab-verify-bundle
+benchmark-ab-verify-bundle:
+	@test -n "$(BENCHMARK_AB_RUN)" || { echo 'Usage: make benchmark-ab-verify-bundle BENCHMARK_AB_RUN=<extracted-ab-dir>' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark ab-verify --bundle "$(BENCHMARK_AB_RUN)"
+
+.PHONY: benchmark-ab-bundle
+benchmark-ab-bundle:
+	@test -n "$(BENCHMARK_AB_RUN)" || { echo 'Usage: make benchmark-ab-bundle BENCHMARK_AB_RUN=<ab-id-or-dir> [BENCHMARK_AB_BUNDLE_OUT=generated/ab.tar.gz]' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) benchmark ab-bundle "$(BENCHMARK_AB_RUN)" $(if $(strip $(BENCHMARK_AB_BUNDLE_OUT)),"$(BENCHMARK_AB_BUNDLE_OUT)",)
+
+.PHONY: pgdrill-baseline-export
+pgdrill-baseline-export:
+	@test -n "$(PGDRILL_SOURCE)" || { echo 'Usage: make pgdrill-baseline-export PGDRILL_SOURCE=<run-or-bundle> PGDRILL_BASELINE=<output.json> [PGDRILL_PREDICATE_FILE=file]' >&2; exit 2; }
+	@test -n "$(PGDRILL_BASELINE)" || { echo 'Usage: make pgdrill-baseline-export PGDRILL_SOURCE=<run-or-bundle> PGDRILL_BASELINE=<output.json> [PGDRILL_PREDICATE_FILE=file]' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) bridge pgdrill export $(if $(filter 1,$(PGDRILL_REQUIRE_BUNDLE)),--bundle,) $(if $(strip $(PGDRILL_PREDICATE_FILE)),--reviewed-predicate-file "$(PGDRILL_PREDICATE_FILE)",) "$(PGDRILL_SOURCE)" "$(PGDRILL_BASELINE)"
+
+.PHONY: pgdrill-baseline-verify
+pgdrill-baseline-verify:
+	@test -n "$(PGDRILL_BASELINE)" || { echo 'Usage: make pgdrill-baseline-verify PGDRILL_BASELINE=<baseline.json> [PGDRILL_SOURCE=run-or-bundle]' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) bridge pgdrill verify $(if $(strip $(PGDRILL_SOURCE)),--source "$(PGDRILL_SOURCE)",) "$(PGDRILL_BASELINE)"
 
 .PHONY: matrix-list
 matrix-list:
@@ -670,11 +1051,11 @@ utility-plan-expanded:
 
 .PHONY: utility-run
 utility-run:
-	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility run "$(UTILITY_TEST_SPEC)"
+	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) utility run --runtime "$(PGWORKBENCH_RUNTIME)" $(UTILITY_RUN_ID_ARG) "$(UTILITY_TEST_SPEC)"
 
 .PHONY: utility-run-json
 utility-run-json:
-	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility run --json "$(UTILITY_TEST_SPEC)"
+	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) utility run --json --runtime "$(PGWORKBENCH_RUNTIME)" $(UTILITY_RUN_ID_ARG) "$(UTILITY_TEST_SPEC)"
 
 .PHONY: utility-suite-list
 utility-suite-list:
@@ -698,11 +1079,11 @@ utility-suite-plan-json:
 
 .PHONY: utility-suite-run
 utility-suite-run:
-	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite run "$(UTILITY_SUITE)"
+	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) utility-suite run "$(UTILITY_SUITE)"
 
 .PHONY: utility-suite-run-json
 utility-suite-run-json:
-	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility-suite run --json "$(UTILITY_SUITE)"
+	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) utility-suite run --json "$(UTILITY_SUITE)"
 
 .PHONY: utility-suite-run-list
 utility-suite-run-list:
@@ -760,29 +1141,10 @@ scan-artifacts-go:
 
 .PHONY: privacy-scan
 privacy-scan:
-	@tmp="$$(mktemp "$${TMPDIR:-/tmp}/postgres-experiment-workbench-privacy.XXXXXX")"; \
-	home_pattern="$$(printf '%s' "$$HOME" | sed 's/[][\\.^$$*+?{}|()]/\\&/g')"; \
-	pattern="$$(printf '%s|%s|%s|%s' 'gh''o_' 'gh''p_' 'to''ken' 'se''cret')"; \
-	if [[ -n "$$home_pattern" ]]; then pattern="$$pattern|$$home_pattern"; fi; \
-	rg -n -i "$$pattern" . -g '!notes/**' -g '!logs/**' -g '!runs/**' -g '!generated/**' -g '!.tmp/**' -g '!.git/**' > "$$tmp" 2>&1; \
-	status="$$?"; \
-	if [[ "$$status" = "1" ]]; then \
-		rm -f "$$tmp"; \
-		echo 'PASS: privacy scan'; \
-	elif [[ "$$status" = "0" ]]; then \
-		cat "$$tmp"; \
-		rm -f "$$tmp"; \
-		echo 'FAIL: privacy scan found sensitive-looking public text' >&2; \
-		exit 1; \
-	else \
-		cat "$$tmp"; \
-		rm -f "$$tmp"; \
-		echo 'FAIL: privacy scan command failed' >&2; \
-		exit "$$status"; \
-	fi
+	./scripts/privacy_scan.sh
 
 .PHONY: workload-start
-workload-start: docker-up
+workload-start: runtime-up
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" ./scripts/workload_bg.sh start-profile "$(PROFILE)" "$(WORKLOAD_SQL)"
 
 .PHONY: workload-start-spec
@@ -790,7 +1152,7 @@ workload-start-spec:
 	PROFILE_SIZE="$(PROFILE_SIZE)" PROFILE_SECONDS="$(PROFILE_SECONDS)" ./scripts/workload_bg.sh start-spec "$(WORKLOAD_SPEC)"
 
 .PHONY: workload-start-sql
-workload-start-sql: docker-up
+workload-start-sql: runtime-up
 	@test -n "$(SQL)" || { echo 'Usage: make workload-start-sql SQL=path/to/file.sql' >&2; exit 2; }
 	./scripts/workload_bg.sh start-sql "$(SQL)"
 
@@ -819,7 +1181,7 @@ workload-stop:
 	./scripts/workload_bg.sh stop
 
 .PHONY: run-sql
-run-sql: docker-up
+run-sql: runtime-up
 	@test -n "$(SQL)" || { echo 'Usage: make run-sql SQL=path/to/file.sql' >&2; exit 2; }
 	./scripts/run_sql_logged.sh "$(SQL)"
 
@@ -844,23 +1206,38 @@ pgworkbench:
 	mkdir -p generated/bin
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) build -trimpath -ldflags '$(PGWORKBENCH_LDFLAGS)' -o generated/bin/pgworkbench ./cmd/pgworkbench
 
+.PHONY: candidate-preflight
+candidate-preflight:
+	BUILD_COMMIT="$(BUILD_COMMIT)" PGWORKBENCH_GO="$(GO)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" ./scripts/candidate_preflight.sh "$(VERSION)"
+
 .PHONY: release-snapshot
-release-snapshot:
+release-snapshot: candidate-preflight
 	mkdir -p "$(RELEASE_DIR)"
-	@for target in $(RELEASE_PLATFORMS); do \
+	@set -euo pipefail; for target in $(RELEASE_PLATFORMS); do \
 		os="$${target%/*}"; \
 		arch="$${target#*/}"; \
 		name="pgworkbench-$(VERSION)-$${os}-$${arch}"; \
 		out_dir="$(RELEASE_DIR)/$${name}"; \
-		rm -rf "$$out_dir"; \
-		mkdir -p "$$out_dir"; \
+		archive="$(RELEASE_DIR)/$${name}.tar.gz"; \
+		sbom="$(RELEASE_DIR)/$${name}.spdx.json"; \
+		rm -rf "$$out_dir"; rm -f "$$archive" "$$sbom"; \
 		echo "building $$name"; \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(GO) run ./cmd/pgworkbench pack export --engine-version "$(VERSION)" "$$out_dir"; \
 		CGO_ENABLED=0 GOOS="$$os" GOARCH="$$arch" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
 			$(GO) build -trimpath -ldflags '$(PGWORKBENCH_LDFLAGS)' -o "$$out_dir/pgworkbench" ./cmd/pgworkbench; \
-		tar -C "$$out_dir" -czf "$(RELEASE_DIR)/$${name}.tar.gz" pgworkbench; \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(GO) run ./cmd/pgworkbench release sbom create --root "$$out_dir" --output "$$sbom" \
+				--name "$$name" --version "$(VERSION)" --commit "$(BUILD_COMMIT)" --epoch "$(SOURCE_DATE_EPOCH)"; \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(GO) run ./cmd/pgworkbench release sbom verify --package-root "$$out_dir" "$$sbom"; \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(GO) run ./cmd/pgworkbench release archive create --source "$$out_dir" --output "$$archive" \
+				--root-name "$$name" --epoch "$(SOURCE_DATE_EPOCH)"; \
+		rm -rf "$$out_dir"; \
 	done
 	@rm -f "$(RELEASE_CHECKSUM_FILE)"
-	@for target in $(RELEASE_PLATFORMS); do \
+	@set -euo pipefail; for target in $(RELEASE_PLATFORMS); do \
 		os="$${target%/*}"; \
 		arch="$${target#*/}"; \
 		name="pgworkbench-$(VERSION)-$${os}-$${arch}.tar.gz"; \
@@ -870,19 +1247,51 @@ release-snapshot:
 			(cd "$(RELEASE_DIR)" && shasum -a 256 "$$name") >> "$(RELEASE_CHECKSUM_FILE)"; \
 		fi; \
 	done
+	@LC_ALL=C sort -k2,2 -o "$(RELEASE_CHECKSUM_FILE)" "$(RELEASE_CHECKSUM_FILE)"
+	@chmod 0644 "$(RELEASE_CHECKSUM_FILE)"
+	@rm -f "$(RELEASE_MANIFEST_FILE)"
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench release manifest create \
+		--release-dir "$(RELEASE_DIR)" --version "$(VERSION)" --commit "$(BUILD_COMMIT)" --pack-root . \
+		--checksum-file "$$(basename "$(RELEASE_CHECKSUM_FILE)")" \
+		--output "$$(basename "$(RELEASE_MANIFEST_FILE)")" --source-date-epoch "$(SOURCE_DATE_EPOCH)"
+	@GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench release manifest verify \
+		--release-dir "$(RELEASE_DIR)" --manifest "$$(basename "$(RELEASE_MANIFEST_FILE)")"
 	@for target in $(RELEASE_PLATFORMS); do \
 		os="$${target%/*}"; \
 		arch="$${target#*/}"; \
 		name="pgworkbench-$(VERSION)-$${os}-$${arch}"; \
 		printf '%s\n' "$(RELEASE_DIR)/$${name}.tar.gz"; \
+		printf '%s\n' "$(RELEASE_DIR)/$${name}.spdx.json"; \
 	done
 	@printf '%s\n' "$(RELEASE_CHECKSUM_FILE)"
+	@printf '%s\n' "$(RELEASE_MANIFEST_FILE)"
+
+.PHONY: release-smoke
+release-smoke: release-snapshot
+	@set -euo pipefail; \
+		manifest="$$(basename "$(RELEASE_MANIFEST_FILE)")"; \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench release manifest verify \
+			--release-dir "$(RELEASE_DIR)" --manifest "$$manifest"; \
+		host_os="$$($(GO) env GOOS)"; host_arch="$$($(GO) env GOARCH)"; \
+		archive="$(RELEASE_DIR)/pgworkbench-$(VERSION)-$${host_os}-$${host_arch}.tar.gz"; \
+		./tests/release_archive.sh "$$archive"; \
+		PGWORKBENCH_GO="$(GO)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" ./tests/release_reproducibility.sh \
+			"$$archive" "$(VERSION)" "$(BUILD_COMMIT)" "$(SOURCE_DATE_EPOCH)" "$(BUILD_DATE)"; \
+		PGWORKBENCH_GO="$(GO)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" ./tests/release_set_reproducibility.sh \
+			"$(RELEASE_DIR)" "$(VERSION)" "$(BUILD_COMMIT)" "$(SOURCE_DATE_EPOCH)" "$(BUILD_DATE)"
+
+.PHONY: schema-check
+schema-check:
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test -count=1 ./internal/schemavalidation -run '^TestRepositorySchemaGate$$'
 
 .PHONY: check
-check:
+check: schema-check
 	bash -n scripts/*.sh tests/*.sh profiles/*/scripts/*.sh
-	git diff --check
+	@if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git diff --check; fi
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) test ./...
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) vet ./...
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench pack validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench compatibility validate >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile list >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile show smoke >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench profile validate >/dev/null
@@ -909,6 +1318,16 @@ check:
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan --raw pgbench/tiny >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload plan --json pgbench/tiny >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench benchmark list --raw >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench benchmark show --raw pgbench/smoke >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench benchmark validate >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench benchmark plan pgbench/smoke >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench benchmark plan --json pgbench/smoke >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench benchmark drivers --json >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench benchmark driver-show sysbench-postgresql-1.0.20 >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench benchmark operation list --json >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench benchmark operation show maintenance/vacuum-bloat-manual >/dev/null
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" ./tests/benchmark_import.sh >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload bg status --json >/dev/null
 	PG_UPGRADE_ACTION=plan WORKLOAD_RUN_LOG=0 GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench workload run topology/native-pg-upgrade >/dev/null
 	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(GO) run ./cmd/pgworkbench utility list --raw >/dev/null
@@ -945,12 +1364,128 @@ check:
 	./tests/patchsets.sh
 	./tests/diagnostics.sh
 	./tests/shell_portability.sh
+	./tests/runtime.sh
+	./tests/runtime_workloads.sh
+	./tests/pgbench_phase_io.sh
+	./tests/benchmark_capsule.sh
+	./tests/compose_loopback_ports.sh
+	./tests/candidate_identity.sh
+	./tests/release_workflow_graph.sh
+	./tests/external_driver_gate.sh
+	./tests/benchmark_phase.sh
+	./tests/effective_pg_settings.sh
+	GO_CACHE="$(GO_CACHE)" GO_MOD_CACHE="$(GO_MOD_CACHE)" bash ./tests/benchmark_preflight.sh
+	GO_CACHE="$(GO_CACHE)" GO_MOD_CACHE="$(GO_MOD_CACHE)" ./tests/experiment_terminal.sh
+	GO_CACHE="$(GO_CACHE)" GO_MOD_CACHE="$(GO_MOD_CACHE)" ./tests/utility_provenance.sh
+	bash ./tests/experiment_hooks.sh
+	./tests/experiment_target_guard.sh
+	./tests/experiment_runs_root.sh
+	./tests/privacy_scan.sh
 	./tests/scan_failures.sh
 	./tests/run_verify.sh
 	./tests/report_runs.sh
 	./tests/summarize_runs.sh
 	./tests/compare_runs.sh
 	./tests/history.sh
+
+.PHONY: native-test
+native-test:
+	./tests/runtime.sh
+	./tests/runtime_workloads.sh
+	@set -euo pipefail; bindir="$(PGWORKBENCH_NATIVE_BINDIR)"; \
+		if [[ -z "$$bindir" ]] && command -v pg_config >/dev/null 2>&1; then bindir="$$(pg_config --bindir)"; fi; \
+		if [[ -z "$$bindir" || ! -x "$$bindir/initdb" ]]; then \
+			echo 'FAIL: native PostgreSQL server binaries not found; set PGWORKBENCH_NATIVE_BINDIR' >&2; exit 1; \
+		fi; \
+		ports="$$(./scripts/assign_test_ports.sh)"; \
+		port="$$(awk -F= '$$1 == "POSTGRES_PORT" {print $$2}' <<< "$$ports")"; \
+		run_stamp="$$(date -u +%Y%m%d_%H%M%S)"; \
+		configured_id="native-configured-$$run_stamp"; \
+		default_id="native-default-$$run_stamp"; \
+		false_id="native-false-$$run_stamp"; \
+		metrics_fail_id="native-metrics-fail-$$run_stamp"; \
+		background_fail_id="native-background-fail-$$run_stamp"; \
+		benchmark_id="native-benchmark-smoke-$$run_stamp"; \
+		utility_dump_id="native-utility-pgdump-$$run_stamp"; \
+		utility_dumpall_id="native-utility-pgdumpall-$$run_stamp"; \
+		utility_restore_id="native-utility-pgrestore-$$run_stamp"; \
+		bundle_root="$$(mktemp -d "$${TMPDIR:-/tmp}/pgworkbench-native-bundle.XXXXXX")"; \
+		cleanup_native() { POSTGRES_PORT="$$port" PGWORKBENCH_RUNTIME=native PGWORKBENCH_NATIVE_BINDIR="$$bindir" ./scripts/runtime.sh down single >/dev/null 2>&1 || true; rm -rf -- "$$bundle_root"; }; \
+		trap cleanup_native EXIT; \
+		POSTGRES_PORT="$$port" PGWORKBENCH_NATIVE_BINDIR="$$bindir" EXPERIMENT_RUNTIME_RESET=1 \
+		EXPERIMENT_PG_CONFIG=debug-logging EXPERIMENT_METRICS=0 EXPERIMENT_SNAPSHOT=0 \
+			GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(PGWORKBENCH_CLI) experiment run --runtime native --run-id "$$configured_id" smoke; \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(PGWORKBENCH_CLI) run verify "runs/$$configured_id"; \
+		test "$$(POSTGRES_PORT="$$port" PGWORKBENCH_RUNTIME=native PGWORKBENCH_NATIVE_BINDIR="$$bindir" ./scripts/psql.sh -Atq -c 'SHOW log_min_duration_statement')" = '0'; \
+		POSTGRES_PORT="$$port" PGWORKBENCH_NATIVE_BINDIR="$$bindir" EXPERIMENT_PG_CONFIG=default \
+		EXPERIMENT_METRICS=0 EXPERIMENT_SNAPSHOT=0 GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(PGWORKBENCH_CLI) experiment run --runtime native --run-id "$$default_id" smoke; \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) run verify "runs/$$default_id"; \
+		test "$$(POSTGRES_PORT="$$port" PGWORKBENCH_RUNTIME=native PGWORKBENCH_NATIVE_BINDIR="$$bindir" ./scripts/psql.sh -Atq -c 'SHOW log_min_duration_statement')" = '-1'; \
+		for utility_spec in pg-dump/smoke pg-dumpall/smoke pg-restore/smoke; do \
+			case "$$utility_spec" in \
+				pg-dump/smoke) utility_id="$$utility_dump_id" ;; \
+				pg-dumpall/smoke) utility_id="$$utility_dumpall_id" ;; \
+				pg-restore/smoke) utility_id="$$utility_restore_id" ;; \
+			esac; \
+			POSTGRES_PORT="$$port" PGWORKBENCH_NATIVE_BINDIR="$$bindir" \
+			UTILITY_TEST_SNAPSHOT=0 METRICS_SAMPLES=1 \
+			GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+				$(PGWORKBENCH_CLI) utility run --runtime native --run-id "$$utility_id" "$$utility_spec"; \
+			GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+				$(PGWORKBENCH_CLI) run verify "runs/$$utility_id"; \
+			done; \
+		for utility_id in "$$utility_dump_id" "$$utility_dumpall_id" "$$utility_restore_id"; do \
+			test -s "runs/$$utility_id/artifacts/provenance/experiment-spec.env"; \
+			test -s "runs/$$utility_id/artifacts/provenance/source-utility-test.env"; \
+		done; \
+		for captured in \
+			"$$utility_dump_id/pg-dump-smoke.sql" \
+			"$$utility_dumpall_id/pg-dumpall.sql" \
+			"$$utility_restore_id/pg-restore-smoke.dump" \
+			"$$utility_restore_id/pg-restore-smoke.dump.sql"; do \
+			utility_id="$${captured%%/*}"; output="$${captured#*/}"; \
+			test -s "runs/$$utility_id/artifacts/utility/logs/utility/$$output"; \
+		done; \
+		bundle_archive="$$bundle_root/pgrestore.tar.gz"; \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(PGWORKBENCH_CLI) run bundle "runs/$$utility_restore_id" "$$bundle_archive" >/dev/null; \
+		mkdir -p "$$bundle_root/extracted"; tar -C "$$bundle_root/extracted" -xzf "$$bundle_archive"; \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(PGWORKBENCH_CLI) run verify --bundle "$$bundle_root/extracted/$$utility_restore_id"; \
+		test "$$(POSTGRES_PORT="$$port" PGWORKBENCH_RUNTIME=native PGWORKBENCH_NATIVE_BINDIR="$$bindir" ./scripts/psql.sh -Atq -c 'SELECT count(*) FROM restore_check.items')" = '10000'; \
+		for utility_output in pg-dump-smoke.sql pg-dumpall.sql pg-restore-smoke.dump pg-restore-smoke.dump.sql; do test -s "logs/utility/$$utility_output"; done; \
+		POSTGRES_PORT="$$port" PGWORKBENCH_RUNTIME=native PGWORKBENCH_NATIVE_BINDIR="$$bindir" \
+			PGWORKBENCH_GO="$(GO)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			./tests/benchmark_smoke.sh "$$benchmark_id"; \
+		if POSTGRES_PORT="$$port" PGWORKBENCH_NATIVE_BINDIR="$$bindir" EXPERIMENT_PG_CONFIG=default \
+		EXPERIMENT_METRICS=0 EXPERIMENT_SNAPSHOT=0 EXPERIMENT_ASSERT_SQL= EXPERIMENT_ASSERT_TRUE_SQL='SELECT false' \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(PGWORKBENCH_CLI) experiment run --runtime native --run-id "$$false_id" smoke; then \
+			echo 'FAIL: strict boolean SQL assertion accepted false' >&2; exit 1; \
+		fi; \
+		grep -q '"status": "failed"' "runs/$$false_id/verdict.json"; \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) run verify "runs/$$false_id"; \
+		if POSTGRES_PORT="$$port" PGWORKBENCH_NATIVE_BINDIR="$$bindir" EXPERIMENT_PG_CONFIG=default \
+		EXPERIMENT_METRICS_INTERVAL=invalid EXPERIMENT_METRICS_SAMPLES=1 EXPERIMENT_SNAPSHOT=0 \
+		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(PGWORKBENCH_CLI) experiment run --runtime native --run-id "$$metrics_fail_id" smoke; then \
+			echo 'FAIL: metrics child failure produced a passing experiment' >&2; exit 1; \
+		fi; \
+		grep -q '"status": "failed"' "runs/$$metrics_fail_id/verdict.json"; \
+		grep -Eq '^workload_exit="?[1-9][0-9]*"?$$' "runs/$$metrics_fail_id/verdict.env"; \
+		if POSTGRES_PORT="$$port" PGWORKBENCH_NATIVE_BINDIR="$$bindir" EXPERIMENT_PG_CONFIG=default \
+		EXPERIMENT_BACKGROUND_SPECS=missing/background EXPERIMENT_BACKGROUND_WAIT=1 \
+		EXPERIMENT_METRICS=0 EXPERIMENT_SNAPSHOT=0 GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
+			$(PGWORKBENCH_CLI) experiment run --runtime native --run-id "$$background_fail_id" smoke; then \
+			echo 'FAIL: background child failure produced a passing experiment' >&2; exit 1; \
+		fi; \
+		grep -q '"status": "failed"' "runs/$$background_fail_id/verdict.json"; \
+		grep -Eq '^workload_exit="?[1-9][0-9]*"?$$' "runs/$$background_fail_id/verdict.env"; \
+		cleanup_native; trap - EXIT; \
+		echo 'PASS: native runtime, utility adapters, portable bundle, child-exit handling, config isolation, strict assertion, and evidence contract'
 
 .PHONY: test
 test: docker-up
@@ -968,7 +1503,8 @@ test: docker-up
 	./tests/compare_runs.sh
 	./tests/history.sh
 	./tests/matrices.sh
+	PGWORKBENCH_RUNTIME=docker PGWORKBENCH_GO="$(GO)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" ./tests/benchmark_smoke.sh
 
 .PHONY: release-check
-release-check: doctor check quickstart test scan-artifacts scan-artifacts-go pgworkbench privacy-scan
+release-check: candidate-preflight doctor check native-test quickstart test scan-artifacts scan-artifacts-go pgworkbench privacy-scan release-smoke
 	@echo 'PASS: release-check'

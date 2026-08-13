@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-driver-lock.schema.json",
+  "title": "pgworkbench pinned external benchmark driver lock",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "drivers"],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.benchmark-driver-lock/v1"},
+    "artifact_type": {"const": "pgworkbench.benchmark-driver-lock"},
+    "drivers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/driver"}
+    }
+  },
+  "$defs": {
+    "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "driver": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "adapter", "display_version", "repository", "ref_type", "ref",
+        "commit", "entrypoint", "result_format", "parser", "runtime_support",
+        "workloads", "binary_distributed_by_project", "source_to_binary_attested",
+        "decision_eligible"
+      ],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"},
+        "adapter": {"enum": ["benchbase", "hammerdb6", "sysbench1"]},
+        "display_version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "repository": {"type": "string", "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "ref_type": {"enum": ["commit", "tag"]},
+        "ref": {"type": "string", "minLength": 1, "maxLength": 128},
+        "tag_object": {"$ref": "#/$defs/sha"},
+        "commit": {"$ref": "#/$defs/sha"},
+        "entrypoint": {"type": "string", "minLength": 1, "maxLength": 128},
+        "result_format": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/@+-]{0,127}$"},
+        "parser": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/@+-]{0,127}$"},
+        "runtime_support": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["native", "docker"]}
+        },
+        "workloads": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,159}$"}
+        },
+        "binary_distributed_by_project": {"const": false},
+        "source_to_binary_attested": {"const": false},
+        "decision_eligible": {"const": false}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"ref_type": {"const": "tag"}}},
+          "then": {"required": ["tag_object"]},
+          "else": {"not": {"required": ["tag_object"]}}
+        }
+      ]
+    }
+  }
+}

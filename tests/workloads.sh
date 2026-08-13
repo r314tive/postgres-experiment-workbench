@@ -43,7 +43,7 @@ GO_SHELL_WORKLOAD_PLAN="$(
   cd "$REPO_DIR"
   GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" "$GO" run ./cmd/pgworkbench workload plan topology/pgbouncer-smoke
 )"
-grep -q 'bash -lc' <<< "$GO_SHELL_WORKLOAD_PLAN"
+grep -q 'bash --noprofile --norc -c' <<< "$GO_SHELL_WORKLOAD_PLAN"
 
 GO_MASSIVE_DML_PLAN="$(
   cd "$REPO_DIR"

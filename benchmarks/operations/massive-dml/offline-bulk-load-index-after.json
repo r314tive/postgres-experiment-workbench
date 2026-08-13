@@ -1,0 +1,21 @@
+{
+  "schema_version": "pgworkbench.operation-benchmark-spec/v1",
+  "id": "massive-dml/offline-bulk-load-index-after",
+  "name": "Massive DML offline bulk load with indexes built after load",
+  "description": "Repeated disposable bulk-load experiment with secondary indexes created after rows are inserted.",
+  "classification": "descriptive-engineering",
+  "decision_eligible": false,
+  "experiment_spec": "massive-dml/offline-bulk-load-index-after",
+  "trials": 5,
+  "max_cv_pct": 15,
+  "supported_runtimes": ["docker", "native"],
+  "measurement": {
+    "basis": "operation-result",
+    "result_path": "artifacts/operation-result.json",
+    "metric": "total_ms",
+    "unit": "milliseconds",
+    "direction": "lower-is-better",
+    "scope": "PostgreSQL server clock around table creation, row insertion, and required secondary-index creation; ANALYZE is excluded."
+  },
+  "assurance": "A passing series proves exact repeated runs, linked-run integrity, result parsing, and aggregate reproducibility for this disposable environment. It does not prove production capacity, universal superiority, TPC compliance, or causal equivalence with a separately scheduled series."
+}

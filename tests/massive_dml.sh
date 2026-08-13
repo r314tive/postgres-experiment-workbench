@@ -7,23 +7,36 @@ GO_MOD_CACHE="${GO_MOD_CACHE:-$REPO_DIR/.tmp/go-mod-cache}"
 
 run_massive_dml_experiment() {
   local spec="$1"
-  local safe_spec="${spec//\//-}"
-  local run_id="test-${safe_spec}-$(date -u +%Y%m%d_%H%M%S)-$$"
+  local safe_spec run_id
+  safe_spec="${spec//\//-}"
+  run_id="test-${safe_spec}-$(date -u +%Y%m%d_%H%M%S)-$$"
   local run_dir="$REPO_DIR/runs/$run_id"
 
-  EXPERIMENT_RUN_ID="$run_id" \
-  EXPERIMENT_PROFILE_SIZE=small \
-  EXPERIMENT_SNAPSHOT=0 \
-  EXPERIMENT_METRICS_SAMPLES=1 \
-    "$REPO_DIR/scripts/run_experiment.sh" run "$spec" >/dev/null
+  if ! EXPERIMENT_RUN_ID="$run_id" \
+    EXPERIMENT_PROFILE_SIZE=small \
+    EXPERIMENT_SNAPSHOT=0 \
+    EXPERIMENT_METRICS_SAMPLES=1 \
+      "$REPO_DIR/scripts/run_experiment.sh" run "$spec" >/dev/null; then
+    echo "FAIL: massive-DML experiment failed: $spec ($run_dir)" >&2
+    return 1
+  fi
 
-  grep -q '"status": "passed"' "$run_dir/verdict.json"
-  "$REPO_DIR/scripts/run_experiment.sh" show "$spec" >/dev/null
-  (
+  if ! grep -q '"status": "passed"' "$run_dir/verdict.json"; then
+    echo "FAIL: massive-DML experiment has no passed verdict: $spec ($run_dir)" >&2
+    return 1
+  fi
+  if ! "$REPO_DIR/scripts/run_experiment.sh" show "$spec" >/dev/null; then
+    echo "FAIL: massive-DML experiment is not inspectable: $spec" >&2
+    return 1
+  fi
+  if ! (
     cd "$REPO_DIR"
     GOCACHE="$GO_CACHE" GOMODCACHE="$GO_MOD_CACHE" \
       go run ./cmd/pgworkbench run verify "$run_dir" >/dev/null
-  )
+  ); then
+    echo "FAIL: massive-DML artifact did not verify: $spec ($run_dir)" >&2
+    return 1
+  fi
 
   printf '%s\n' "$run_dir"
 }
