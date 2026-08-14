@@ -10,7 +10,9 @@
   checkout scenario pack, and requires both run evidence and the verifier
   executable to name one non-development version and full commit. The release
   runbook now uses a scrubbed process environment in a fresh detached evidence
-  worktree and pins Docker plus `.env.example`.
+  worktree, a candidate-private home/cache and Docker context with one copied
+  Compose plugin and explicit local socket, a fixed bootstrap path plus
+  `.env.example`, and fail-closed checks for conflicting Docker resources.
 - Pinned release and CI builds to the exact Go 1.26.5 patch toolchain, made
   candidate preflight reject toolchain drift and pack-visible untracked files,
   and bound the embedded toolchain across all four archives into the verified

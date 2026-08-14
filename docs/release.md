@@ -27,29 +27,97 @@ dirty worktree. They also
 require the exact stable Go patch release recorded in `.go-version`; the same
 pin is used by every GitHub build job. Supplying the candidate binary to both
 the manual matrix and `release-check` keeps generated manifests bound to the
-candidate SemVer and commit instead of `dev`/`unknown`:
+candidate SemVer and commit instead of `dev`/`unknown`. Before running the
+block, set `PGWORKBENCH_RELEASE_DOCKER_HOST` to the local daemon's explicit
+`unix://` socket and `PGWORKBENCH_RELEASE_COMPOSE_PLUGIN` to an absolute,
+executable Docker Compose plugin. The block stages only that plugin into an
+otherwise empty Docker CLI configuration:
 
 ```bash
-go_bin="${PGWORKBENCH_GO:-go}"
-native_bindir="${PGWORKBENCH_NATIVE_BINDIR:?set native PostgreSQL bindir}"
-release_env=(
-  env -i
-  "HOME=${HOME:?HOME is required}"
-  "PATH=${PATH:?PATH is required}"
-  "TMPDIR=${TMPDIR:-/tmp}"
+set -euo pipefail
+
+go_command="${PGWORKBENCH_GO:-go}"
+go_bin="$(command -v "$go_command")"
+case "$go_bin" in
+  /*) ;;
+  *) echo 'Go must resolve to an absolute executable path' >&2; exit 2 ;;
+esac
+test -n "$go_bin" && test -x "$go_bin"
+go_bindir="$(cd -P "${go_bin%/*}" && pwd)"
+go_bin="$go_bindir/${go_bin##*/}"
+native_bindir_input="${PGWORKBENCH_NATIVE_BINDIR:?set native PostgreSQL bindir}"
+native_bindir="$(cd -P "$native_bindir_input" && pwd)"
+docker_host="${PGWORKBENCH_RELEASE_DOCKER_HOST:?set explicit local unix:// Docker socket}"
+case "$docker_host" in
+  unix:///*) ;;
+  *) echo 'release Docker host must be a local unix:// socket' >&2; exit 2 ;;
+esac
+test -S "${docker_host#unix://}"
+compose_plugin_input="${PGWORKBENCH_RELEASE_COMPOSE_PLUGIN:?set absolute Docker Compose plugin}"
+case "$compose_plugin_input" in
+  /*) ;;
+  *) echo 'Docker Compose plugin path must be absolute' >&2; exit 2 ;;
+esac
+test -x "$compose_plugin_input"
+compose_plugin_dir="$(cd -P "${compose_plugin_input%/*}" && pwd)"
+compose_plugin="$compose_plugin_dir/${compose_plugin_input##*/}"
+release_path="$go_bindir:$native_bindir:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+release_tmp="$(cd -P /tmp && pwd)"
+release_common_env=(
+  "PATH=$release_path"
+  "TMPDIR=$release_tmp"
   "USER=${USER:-pgworkbench}"
   "LOGNAME=${LOGNAME:-${USER:-pgworkbench}}"
   LANG=C LC_ALL=C TZ=UTC
-  GOENV=off GOWORK=off GOFLAGS= GOTOOLCHAIN=local
+  GOENV=off GOWORK=off GOFLAGS= GOTOOLCHAIN=local GOTELEMETRY=off
   GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+  GIT_CONFIG_COUNT=2
+  GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null
+  GIT_CONFIG_KEY_1=core.autocrlf GIT_CONFIG_VALUE_1=false
 )
+bootstrap_env=(env -i "HOME=$release_tmp" "${release_common_env[@]}")
 
-candidate_sha="$("${release_env[@]}" git rev-parse HEAD)"
-candidate_parent="$("${release_env[@]}" mktemp -d "${TMPDIR:-/tmp}/pgworkbench-v0.2.0.XXXXXX")"
-candidate_checkout="$candidate_parent/checkout"
+candidate_sha="$("${bootstrap_env[@]}" git rev-parse HEAD)"
+candidate_parent="$("${bootstrap_env[@]}" mktemp -d "$release_tmp/pgworkbench-v0.2.0.XXXXXX")"
+candidate_checkout="$candidate_parent/pgworkbench-${candidate_sha:0:12}"
+release_home="$candidate_parent/home"
+docker_config="$release_home/.docker"
+"${bootstrap_env[@]}" mkdir -p "$docker_config/cli-plugins"
+"${bootstrap_env[@]}" install -m 0755 \
+  "$compose_plugin" "$docker_config/cli-plugins/docker-compose"
+"${bootstrap_env[@]}" docker --config "$docker_config" context create \
+  pgworkbench-release --description 'pgworkbench release candidate' \
+  --docker "host=$docker_host"
+"${bootstrap_env[@]}" docker --config "$docker_config" context use pgworkbench-release
+release_env=(
+  env -i "HOME=$release_home" "${release_common_env[@]}"
+  "GOCACHE=$candidate_checkout/.tmp/go-cache"
+  "GOMODCACHE=$candidate_checkout/.tmp/go-mod-cache"
+)
 "${release_env[@]}" git worktree add --detach "$candidate_checkout" "$candidate_sha"
 cd -P "$candidate_checkout"
 for path in .env runs generated .tmp; do test ! -e "$path"; done
+
+"${release_env[@]}" bash -c '(( BASH_VERSINFO[0] >= 4 ))'
+test "$("${release_env[@]}" docker context inspect --format '{{.Endpoints.docker.Host}}')" = "$docker_host"
+"${release_env[@]}" docker compose version >/dev/null
+"${release_env[@]}" docker info >/dev/null
+release_project="${candidate_checkout##*/}"
+for container_name in \
+  postgres-experiment-workbench \
+  postgres-experiment-workbench-replica \
+  postgres-experiment-workbench-logical-subscriber \
+  postgres-experiment-workbench-pgbouncer \
+  postgres-experiment-workbench-upgrade-old \
+  postgres-experiment-workbench-upgrade-new; do
+  test -z "$("${release_env[@]}" docker ps -aq --filter "name=^/${container_name}$")"
+done
+test -z "$("${release_env[@]}" docker ps -aq \
+  --filter "label=com.docker.compose.project=$release_project")"
+test -z "$("${release_env[@]}" docker volume ls -q \
+  --filter "label=com.docker.compose.project=$release_project")"
+test -z "$("${release_env[@]}" docker network ls -q \
+  --filter "label=com.docker.compose.project=$release_project")"
 
 candidate_bin="$PWD/.tmp/release-candidate/pgworkbench"
 matrix_run_id="v0.2.0-massive-dml-${candidate_sha:0:12}"
@@ -81,12 +149,24 @@ ENV_FILE=.env.example \
     PGWORKBENCH_NATIVE_BINDIR="$native_bindir"
 ```
 
-The intentionally inherited `HOME`, `PATH`, temporary-directory, and user
-values are process bootstrap only and remain outside the experiment evidence
-claim. Persistent Go environment/workspace state, ambient build flags, and
-system/global Git configuration are disabled explicitly. All workbench,
-PostgreSQL, profile, workload, and experiment controls are removed before each
-gate and only the values shown above are reintroduced.
+The intentionally inherited user values are process bootstrap only and remain
+outside the experiment evidence claim. `HOME` is replaced with a
+candidate-private directory. The Go executable is resolved to an absolute path
+before scrubbing and its exact patch version is enforced by
+`candidate-preflight`; its caches also live under the candidate checkout.
+`PATH` is reconstructed from that Go binary's directory, the explicit native
+PostgreSQL bindir, and a fixed list of conventional host tool locations; the
+temporary root is fixed to the physical path behind `/tmp`. Docker uses an
+explicit local socket and a candidate-private context/config containing only
+the selected Compose plugin, so the user's current context, credential store,
+and other CLI plugins are not inputs. The SHA-specific checkout basename gives
+Compose a SHA-specific project name, and the preflight fails instead of touching
+any pre-existing fixed-name container or project-labelled container, volume, or
+network. Persistent Go environment/workspace state, ambient build flags, and
+system/global Git configuration, checkout-time hooks, and automatic CRLF
+conversion are disabled explicitly. All workbench, PostgreSQL, profile,
+workload, and experiment controls are removed before each gate and only the
+values shown above are reintroduced.
 
 If merging the pull request creates a different commit SHA, create another
 fresh detached worktree, rebuild the binary, and repeat this block for that
