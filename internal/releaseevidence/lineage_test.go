@@ -11,7 +11,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/schemavalidation"
 )
 
-func TestV2LineageVerification(t *testing.T) {
+func TestVersionedLineageVerification(t *testing.T) {
 	zero := int64(0)
 	previous := "sha256:" + strings.Repeat("b", 64)
 	tests := []struct {
@@ -27,19 +27,21 @@ func TestV2LineageVerification(t *testing.T) {
 		{name: "later without predecessor", lineage: &Lineage{Revision: 1}, issue: "must be a lowercase sha256 digest"},
 		{name: "later revision", lineage: &Lineage{Revision: 1, PreviousIndexDigest: &previous}, valid: true},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			index := openIndex(RecordStatusActive)
-			index.SchemaVersion = SchemaVersionV2
-			index.Lineage = test.lineage
-			verification := Verify(index)
-			if verification.Valid != test.valid {
-				t.Fatalf("valid = %v, want %v: %+v", verification.Valid, test.valid, verification)
-			}
-			if test.issue != "" && !sliceContainsSubstring(verification.Issues, test.issue) {
-				t.Fatalf("issues %v do not contain %q", verification.Issues, test.issue)
-			}
-		})
+	for _, schemaVersion := range []string{SchemaVersionV2, SchemaVersionV3} {
+		for _, test := range tests {
+			t.Run(schemaVersion+"/"+test.name, func(t *testing.T) {
+				index := openIndex(RecordStatusActive)
+				index.SchemaVersion = schemaVersion
+				index.Lineage = test.lineage
+				verification := Verify(index)
+				if verification.Valid != test.valid {
+					t.Fatalf("valid = %v, want %v: %+v", verification.Valid, test.valid, verification)
+				}
+				if test.issue != "" && !sliceContainsSubstring(verification.Issues, test.issue) {
+					t.Fatalf("issues %v do not contain %q", verification.Issues, test.issue)
+				}
+			})
+		}
 	}
 }
 
@@ -57,11 +59,11 @@ func TestSchemaVersionsAcceptPrereleaseAndBuildTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, schemaVersion := range []string{SchemaVersionV1, SchemaVersionV2} {
+	for _, schemaVersion := range []string{SchemaVersionV1, SchemaVersionV2, SchemaVersionV3} {
 		t.Run(schemaVersion, func(t *testing.T) {
 			index := openIndex(RecordStatusActive)
 			index.SchemaVersion = schemaVersion
-			if schemaVersion == SchemaVersionV2 {
+			if schemaVersion != SchemaVersionV1 {
 				index.Lineage = &Lineage{Revision: 0}
 			}
 			index.Candidate.Version = "1.2.3-rc.1+build.7"

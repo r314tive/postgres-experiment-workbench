@@ -59,11 +59,16 @@ Current execution state on `next/v0.3`:
 
 - M1.1 is implemented and committed: strict semantic status/verification works
   outside a checkout and derives `GO`/`NO-GO` independently.
-- The candidate-initialization half of M1.2 is implemented in the current
-  tranche: exact 16-asset snapshot, manifest/inventory cross-binding, revision
-  zero, copy-on-write publication, and typed ambiguous-commit handling.
-- Typed gate attachment is the next open dependency. M1.2 is not complete until
-  that command and its adversarial matrix pass.
+- Candidate initialization is implemented and committed: exact 16-asset
+  snapshot, manifest/inventory cross-binding, revision zero, copy-on-write
+  publication, and typed ambiguous-commit handling.
+- The typed attachment framework and its first pass-only adapter are implemented
+  in the current tranche. `pgworkbench.release-external-driver-verification/v1` can close
+  only `draft_external_drivers`; the caller cannot supply an outcome.
+- M1.2 remains open until the remaining workflow producers emit equally strict
+  candidate-bound records and preventive controls have a separate atomic
+  attachment adapter. Unsupported records stay open rather than being inferred
+  from artifact presence.
 
 ## M0 — publish the frozen v0.2.0 candidate
 
@@ -142,6 +147,28 @@ authenticity; those remain separate gates. Gate attachment rehashes a supplied
 downloaded object and records its durable URI separately from the local
 verification path. Every mutation creates a new index revision bound to the
 exact previous index digest; an existing index is never rewritten in place.
+The predecessor and successor names are canonical `index-r<N>.json` and
+`index-r<N+1>.json` in one directory, giving concurrent local writers one
+exclusive destination. The directory and predecessor inode stay pinned while
+the successor is staged, linked, confirmed, cleaned, and fsynced with
+descriptor-relative operations; pathname replacement cannot redirect the
+write. A copied chain can still fork in another directory; lineage makes that
+fork detectable but does not claim a distributed global compare-and-swap head.
+
+The first adapter accepts only
+`pgworkbench.release-external-driver-verification/v1`, emitted after the
+read-only workflow has reverified the draft candidate, authenticated release
+archive and manifest, metadata-only provider artifact, exact three-driver set,
+and bounded non-performance assurance facts. An Actions artifact is transport,
+not a durable reference. The CLI rejects Actions transport URLs and reports
+durability and remote authenticity separately as operator-asserted and
+unverified because it does not fetch the URI. The successor upgrades the chain
+to v3 and stores both the typed record identity and that exact trust class. It
+appears in `unqualified_evidence`; a positive typed record closes its
+record-level check but cannot produce release `GO`. V3 exposes no self-declared
+verified value. A future proof-backed assurance class lands only with an
+adapter that independently verifies durable remote presence, exact digest,
+producer identity, and the remote object binding.
 
 ### M1.3 Pilot and critical-review readers
 
@@ -423,23 +450,26 @@ them as supported.
 
 ## Immediate implementation slice
 
-The next tranche completes M1.2 with typed gate attachment:
+The current M1.2b tranche establishes the attachment substrate:
 
-1. define one typed attachment adapter per release gate/control rather than a
-   generic user-authored `passed` flag;
-2. strictly load and hash the previous index and require v2 lineage;
-3. strictly load the gate record, recompute its local digest, and validate its
-   candidate identity and gate-specific invariants;
-4. record the durable evidence URI separately from the local verification path;
-5. produce revision `N+1` with `previous_index_digest` bound to the exact prior
-   bytes and refuse in-place or pre-existing output;
-6. rederive aggregate status/decision after attachment; a passed record may
-   close only its own gate and cannot directly set top-level `GO`;
-7. cover wrong-candidate, wrong-gate, digest drift, symlink, source/output
-   containment, stale revision, concurrent publication, and committed-but-
-   unconfirmed fault paths;
-8. run focused, race, workflow-graph, standalone-binary, and full repository
-   gates before committing M1.2.
+1. completed: a closed adapter registry instead of a generic user-authored
+   `passed` flag;
+2. completed: one pinned parse/hash snapshot for the predecessor and evidence
+   record, strict v3 lineage with v2-to-v3 migration, canonical adjacent
+   revision names, inode-pinned descriptor-relative publication, and exclusive
+   copy-on-write semantics;
+3. completed: the first candidate-bound pass-only adapter for the draft
+   external-driver qualification, including its typed workflow producer;
+4. completed: independently separated recorded, readiness, and effective
+   authorization decisions; legacy v1/v2 `GO` remains readable but is not
+   grandfathered when its evidence lacks persisted trust metadata, and one
+   passed current record leaves the release `NO-GO`;
+5. next: typed source/draft/published compatibility, aggregate-attempt,
+   asset-authenticity, publication, and repository-control summaries and
+   adapters. Their current untyped directories or asset inventory alone are not
+   accepted as positive evidence;
+6. exit: finish the remaining adapters, full fault/race/standalone matrix, and
+   only then mark M1.2 complete.
 
 M1.3 typed pilot/critical-review readers and M1.4 relocated closed bundles then
 complete the control plane. M2.1 A/A calibration starts only after the M1 exit

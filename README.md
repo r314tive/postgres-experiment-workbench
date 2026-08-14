@@ -659,7 +659,21 @@ go run ./cmd/pgworkbench evidence candidate init \
   --release-manifest downloaded/pgworkbench-0.2.0-release-manifest.json \
   --asset-inventory draft-verification/asset-inventory.json \
   --output evidence/index-r0.json
+# After copying an exact typed workflow summary to durable storage:
+go run ./cmd/pgworkbench evidence gate attach \
+  --index evidence/index-r0.json \
+  --gate draft_external_drivers \
+  --evidence-file downloaded/verification.json \
+  --evidence-ref 's3://release-evidence/v0.2.0/external-drivers.json?versionId=...' \
+  --output evidence/index-r1.json
 ```
+
+The current offline attachment adapter persists its trust boundary in the new
+index revision. A semantically passed local record with an operator-supplied
+durable URI remains in `unqualified_evidence` and cannot authorize release
+`GO`. V3 intentionally has no verified override; a proof-backed class will be
+introduced only with a typed verifier that authenticates the remote object and
+producer.
 
 Run `go run ./cmd/pgworkbench` without arguments for the complete command tree.
 Go migration notes live in [docs/go-migration.md](docs/go-migration.md).

@@ -15,6 +15,7 @@ var (
 	semVerPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
 	lowerHex40    = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	lowerHex64    = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	urnNIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,30}[A-Za-z0-9]$`)
 )
 
 type requirement struct {
@@ -36,19 +37,22 @@ func VerifyFile(path string) (Verification, error) {
 // readiness requirements, and the stored lifecycle decision.
 func Verify(index Index) Verification {
 	result := Verification{
-		OpenGates:   make([]string, 0),
-		FailedGates: make([]string, 0),
-		PassedGates: make([]string, 0),
-		Reasons:     make([]string, 0),
-		Issues:      make([]string, 0),
+		RecordedDecision:    index.Decision.Status,
+		OpenGates:           make([]string, 0),
+		FailedGates:         make([]string, 0),
+		PassedGates:         make([]string, 0),
+		UnqualifiedEvidence: make([]string, 0),
+		Reasons:             make([]string, 0),
+		Warnings:            make([]string, 0),
+		Issues:              make([]string, 0),
 	}
 	add := func(format string, args ...any) {
 		result.Issues = append(result.Issues, fmt.Sprintf(format, args...))
 	}
 
 	integrityOK := true
-	if !oneOf(index.SchemaVersion, SchemaVersionV1, SchemaVersionV2) {
-		add("schema_version = %q, want %q or %q", index.SchemaVersion, SchemaVersionV1, SchemaVersionV2)
+	if !oneOf(index.SchemaVersion, SchemaVersionV1, SchemaVersionV2, SchemaVersionV3) {
+		add("schema_version = %q, want %q, %q, or %q", index.SchemaVersion, SchemaVersionV1, SchemaVersionV2, SchemaVersionV3)
 		integrityOK = false
 	}
 	if !validateLineage(add, index.SchemaVersion, index.Lineage) {
@@ -83,19 +87,8 @@ func Verify(index Index) Verification {
 		}
 	}
 
-	states := make(map[string]string, 16)
-	for _, item := range gateRequirements(index.Gates) {
-		state, valid := validateGate(add, "gates."+item.name, item.gate)
-		states[item.name] = state
-		if !valid {
-			integrityOK = false
-		}
-	}
-	controlStates, controlsValid := validatePreventiveControls(add, index.PreventiveControls)
-	for name, state := range controlStates {
-		states[name] = state
-	}
-	if !controlsValid {
+	states, qualifications, readinessValid := validateReadinessRequirements(add, index.Gates, index.PreventiveControls)
+	if !readinessValid {
 		integrityOK = false
 	}
 
@@ -109,30 +102,35 @@ func Verify(index Index) Verification {
 			result.PassedGates = append(result.PassedGates, name)
 		}
 	}
+	for name, qualification := range qualifications {
+		if qualification != AssuranceAuthorizationEligible {
+			result.UnqualifiedEvidence = append(result.UnqualifiedEvidence, name)
+		}
+		if qualification == AssuranceLegacyUnspecified {
+			result.Warnings = append(result.Warnings, "legacy evidence has no persisted record and assurance: "+name)
+		}
+	}
 	sort.Strings(result.OpenGates)
 	sort.Strings(result.FailedGates)
 	sort.Strings(result.PassedGates)
+	sort.Strings(result.UnqualifiedEvidence)
+	sort.Strings(result.Warnings)
+	result.AssuranceStatus = aggregateAssuranceStatus(qualifications)
 
-	switch {
-	case !integrityOK || len(result.FailedGates) > 0:
-		result.Status = StatusFailed
-		result.Decision = DecisionNoGo
-	case len(result.OpenGates) > 0:
-		result.Status = StatusOpen
-		result.Decision = DecisionNoGo
-	default:
-		result.Status = StatusPassed
-		result.Decision = DecisionGo
+	result.ReadinessStatus, result.ReadinessDecision = readinessOutcome(integrityOK, states, false)
+	result.Status, result.Decision = readinessOutcome(integrityOK, states, len(result.UnqualifiedEvidence) != 0)
+	storedExpectedDecision := result.Decision
+	if oneOf(index.SchemaVersion, SchemaVersionV1, SchemaVersionV2) {
+		storedExpectedDecision = result.ReadinessDecision
 	}
-	derivedDecision := result.Decision
 
-	if index.Decision.Status != derivedDecision {
-		add("decision.status = %q, want independently recomputed %q", index.Decision.Status, derivedDecision)
+	if index.Decision.Status != storedExpectedDecision {
+		add("decision.status = %q, want independently recomputed %q for schema_version %q", index.Decision.Status, storedExpectedDecision, index.SchemaVersion)
 	}
-	if derivedDecision == DecisionGo && index.RecordStatus != RecordStatusComplete {
+	if storedExpectedDecision == DecisionGo && index.RecordStatus != RecordStatusComplete {
 		add("record_status = %q, want complete for an independently recomputed go decision", index.RecordStatus)
 	}
-	if derivedDecision == DecisionNoGo && index.RecordStatus == RecordStatusComplete {
+	if storedExpectedDecision == DecisionNoGo && index.RecordStatus == RecordStatusComplete {
 		add("record_status complete is inconsistent with an independently recomputed no-go decision")
 	}
 	if index.RecordStatus == RecordStatusTemplate && !allRequirementsHaveState(states, StatusOpen) {
@@ -145,11 +143,15 @@ func Verify(index Index) Verification {
 		result.Status = StatusFailed
 		result.Decision = DecisionNoGo
 	}
+	result.AuthorizationEligible = result.Valid && result.Decision == DecisionGo && result.AssuranceStatus == AssuranceAuthorizationEligible
 	for _, name := range result.FailedGates {
 		result.Reasons = append(result.Reasons, "failed readiness requirement: "+name)
 	}
 	for _, name := range result.OpenGates {
 		result.Reasons = append(result.Reasons, "open readiness requirement: "+name)
+	}
+	for _, name := range result.UnqualifiedEvidence {
+		result.Reasons = append(result.Reasons, "unqualified evidence cannot authorize release: "+name)
 	}
 	if !result.Valid {
 		result.Reasons = append(result.Reasons, "semantic verification issues present")
@@ -158,6 +160,77 @@ func Verify(index Index) Verification {
 	}
 	sort.Strings(result.Reasons)
 	return result
+}
+
+// validateReadinessRequirements is shared by the independent verifier and by
+// copy-on-write mutation code that must derive lifecycle metadata without
+// consulting the currently stored lifecycle decision.
+func validateReadinessRequirements(
+	add func(string, ...any),
+	gates Gates,
+	controls PreventiveControls,
+) (map[string]string, map[string]string, bool) {
+	states := make(map[string]string, 16)
+	qualifications := make(map[string]string, 16)
+	valid := true
+	for _, item := range gateRequirements(gates) {
+		state, qualification, gateValid := validateGate(add, "gates."+item.name, item.gate)
+		states[item.name] = state
+		if state == StatusPassed {
+			qualifications[item.name] = qualification
+		}
+		if !gateValid {
+			valid = false
+		}
+	}
+	controlStates, controlQualifications, controlsValid := validatePreventiveControls(add, controls)
+	for name, state := range controlStates {
+		states[name] = state
+	}
+	for name, qualification := range controlQualifications {
+		qualifications[name] = qualification
+	}
+	return states, qualifications, valid && controlsValid
+}
+
+func aggregateAssuranceStatus(qualifications map[string]string) string {
+	if len(qualifications) == 0 {
+		return AssuranceNotApplicable
+	}
+	status := AssuranceAuthorizationEligible
+	for _, qualification := range qualifications {
+		switch qualification {
+		case AssuranceLegacyUnspecified:
+			return AssuranceLegacyUnspecified
+		case AssuranceOperatorAttested:
+			status = AssuranceOperatorAttested
+		case AssuranceAuthorizationEligible:
+		default:
+			return AssuranceLegacyUnspecified
+		}
+	}
+	return status
+}
+
+func readinessOutcome(integrityOK bool, states map[string]string, assurancePending bool) (string, string) {
+	failed := false
+	open := false
+	for _, state := range states {
+		switch state {
+		case StatusFailed:
+			failed = true
+		case StatusOpen:
+			open = true
+		}
+	}
+	switch {
+	case !integrityOK || failed:
+		return StatusFailed, DecisionNoGo
+	case open || assurancePending:
+		return StatusOpen, DecisionNoGo
+	default:
+		return StatusPassed, DecisionGo
+	}
 }
 
 func gateRequirements(gates Gates) []requirement {
@@ -219,9 +292,9 @@ func validateLineage(add func(string, ...any), schemaVersion string, lineage *Li
 			return false
 		}
 		return true
-	case SchemaVersionV2:
+	case SchemaVersionV2, SchemaVersionV3:
 		if lineage == nil {
-			add("lineage is required for schema_version %q", SchemaVersionV2)
+			add("lineage is required for schema_version %q", schemaVersion)
 			return false
 		}
 		valid := true
@@ -274,7 +347,7 @@ func validateDecisionShape(add func(string, ...any), decision Decision) bool {
 	return valid
 }
 
-func validateGate(add func(string, ...any), path string, gate Gate) (string, bool) {
+func validateGate(add func(string, ...any), path string, gate Gate) (string, string, bool) {
 	valid := true
 	if gate.Note != nil && !validLength(*gate.Note, 1, 1000) {
 		add("%s.note must contain 1 to 1000 characters when present", path)
@@ -288,50 +361,61 @@ func validateGate(add func(string, ...any), path string, gate Gate) (string, boo
 			valid = false
 		}
 		if !valid {
-			return StatusFailed, false
+			return StatusFailed, AssuranceNotApplicable, false
 		}
-		return StatusOpen, true
+		return StatusOpen, AssuranceNotApplicable, true
 	case GateStatusPassed, GateStatusFailed:
 		if gate.Evidence == nil {
 			add("%s.evidence is required while status is %s", path, gate.Status)
-			return StatusFailed, false
+			return StatusFailed, AssuranceNotApplicable, false
 		}
-		if !validateEvidence(add, path+".evidence", *gate.Evidence) {
+		evidenceValid, qualification := validateEvidence(add, path+".evidence", *gate.Evidence)
+		if !evidenceValid {
 			valid = false
 		}
 		if !valid || gate.Status == GateStatusFailed {
-			return StatusFailed, valid
+			return StatusFailed, qualification, valid
 		}
-		return StatusPassed, true
+		return StatusPassed, qualification, true
 	default:
 		add("%s.status = %q, want open, passed, or failed", path, gate.Status)
-		return StatusFailed, false
+		return StatusFailed, AssuranceNotApplicable, false
 	}
 }
 
-func validatePreventiveControls(add func(string, ...any), controls PreventiveControls) (map[string]string, bool) {
+func validatePreventiveControls(add func(string, ...any), controls PreventiveControls) (map[string]string, map[string]string, bool) {
 	states := make(map[string]string, 3)
+	qualifications := make(map[string]string, 3)
 	valid := true
 
-	tagState, tagValid := validateTagRuleset(add, controls.TagRuleset)
+	tagState, tagQualification, tagValid := validateTagRuleset(add, controls.TagRuleset)
 	states["preventive_controls.tag_ruleset"] = tagState
+	if tagState == StatusPassed {
+		qualifications["preventive_controls.tag_ruleset"] = tagQualification
+	}
 	if !tagValid {
 		valid = false
 	}
-	reviewState, reviewValid := validateAdminReview(add, controls.TagRuleset.BypassReview)
+	reviewState, reviewQualification, reviewValid := validateAdminReview(add, controls.TagRuleset.BypassReview)
 	states["preventive_controls.tag_ruleset.bypass_review"] = reviewState
+	if reviewState == StatusPassed {
+		qualifications["preventive_controls.tag_ruleset.bypass_review"] = reviewQualification
+	}
 	if !reviewValid {
 		valid = false
 	}
-	immutableState, immutableValid := validateImmutableReleases(add, controls.ImmutableReleases)
+	immutableState, immutableQualification, immutableValid := validateImmutableReleases(add, controls.ImmutableReleases)
 	states["preventive_controls.immutable_releases"] = immutableState
+	if immutableState == StatusPassed {
+		qualifications["preventive_controls.immutable_releases"] = immutableQualification
+	}
 	if !immutableValid {
 		valid = false
 	}
-	return states, valid
+	return states, qualifications, valid
 }
 
-func validateTagRuleset(add func(string, ...any), control TagRuleset) (string, bool) {
+func validateTagRuleset(add func(string, ...any), control TagRuleset) (string, string, bool) {
 	const path = "preventive_controls.tag_ruleset"
 	valid := true
 	if control.Target != "tag" {
@@ -370,38 +454,40 @@ func validateTagRuleset(add func(string, ...any), control TagRuleset) (string, b
 			valid = false
 		}
 		if !valid {
-			return StatusFailed, false
+			return StatusFailed, AssuranceNotApplicable, false
 		}
-		return StatusOpen, true
+		return StatusOpen, AssuranceNotApplicable, true
 	case ControlStatusVerified:
 		if control.APIEvidence == nil {
 			add("%s.api_evidence is required while status is verified", path)
-			return StatusFailed, false
+			return StatusFailed, AssuranceNotApplicable, false
 		}
-		if !validateEvidence(add, path+".api_evidence", *control.APIEvidence) {
+		evidenceValid, qualification := validateEvidence(add, path+".api_evidence", *control.APIEvidence)
+		if !evidenceValid {
 			valid = false
 		}
 		if !valid {
-			return StatusFailed, false
+			return StatusFailed, qualification, false
 		}
-		return StatusPassed, true
+		return StatusPassed, qualification, true
 	default:
 		add("%s.status = %q, want open or verified", path, control.Status)
-		return StatusFailed, false
+		return StatusFailed, AssuranceNotApplicable, false
 	}
 }
 
-func validateAdminReview(add func(string, ...any), review AdminReview) (string, bool) {
+func validateAdminReview(add func(string, ...any), review AdminReview) (string, string, bool) {
 	const path = "preventive_controls.tag_ruleset.bypass_review"
 	switch review.Status {
 	case ReviewStatusOpen:
 		if review.Reviewer != nil || review.ReviewedAt != nil || review.RulesetID != nil || review.RulesetUpdatedAt != nil || review.Evidence != nil {
 			add("%s review details must be absent while status is open", path)
-			return StatusFailed, false
+			return StatusFailed, AssuranceNotApplicable, false
 		}
-		return StatusOpen, true
+		return StatusOpen, AssuranceNotApplicable, true
 	case ReviewStatusAdminReviewed:
 		valid := true
+		qualification := AssuranceNotApplicable
 		if review.Reviewer == nil || !validLength(valueOrEmpty(review.Reviewer), 1, 128) {
 			add("%s.reviewer must contain 1 to 128 characters", path)
 			valid = false
@@ -430,20 +516,24 @@ func validateAdminReview(add func(string, ...any), review AdminReview) (string, 
 		if review.Evidence == nil {
 			add("%s.evidence is required while status is admin-reviewed", path)
 			valid = false
-		} else if !validateEvidence(add, path+".evidence", *review.Evidence) {
-			valid = false
+		} else {
+			evidenceValid, evidenceQualification := validateEvidence(add, path+".evidence", *review.Evidence)
+			qualification = evidenceQualification
+			if !evidenceValid {
+				valid = false
+			}
 		}
 		if !valid {
-			return StatusFailed, false
+			return StatusFailed, qualification, false
 		}
-		return StatusPassed, true
+		return StatusPassed, qualification, true
 	default:
 		add("%s.status = %q, want open or admin-reviewed", path, review.Status)
-		return StatusFailed, false
+		return StatusFailed, AssuranceNotApplicable, false
 	}
 }
 
-func validateImmutableReleases(add func(string, ...any), control ImmutableReleases) (string, bool) {
+func validateImmutableReleases(add func(string, ...any), control ImmutableReleases) (string, string, bool) {
 	const path = "preventive_controls.immutable_releases"
 	valid := true
 	if control.Enabled == nil {
@@ -457,10 +547,11 @@ func validateImmutableReleases(add func(string, ...any), control ImmutableReleas
 			valid = false
 		}
 		if !valid {
-			return StatusFailed, false
+			return StatusFailed, AssuranceNotApplicable, false
 		}
-		return StatusOpen, true
+		return StatusOpen, AssuranceNotApplicable, true
 	case ControlStatusVerified:
+		qualification := AssuranceNotApplicable
 		if control.Enabled == nil || !*control.Enabled {
 			add("%s.enabled must be true while status is verified", path)
 			valid = false
@@ -468,20 +559,24 @@ func validateImmutableReleases(add func(string, ...any), control ImmutableReleas
 		if control.APIEvidence == nil {
 			add("%s.api_evidence is required while status is verified", path)
 			valid = false
-		} else if !validateEvidence(add, path+".api_evidence", *control.APIEvidence) {
-			valid = false
+		} else {
+			evidenceValid, evidenceQualification := validateEvidence(add, path+".api_evidence", *control.APIEvidence)
+			qualification = evidenceQualification
+			if !evidenceValid {
+				valid = false
+			}
 		}
 		if !valid {
-			return StatusFailed, false
+			return StatusFailed, qualification, false
 		}
-		return StatusPassed, true
+		return StatusPassed, qualification, true
 	default:
 		add("%s.status = %q, want open or verified", path, control.Status)
-		return StatusFailed, false
+		return StatusFailed, AssuranceNotApplicable, false
 	}
 }
 
-func validateEvidence(add func(string, ...any), path string, evidence Evidence) bool {
+func validateEvidence(add func(string, ...any), path string, evidence Evidence) (bool, string) {
 	valid := true
 	if !validDurableRef(evidence.Ref) {
 		add("%s.ref must be an absolute durable https, s3, gs, or urn URI", path)
@@ -508,22 +603,111 @@ func validateEvidence(add func(string, ...any), path string, evidence Evidence) 
 			valid = false
 		}
 	}
-	return valid
+	if evidence.Record == nil && evidence.Assurance == nil {
+		return valid, AssuranceLegacyUnspecified
+	}
+	if evidence.Record == nil || evidence.Assurance == nil {
+		add("%s.record and assurance must either both be present or both be absent", path)
+		return false, AssuranceLegacyUnspecified
+	}
+	if !validateEvidenceRecord(add, path+".record", path, *evidence.Record) {
+		valid = false
+	}
+	if *evidence.Assurance != (EvidenceAssurance{Durability: EvidenceDurabilityAsserted, Authenticity: EvidenceAuthenticityUnverified}) {
+		add("%s.assurance must be the supported operator-asserted, remote-authenticity-unverified trust pair", path)
+		valid = false
+	}
+	return valid, AssuranceOperatorAttested
+}
+
+func validateEvidenceRecord(add func(string, ...any), recordPath, evidencePath string, record EvidenceRecord) bool {
+	if evidencePath == "gates.draft_external_drivers.evidence" {
+		valid := true
+		if record.SchemaVersion != ExternalDriverVerificationSchema {
+			add("%s.schema_version = %q, want %q", recordPath, record.SchemaVersion, ExternalDriverVerificationSchema)
+			valid = false
+		}
+		if record.ArtifactType != ExternalDriverVerificationType {
+			add("%s.artifact_type = %q, want %q", recordPath, record.ArtifactType, ExternalDriverVerificationType)
+			valid = false
+		}
+		return valid
+	}
+	add("%s has no registered typed evidence contract", recordPath)
+	return false
 }
 
 func validDurableRef(value string) bool {
+	for _, character := range value {
+		if character <= 0x20 || character == 0x7f {
+			return false
+		}
+	}
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme == "" {
+	if err != nil || parsed.Scheme == "" || parsed.User != nil || parsed.Fragment != "" {
 		return false
 	}
 	switch parsed.Scheme {
-	case "https", "s3", "gs":
-		return parsed.Host != ""
+	case "https":
+		return parsed.Host != "" && parsed.Path != "" && parsed.Path != "/" && !isEphemeralGitHubActionsRef(parsed.Hostname(), parsed.Path)
+	case "s3", "gs":
+		return parsed.Host != "" && parsed.Path != "" && parsed.Path != "/"
 	case "urn":
-		return parsed.Opaque != ""
+		return validURNRef(parsed)
 	default:
 		return false
 	}
+}
+
+func validURNRef(parsed *url.URL) bool {
+	if parsed.Host != "" || parsed.RawQuery != "" || parsed.Opaque == "" {
+		return false
+	}
+	parts := strings.SplitN(parsed.Opaque, ":", 2)
+	if len(parts) != 2 || !urnNIDPattern.MatchString(parts[0]) || strings.EqualFold(parts[0], "urn") {
+		return false
+	}
+	return validURNNamespaceSpecificString(parts[1])
+}
+
+func validURNNamespaceSpecificString(value string) bool {
+	if value == "" || value[0] == '/' {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		character := value[index]
+		if isURNPChar(character) || character == '/' {
+			continue
+		}
+		if character != '%' || index+2 >= len(value) || !isHexDigit(value[index+1]) || !isHexDigit(value[index+2]) {
+			return false
+		}
+		index += 2
+	}
+	return true
+}
+
+func isURNPChar(character byte) bool {
+	return character >= 'a' && character <= 'z' ||
+		character >= 'A' && character <= 'Z' ||
+		character >= '0' && character <= '9' ||
+		strings.ContainsRune("-._~!$&'()*+,;=:@", rune(character))
+}
+
+func isHexDigit(character byte) bool {
+	return character >= '0' && character <= '9' || character >= 'a' && character <= 'f' || character >= 'A' && character <= 'F'
+}
+
+func isEphemeralGitHubActionsRef(parsedHost, parsedPath string) bool {
+	host := strings.TrimRight(strings.ToLower(parsedHost), ".")
+	path := strings.ToLower(parsedPath)
+	if host == "github.com" && (strings.Contains(path, "/actions/runs/") || strings.Contains(path, "/actions/artifacts/")) {
+		return true
+	}
+	if host == "api.github.com" && strings.Contains(path, "/actions/artifacts/") {
+		return true
+	}
+	return host == "pipelines.actions.githubusercontent.com" || host == "objects.githubusercontent.com"
 }
 
 func validCommit(value string) bool {

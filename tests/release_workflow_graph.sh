@@ -51,6 +51,27 @@ last_job="$(awk '/^  [A-Za-z0-9_-]+:$/ { name = $1; sub(/:$/, "", name) } END { 
 release_header="$(awk '/^jobs:$/ { exit } { print }' "$WORKFLOW")"
 check_header="$(awk '/^jobs:$/ { exit } { print }' "$CHECK_WORKFLOW")"
 
+external_verification_summary="$(awk '
+  $0 == "      - name: Write typed external-driver verification summary" { active = 1 }
+  active && $0 ~ /^      - name:/ && $0 != "      - name: Write typed external-driver verification summary" { exit }
+  active { print }
+' <<<"$verify_publication_evidence")"
+external_verification_upload="$(awk '
+  $0 == "      - name: Upload typed external-driver verification summary" { active = 1 }
+  active && $0 ~ /^      - name:/ && $0 != "      - name: Upload typed external-driver verification summary" { exit }
+  active { print }
+' <<<"$verify_publication_evidence")"
+candidate_verifier_setup="$(awk '
+  $0 == "      - name: Create isolated candidate verifier identity" { active = 1 }
+  active && $0 ~ /^      - name:/ && $0 != "      - name: Create isolated candidate verifier identity" { exit }
+  active { print }
+' <<<"$verify_publication_evidence")"
+candidate_verifier_cleanup="$(awk '
+  $0 == "      - name: Destroy isolated candidate verifier identity" { active = 1 }
+  active && $0 ~ /^      - name:/ && $0 != "      - name: Destroy isolated candidate verifier identity" { exit }
+  active { print }
+' <<<"$verify_publication_evidence")"
+
 duplicate_external_step_names="$(
   sed -n 's/^      - name: //p' <<<"$draft_external_drivers" | LC_ALL=C sort | uniq -d
 )"
@@ -443,8 +464,66 @@ require_text "$verify_publication_evidence" '.runner.provider == "github-hosted"
   'read-only job must verify the exact hosted runner metadata contract'
 require_text "$verify_publication_evidence" '.runner.label == "ubuntu-24.04"' \
   'read-only job must verify the exact hosted runner label'
-require_text "$verify_publication_evidence" '"$verifier" benchmark drivers --json' \
-  'read-only job must bind the candidate driver registry without needing deleted runtime bytes'
+for target_fact in \
+  '.execution.target.acknowledged == true' \
+  '.execution.target.loopback_only == true' \
+  '.execution.target.system_databases_denied == true'; do
+  if [[ "$(grep -Fc -- "$target_fact" <<<"$verify_publication_evidence")" -ne 2 ]]; then
+    echo "FAIL: downstream verifier must independently check target fact in gate and execution records: $target_fact" >&2
+    exit 1
+  fi
+done
+require_line "$verify_publication_evidence" '      CANDIDATE_VERIFIER_SANDBOX_USER: pgwverify' \
+  'read-only verifier must use a dedicated fixed sandbox identity'
+if grep -Fq -- 'CANDIDATE_VERIFIER_SANDBOX_ROOT: ${{ runner.temp }}' <<<"$verify_publication_evidence"; then
+  echo 'FAIL: runner context is unavailable in job-level env' >&2
+  exit 1
+fi
+candidate_sandbox_root='CANDIDATE_VERIFIER_SANDBOX_ROOT="$RUNNER_TEMP/pgworkbench-publication-verifier-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"'
+if [[ "$(grep -Fc -- "$candidate_sandbox_root" <<<"$verify_publication_evidence")" -ne 4 ]]; then
+  echo 'FAIL: every candidate verifier lifecycle step must derive the rerun-specific root from RUNNER_TEMP' >&2
+  exit 1
+fi
+require_text "$candidate_verifier_setup" 'sudo useradd --system --user-group --no-create-home' \
+  'candidate verifier must run as a dedicated unprivileged user'
+require_text "$candidate_verifier_setup" 'test ! -e "$CANDIDATE_VERIFIER_SANDBOX_ROOT"' \
+  'candidate verifier sandbox setup must refuse a pre-existing root'
+require_text "$candidate_verifier_setup" 'install -m 0600 /dev/null "$ownership_marker"' \
+  'candidate verifier setup must record workflow ownership before creating the account'
+require_text "$candidate_verifier_setup" 'sudo install -d -o root -g root -m 0755' \
+  'candidate verifier must not own the sandbox root containing its writable directories'
+require_text "$verify_publication_evidence" 'sudo --user "$CANDIDATE_VERIFIER_SANDBOX_USER" -- env -i' \
+  'downloaded candidate must execute with an empty inherited environment'
+for isolated_env in \
+  '"HOME=$CANDIDATE_VERIFIER_SANDBOX_ROOT/home"' \
+  '"TMPDIR=$CANDIDATE_VERIFIER_SANDBOX_ROOT/tmp"' \
+  '"XDG_CACHE_HOME=$CANDIDATE_VERIFIER_SANDBOX_ROOT/home/.cache"' \
+  '"PGWORKBENCH_ROOT=$verifier_root"'; do
+  require_text "$verify_publication_evidence" "$isolated_env" \
+    "candidate verifier lacks isolated environment binding: $isolated_env"
+done
+require_text "$verify_publication_evidence" 'test -w "$GITHUB_WORKSPACE"' \
+  'candidate verifier identity must be denied workspace write access'
+require_text "$verify_publication_evidence" 'test -w "$verifier_root"' \
+  'candidate verifier identity must be denied candidate-root write access'
+require_text "$verify_publication_evidence" 'find "$GITHUB_WORKSPACE" -writable -print -quit' \
+  'candidate verifier identity must be denied every writable path in the workspace'
+require_text "$verify_publication_evidence" 'identity="$("${sandbox_env[@]}" "$verifier" version)"' \
+  'candidate identity command must use the credential-free sandbox environment'
+require_text "$verify_publication_evidence" 'drivers_json="$("${sandbox_env[@]}" "$verifier" benchmark drivers --json)"' \
+  'candidate driver-registry command must use the credential-free sandbox environment'
+if grep -Fq -- 'identity="$("$verifier" version)"' <<<"$verify_publication_evidence"; then
+  echo 'FAIL: downloaded candidate verifier may not execute as the workflow user' >&2
+  exit 1
+fi
+require_text "$verify_publication_evidence" '--pattern "$manifest" --dir draft-external-driver-manifest' \
+  'read-only job must download the release manifest separately from the executable archive'
+require_text "$verify_publication_evidence" 'test "$release_manifest_digest" = "$release_manifest_asset_digest"' \
+  'read-only job must bind the separately downloaded release manifest to the draft asset inventory'
+require_text "$verify_publication_evidence" 'gh attestation verify "draft-external-driver-manifest/$manifest"' \
+  'read-only job must authenticate the separate release manifest before deriving pack identity'
+require_text "$verify_publication_evidence" '.schema_version == "pgworkbench.release-manifest/v1"' \
+  'read-only job must reject an unexpected release-manifest contract'
 if grep -Fq -- 'benchmark driver-run-verify' <<<"$verify_publication_evidence"; then
   echo 'FAIL: metadata-only downstream verifier may not pretend to re-run verification without third-party runtime bytes' >&2
   exit 1
@@ -456,6 +535,137 @@ for forbidden in 'contents: write' 'id-token: write' 'PGWORKBENCH_ADMIN_READ_TOK
     exit 1
   fi
 done
+
+require_line "$verify_publication_evidence" '      verification_artifact_digest: ${{ steps.upload_verification.outputs.artifact-digest }}' \
+  'semantic verifier must export the typed summary artifact digest'
+require_line "$verify_publication_evidence" '      verification_artifact_id: ${{ steps.upload_verification.outputs.artifact-id }}' \
+  'semantic verifier must export the typed summary artifact id'
+require_line "$verify_publication_evidence" '      verification_artifact_name: ${{ steps.verification_summary.outputs.artifact_name }}' \
+  'semantic verifier must export the typed summary artifact name'
+require_text "$external_verification_summary" 'pgworkbench.release-external-driver-verification/v1' \
+  'read-only verifier must emit the typed external-driver summary contract'
+require_text "$external_verification_summary" 'artifact_name="draft-external-driver-verification-${SUMMARY_TAG}-${SUMMARY_GIT_COMMIT}-${SUMMARY_WORKFLOW_RUN_ATTEMPT}"' \
+  'typed external-driver summary artifact identity must include tag, commit, and run attempt'
+for scenario_pack_field in \
+  'id: $scenario_pack_id' \
+  'version: $scenario_pack_version' \
+  'digest: $scenario_pack_digest'; do
+  require_text "$external_verification_summary" "$scenario_pack_field" \
+    "typed summary lacks captured scenario-pack field: $scenario_pack_field"
+done
+if grep -Fq -- '--slurpfile release_manifest' <<<"$external_verification_summary"; then
+  echo 'FAIL: typed summary may not reread mutable manifest semantics after candidate execution' >&2
+  exit 1
+fi
+for captured_output in \
+  'SUMMARY_SCENARIO_PACK_ID: ${{ steps.verify.outputs.summary_scenario_pack_id }}' \
+  'SUMMARY_GATE_DIGEST: ${{ steps.verify.outputs.summary_gate_digest }}' \
+  'SUMMARY_METADATA_ARCHIVE_DIGEST: ${{ steps.verify.outputs.summary_metadata_archive_digest }}' \
+  'SUMMARY_RELEASE_ARCHIVE_DIGEST: ${{ steps.verify.outputs.summary_release_archive_digest }}' \
+  'SUMMARY_RELEASE_MANIFEST_DIGEST: ${{ steps.verify.outputs.summary_release_manifest_digest }}' \
+  'SUMMARY_VERIFIER_DIGEST: ${{ steps.verify.outputs.summary_verifier_digest }}'; do
+  require_text "$external_verification_summary" "$captured_output" \
+    "typed summary lacks verified step output binding: $captured_output"
+done
+for schema_bound in \
+  'test "${#SUMMARY_WORKFLOW_RUN_ID}" -le 32' \
+  'test "${#SUMMARY_PROVIDER_ARTIFACT_ID}" -le 32' \
+  'test "${#SUMMARY_PROVIDER_ARTIFACT_NAME}" -le 256' \
+  "'(\$value | tonumber) <= 9007199254740991'"; do
+  require_text "$external_verification_summary" "$schema_bound" \
+    "typed summary lacks schema parity bound: $schema_bound"
+done
+for final_digest in \
+  '"$SUMMARY_GATE_DIGEST"' \
+  '"$SUMMARY_METADATA_ARCHIVE_DIGEST"' \
+  '"$SUMMARY_RELEASE_ARCHIVE_DIGEST"' \
+  '"$SUMMARY_RELEASE_MANIFEST_DIGEST"' \
+  '"$SUMMARY_VERIFIER_DIGEST"'; do
+  require_text "$external_verification_summary" "$final_digest" \
+    "typed summary lacks final exact-byte digest recheck: $final_digest"
+done
+for candidate_field in 'version: $version' 'tag: $tag' 'git_commit: $git_commit' \
+  'asset_fingerprint: $asset_fingerprint'; do
+  require_text "$external_verification_summary" "$candidate_field" \
+    "typed external-driver summary lacks full candidate field: $candidate_field"
+done
+for workflow_field in 'id: $run_id' 'attempt: $run_attempt' 'head_sha: $git_commit' \
+  'repository: $repository'; do
+  require_text "$external_verification_summary" "$workflow_field" \
+    "typed external-driver summary lacks workflow identity: $workflow_field"
+done
+for source_field in 'gate_digest: $gate_digest' \
+  'metadata_archive_digest: $metadata_archive_digest' \
+  'id: $provider_artifact_id' 'name: $provider_artifact_name' \
+  'digest: $provider_artifact_digest' \
+  'release_archive_digest: $release_archive_digest' \
+  'release_manifest_digest: $release_manifest_digest'; do
+  require_text "$external_verification_summary" "$source_field" \
+    "typed external-driver summary lacks verified source identity: $source_field"
+done
+for driver in benchbase-postgresql-33c0047 hammerdb-postgresql-6.0 sysbench-postgresql-1.0.20; do
+  require_text "$external_verification_summary" "\"$driver\"" \
+    "typed external-driver summary lacks exact driver id: $driver"
+done
+for assurance in \
+  'verification_scope: "workflow-local-content-and-semantics"' \
+  'third_party_runtime_bytes_uploaded: false' \
+  'performance_claim: false' \
+  'production_decision_eligible: false' \
+  'source_to_binary_attested: false' \
+  'driver_runtime_closure_attested: true' \
+  'host_runtime_dependencies_attested: false' \
+  'benchmark_comparability_claim: false' \
+  'project_redistribution: false' \
+  'all_executions_locally_verified: true' \
+  'exact_source_to_staged_file_match: true' \
+  'disposable_loopback_target_acknowledged: true' \
+  'system_databases_denied: true' \
+  'candidate_identity_reverified: true' \
+  'provider_artifact_reverified: true' \
+  'release_archive_provenance_verified: true' \
+  'release_manifest_provenance_verified: true'; do
+  require_text "$external_verification_summary" "$assurance" \
+    "typed external-driver summary lacks bounded assurance fact: $assurance"
+done
+if grep -Eq '^[[:space:]]+(status|passed):' <<<"$external_verification_summary"; then
+  echo 'FAIL: typed external-driver summary may not contain a caller-selected gate outcome' >&2
+  exit 1
+fi
+require_line "$external_verification_upload" '          name: ${{ steps.verification_summary.outputs.artifact_name }}' \
+  'typed external-driver summary upload must use the exact exported artifact name'
+require_line "$external_verification_upload" '          path: draft-external-driver-verification/verification.json' \
+  'typed external-driver summary artifact must contain only the fact record'
+require_line "$external_verification_upload" '          if-no-files-found: error' \
+  'typed external-driver summary upload must fail closed when the record is absent'
+require_line "$candidate_verifier_cleanup" '        if: always()' \
+  'candidate verifier identity cleanup must run on every prior outcome'
+for cleanup_fact in \
+  'sudo pkill -TERM -u "$CANDIDATE_VERIFIER_SANDBOX_USER"' \
+  'sudo pkill -KILL -u "$CANDIDATE_VERIFIER_SANDBOX_USER"' \
+  'sudo pgrep -u "$CANDIDATE_VERIFIER_SANDBOX_USER"' \
+  'sudo find "$CANDIDATE_VERIFIER_SANDBOX_ROOT" -depth -delete' \
+  'sudo userdel "$CANDIDATE_VERIFIER_SANDBOX_USER"' \
+  'sudo groupdel "$CANDIDATE_VERIFIER_SANDBOX_USER"' \
+  'refusing to clean an unowned candidate verifier identity or root' \
+  'unlink "$ownership_marker"' \
+  'test ! -e "$CANDIDATE_VERIFIER_SANDBOX_ROOT"'; do
+  require_text "$candidate_verifier_cleanup" "$cleanup_fact" \
+    "candidate verifier cleanup lacks fail-closed control: $cleanup_fact"
+done
+require_text "$external_verification_summary" 'candidate verifier sandbox was not completely destroyed' \
+  'typed summary must independently require completed candidate cleanup'
+registry_check_line="$(grep -Fn -- 'test "$(jq -r .digest <<<"$drivers_json")" = "$gate_registry_digest"' \
+  <<<"$verify_publication_evidence" | head -n 1 | cut -d: -f1)"
+cleanup_step_line="$(grep -Fn -- '      - name: Destroy isolated candidate verifier identity' \
+  <<<"$verify_publication_evidence" | head -n 1 | cut -d: -f1)"
+summary_step_line="$(grep -Fn -- '      - name: Write typed external-driver verification summary' \
+  <<<"$verify_publication_evidence" | head -n 1 | cut -d: -f1)"
+if [[ -z "$registry_check_line" || -z "$cleanup_step_line" || -z "$summary_step_line" ]] || \
+   (( cleanup_step_line <= registry_check_line || summary_step_line <= cleanup_step_line )); then
+  echo 'FAIL: typed external-driver summary must follow candidate re-verification and sandbox cleanup' >&2
+  exit 1
+fi
 
 require_line "$publish_release" "    if: github.ref_type == 'tag'" 'publication must be tag-only'
 require_line "$publish_release" '      - attest-and-create-draft' \
@@ -660,7 +870,8 @@ while IFS= read -r upload_name; do
   if [[ "$upload_name" != *'github.run_attempt'* ]] &&
      [[ "$upload_name" != *'steps.package.outputs.artifact_name'* ]] &&
      [[ "$upload_name" != *'steps.inventory.outputs.artifact_name'* ]] &&
-     [[ "$upload_name" != *'steps.controls.outputs.artifact_name'* ]]; then
+     [[ "$upload_name" != *'steps.controls.outputs.artifact_name'* ]] &&
+     [[ "$upload_name" != *'steps.verification_summary.outputs.artifact_name'* ]]; then
     echo "FAIL: workflow artifact upload name is not rerun-safe: $upload_name" >&2
     exit 1
   fi

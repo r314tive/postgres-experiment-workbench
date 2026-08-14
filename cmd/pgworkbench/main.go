@@ -200,6 +200,7 @@ func usage() {
 	pgworkbench evidence release verify [--json] <release-evidence-index.json>
 	pgworkbench evidence release status [--json] <release-evidence-index.json>
 	pgworkbench evidence candidate init --release-manifest file --asset-inventory file --output index.json [--json]
+	pgworkbench evidence gate attach --index index-rN.json --gate name --evidence-file record.json --evidence-ref uri --output index-rN+1.json [--json]
 	pgworkbench bridge pgdrill export [--json] [--bundle] [--reviewed-predicate-file file] <run-or-bundle> <output.json>
 	pgworkbench bridge pgdrill verify [--json] [--source run-or-bundle] <baseline.json>
   pgworkbench dataset list [--raw]
@@ -542,8 +543,11 @@ func runEvidenceTo(writer io.Writer, args []string) error {
 	if len(args) >= 2 && args[0] == "candidate" && args[1] == "init" {
 		return runEvidenceCandidateInit(writer, args[2:])
 	}
+	if len(args) >= 2 && args[0] == "gate" && args[1] == "attach" {
+		return runEvidenceGateAttach(writer, args[2:])
+	}
 	if len(args) < 2 || args[0] != "release" || (args[1] != "verify" && args[1] != "status") {
-		return fmt.Errorf("usage: pgworkbench evidence <release <verify|status>|candidate init> [options]")
+		return fmt.Errorf("usage: pgworkbench evidence <release <verify|status>|candidate init|gate attach> [options]")
 	}
 	action := args[1]
 	jsonOutput, inputs, err := parseJSONOptionArgs(args[2:])
@@ -565,7 +569,7 @@ func runEvidenceTo(writer io.Writer, args []string) error {
 		}
 	} else if action == "verify" {
 		if verification.Valid {
-			fmt.Fprintf(writer, "VALID: release evidence index status=%s decision=%s open=%d failed=%d passed=%d\n", verification.Status, verification.Decision, len(verification.OpenGates), len(verification.FailedGates), len(verification.PassedGates))
+			fmt.Fprintf(writer, "VALID: release evidence index status=%s decision=%s recorded_decision=%s readiness_decision=%s assurance=%s authorization_eligible=%t open=%d failed=%d passed=%d unqualified=%d\n", verification.Status, verification.Decision, verification.RecordedDecision, verification.ReadinessDecision, verification.AssuranceStatus, verification.AuthorizationEligible, len(verification.OpenGates), len(verification.FailedGates), len(verification.PassedGates), len(verification.UnqualifiedEvidence))
 		} else {
 			fmt.Fprintf(writer, "INVALID: release evidence index issues=%d\n", len(verification.Issues))
 			for _, issue := range verification.Issues {
@@ -573,7 +577,7 @@ func runEvidenceTo(writer io.Writer, args []string) error {
 			}
 		}
 	} else {
-		fmt.Fprintf(writer, "release evidence status=%s decision=%s valid=%t open=%d failed=%d passed=%d\n", verification.Status, verification.Decision, verification.Valid, len(verification.OpenGates), len(verification.FailedGates), len(verification.PassedGates))
+		fmt.Fprintf(writer, "release evidence status=%s decision=%s recorded_decision=%s readiness_decision=%s assurance=%s authorization_eligible=%t valid=%t open=%d failed=%d passed=%d unqualified=%d\n", verification.Status, verification.Decision, verification.RecordedDecision, verification.ReadinessDecision, verification.AssuranceStatus, verification.AuthorizationEligible, verification.Valid, len(verification.OpenGates), len(verification.FailedGates), len(verification.PassedGates), len(verification.UnqualifiedEvidence))
 		for _, gate := range verification.FailedGates {
 			fmt.Fprintf(writer, "failed: %s\n", gate)
 		}
@@ -583,11 +587,17 @@ func runEvidenceTo(writer io.Writer, args []string) error {
 		for _, gate := range verification.PassedGates {
 			fmt.Fprintf(writer, "passed: %s\n", gate)
 		}
+		for _, gate := range verification.UnqualifiedEvidence {
+			fmt.Fprintf(writer, "unqualified: %s\n", gate)
+		}
 		for _, reason := range verification.Reasons {
 			fmt.Fprintf(writer, "reason: %s\n", reason)
 		}
 		for _, issue := range verification.Issues {
 			fmt.Fprintf(writer, "issue: %s\n", issue)
+		}
+		for _, warning := range verification.Warnings {
+			fmt.Fprintf(writer, "warning: %s\n", warning)
 		}
 	}
 	if !verification.Valid {
@@ -678,6 +688,103 @@ func renderCandidateInitResult(writer io.Writer, jsonOutput bool, result release
 		result.Digest,
 		result.Candidate.Tag,
 		result.Candidate.GitCommit,
+		result.IndexVerification.Status,
+		result.IndexVerification.Decision,
+	)
+	return nil
+}
+
+func runEvidenceGateAttach(writer io.Writer, args []string) error {
+	values := make(map[string]string)
+	jsonOutput := false
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--json":
+			if jsonOutput {
+				return fmt.Errorf("duplicate option: --json")
+			}
+			jsonOutput = true
+		case "--index", "--gate", "--evidence-file", "--evidence-ref", "--output":
+			if index+1 >= len(args) {
+				return fmt.Errorf("%s requires a value", args[index])
+			}
+			key := strings.TrimPrefix(args[index], "--")
+			if _, exists := values[key]; exists {
+				return fmt.Errorf("duplicate option: %s", args[index])
+			}
+			values[key] = args[index+1]
+			index++
+		default:
+			return fmt.Errorf("unknown option: %s", args[index])
+		}
+	}
+	for _, required := range []string{"index", "gate", "evidence-file", "evidence-ref", "output"} {
+		if values[required] == "" {
+			return fmt.Errorf("--%s is required", required)
+		}
+	}
+	result, err := releaseevidence.AttachGate(releaseevidence.GateAttachOptions{
+		IndexPath:    values["index"],
+		Gate:         values["gate"],
+		EvidenceFile: values["evidence-file"],
+		EvidenceRef:  values["evidence-ref"],
+		Output:       values["output"],
+	})
+	return renderGateAttachResult(writer, jsonOutput, result, err)
+}
+
+type gateAttachCommittedOutput struct {
+	Status    string                           `json:"status"`
+	Committed bool                             `json:"committed"`
+	Confirmed bool                             `json:"confirmed"`
+	RetrySafe bool                             `json:"retry_safe"`
+	Error     string                           `json:"error"`
+	Result    releaseevidence.GateAttachResult `json:"result"`
+}
+
+func renderGateAttachResult(writer io.Writer, jsonOutput bool, result releaseevidence.GateAttachResult, attachErr error) error {
+	if attachErr != nil {
+		var committed *releaseevidence.CommittedError
+		if !errors.As(attachErr, &committed) {
+			return attachErr
+		}
+		if jsonOutput {
+			encoder := json.NewEncoder(writer)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(gateAttachCommittedOutput{
+				Status:    "committed-unconfirmed",
+				Committed: true,
+				Confirmed: false,
+				RetrySafe: false,
+				Error:     attachErr.Error(),
+				Result:    result,
+			}); err != nil {
+				return errors.Join(attachErr, err)
+			}
+		} else {
+			fmt.Fprintf(writer, "COMMITTED-UNCONFIRMED: gate attachment output=%s digest=%s retry-safe=false\n", result.Output, result.Digest)
+		}
+		return attachErr
+	}
+	if jsonOutput {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+	fmt.Fprintf(
+		writer,
+		"ATTACHED: gate=%s outcome=%s revision=%d output=%s digest=%s evidence_digest=%s durability=%s authenticity=%s unqualified=%d assurance=%s authorization_eligible=%t release_status=%s decision=%s\n",
+		result.Gate,
+		result.GateStatus,
+		result.Revision,
+		result.Output,
+		result.Digest,
+		result.EvidenceDigest,
+		result.EvidenceDurability,
+		result.EvidenceAuthenticity,
+		len(result.IndexVerification.UnqualifiedEvidence),
+		result.IndexVerification.AssuranceStatus,
+		result.IndexVerification.AuthorizationEligible,
 		result.IndexVerification.Status,
 		result.IndexVerification.Decision,
 	)

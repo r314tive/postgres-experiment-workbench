@@ -32,11 +32,14 @@ func TestCandidateFromArtifactsAndNewIndex(t *testing.T) {
 	if !verification.Valid || verification.Status != StatusOpen || verification.Decision != DecisionNoGo {
 		t.Fatalf("new index verification = %+v", verification)
 	}
-	if index.SchemaVersion != SchemaVersionV2 || index.Lineage == nil || index.Lineage.Revision != 0 || index.Lineage.PreviousIndexDigest != nil {
+	if index.SchemaVersion != SchemaVersionV3 || index.Lineage == nil || index.Lineage.Revision != 0 || index.Lineage.PreviousIndexDigest != nil {
 		t.Fatalf("new index lineage = %+v", index.Lineage)
 	}
 	if len(verification.OpenGates) != 16 || len(verification.PassedGates) != 0 || len(verification.FailedGates) != 0 {
 		t.Fatalf("new index requirements: open=%v passed=%v failed=%v", verification.OpenGates, verification.PassedGates, verification.FailedGates)
+	}
+	if verification.RecordedDecision != DecisionNoGo || verification.ReadinessDecision != DecisionNoGo || verification.AssuranceStatus != AssuranceNotApplicable || verification.AuthorizationEligible || len(verification.UnqualifiedEvidence) != 0 {
+		t.Fatalf("new index authorization boundary = %+v", verification)
 	}
 }
 

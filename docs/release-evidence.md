@@ -139,7 +139,11 @@ The critical-finding review covers security, data loss, portability, evidence
 integrity, the tag ruleset, immutable releases, and administrator sign-off. A
 `GO` record cannot contain an open or accepted critical finding. The top-level
 release evidence index can become `complete`/`go` only when every declared gate
-has durable passed evidence and both preventive controls are verified.
+has passed evidence, both preventive controls are verified, and every closed
+requirement carries proof-backed, decision-eligible durability and authenticity
+assurance. The current v3 contract intentionally defines no such positive
+assurance class, so it cannot authorize `GO` before the corresponding verifier
+exists.
 
 ## Semantic CLI verification
 
@@ -155,6 +159,12 @@ pgworkbench evidence release status --json evidence-index.json
 Both commands work outside a scenario-pack checkout. They strictly decode one
 bounded regular non-symlink JSON file, reject duplicate or unknown properties
 and trailing JSON, and independently derive the aggregate status and decision.
+A v3 result separates the recorded decision, outcome-only readiness decision,
+effective authorization decision, aggregate assurance status, and
+`authorization_eligible` boolean. Legacy v1/v2 `complete/go` records remain
+readable and internally verifiable, but evidence without persisted typed-record
+and assurance metadata is listed under `unqualified_evidence`; the effective
+decision is therefore `NO-GO` rather than a grandfathered authorization.
 A consistent index with open or failed gates is valid evidence of `NO-GO`; it
 is not a command failure or a release claim. A stored decision or record status
 that contradicts the derived gates and preventive controls is semantically
@@ -176,7 +186,7 @@ The command verifies the release manifest, archive/SBOM/checksum relationships,
 the closed top-level asset set, every local asset size and digest, metadata
 checksum coverage, and the workflow-compatible fingerprint over sorted
 `{id,name,size,digest}` records. It accepts no independent version, tag,
-commit, pack, fingerprint, timestamp, or gate-status flag. The resulting v2
+commit, pack, fingerprint, timestamp, or gate-status flag. The resulting v3
 index is `active`, revision `0`, and a valid `NO-GO` with all readiness
 requirements open.
 
@@ -193,5 +203,68 @@ Draft/public authenticity and repository state must close their own typed
 gates. Output is copy-on-write and exclusive: an existing file or symlink is
 never replaced. If the destination has already been linked but final inode or
 directory-durability confirmation fails, the command exits non-zero and reports
-`committed-unconfirmed`, `retry_safe=false`, plus the exact output and digest in
-`--json` mode. Operators must inspect that path; a blind retry is incorrect.
+`committed-unconfirmed`, `retry_safe=false`, plus the requested output and
+expected digest in `--json` mode. If path identity itself failed, that requested
+path is not claimed as the current inode location. Operators must reconcile the
+chain directory; a blind retry is incorrect.
+
+## Typed gate attachment
+
+Every gate mutation consumes a producer-specific fact record. There is no
+generic `--status` or `passed=true` input:
+
+```bash
+pgworkbench evidence gate attach \
+  --index evidence/index-r0.json \
+  --gate draft_external_drivers \
+  --evidence-file downloaded/verification.json \
+  --evidence-ref 's3://release-evidence/v0.2.0/external-drivers.json?versionId=...' \
+  --output evidence/index-r1.json
+```
+
+The command reads one bounded regular non-symlink snapshot of each input and
+uses that same exact buffer for parsing and hashing. After publication it
+reopens and rereads the predecessor only to confirm that its directory entry,
+inode, and bytes still match that snapshot. It checks the complete candidate
+identity and derives the only gate and outcome allowed by the record type. The
+local path is never stored. The new revision binds the exact previous index
+digest, changes only its adapter-owned gate plus derived lifecycle fields, and
+is published exclusively without replacing the predecessor.
+
+Revision paths are canonical and adjacent in one chain directory:
+`index-r<N>.json` to `index-r<N+1>.json`. This gives concurrent local writers a
+single destination. The CLI pins that directory and predecessor inode before
+parsing, then stages, links, confirms, cleans, and fsyncs only relative to the
+open directory descriptor. Renaming or replacing the pathname cannot redirect
+the successor into a different directory. If a pathname or predecessor identity
+changes after exclusive publication, the command reports
+`committed-unconfirmed` with the successor digest instead of claiming a clean
+commit. Copying a predecessor into a separate directory can still create a
+detectable fork; the local CLI does not claim a distributed global head or
+compare-and-swap service.
+
+The currently supported positive adapter is
+`pgworkbench.release-external-driver-verification/v1` to
+`draft_external_drivers`. It is pass-only and records the exact three drivers,
+complete candidate, workflow/provider identities, source digests, and narrow
+assurance boundary. Missing, malformed, contradictory, wrong-candidate, or
+wrong-gate records produce no revision. An already passed or failed gate is not
+silently superseded.
+
+`--evidence-ref` is an operator assertion. Offline attachment verifies URI
+shape, typed record semantics, and local content digest but does not fetch,
+authenticate, or prove remote retention. Its machine-readable result therefore
+reports `evidence_durability=operator-asserted-not-verified` and
+`evidence_authenticity=record-semantics-verified-remote-authenticity-not-verified`.
+The typed record identity and same trust pair are persisted inside the attached
+gate evidence; they are not lost after the CLI exits. Independent verification
+reports that gate in `unqualified_evidence` and derives
+`status=open decision=no-go`, even if it was the last gate whose typed record
+had a positive outcome. V3 defines no self-declared verified class. A future
+proof-backed class may be added only together with an adapter that actually
+authenticates the producer, durable remote object, and exact digest binding.
+Callers cannot supply a `passed`, `decision_eligible`, or assurance override.
+GitHub Actions run/artifact URLs are rejected because their retention is
+transport-only. Move the exact summary bytes to a versioned or
+content-addressed durable location first. A successful attachment can still
+report `release_status=open decision=no-go`; it is not release authorization.

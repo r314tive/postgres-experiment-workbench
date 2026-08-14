@@ -97,3 +97,23 @@ func TestLoadFileIsBoundedAndRejectsUnsafeInputs(t *testing.T) {
 		}
 	})
 }
+
+func TestReadFileReturnsTheExactAcceptedBytes(t *testing.T) {
+	directory := t.TempDir()
+	content := []byte("{\n  \"name\": \"record\",\n  \"nested\": {\"enabled\": true},\n  \"values\": []\n}\n")
+	path := filepath.Join(directory, "record.json")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read, err := ReadFile(path, int64(len(content)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(read) != string(content) {
+		t.Fatalf("ReadFile changed bytes:\n got %q\nwant %q", read, content)
+	}
+	var decoded fixture
+	if err := Parse(read, &decoded); err != nil {
+		t.Fatal(err)
+	}
+}

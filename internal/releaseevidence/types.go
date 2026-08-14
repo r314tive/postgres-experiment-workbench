@@ -6,8 +6,10 @@ package releaseevidence
 const (
 	SchemaVersionV1 = "pgworkbench.release-evidence-index/v1"
 	SchemaVersionV2 = "pgworkbench.release-evidence-index/v2"
+	SchemaVersionV3 = "pgworkbench.release-evidence-index/v3"
 	// SchemaVersion remains the v1 name for source compatibility. New indexes
-	// are created with SchemaVersionV2 and an explicit immutable lineage.
+	// are created with SchemaVersionV3, explicit immutable lineage, and
+	// persisted evidence trust metadata.
 	SchemaVersion = SchemaVersionV1
 	ArtifactType  = "pgworkbench.release-evidence-index"
 	DecisionScope = "v1-readiness"
@@ -28,6 +30,18 @@ const (
 
 	DecisionNoGo = "no-go"
 	DecisionGo   = "go"
+
+	// Evidence assurance is recorded inside every new v3 attachment. The only
+	// currently supported pair is a valid operator assertion, but is not
+	// sufficient for release authorization. A proof-backed pair must not be
+	// introduced until a typed adapter independently establishes it.
+	EvidenceDurabilityAsserted     = "operator-asserted-not-verified"
+	EvidenceAuthenticityUnverified = "record-semantics-verified-remote-authenticity-not-verified"
+
+	AssuranceNotApplicable         = "not-applicable"
+	AssuranceLegacyUnspecified     = "legacy-unspecified-unverified"
+	AssuranceOperatorAttested      = "operator-attested-not-verified"
+	AssuranceAuthorizationEligible = "authorization-eligible"
 
 	// Verification status is the aggregate state of all release gates and
 	// mandatory preventive controls. Failed takes precedence over open.
@@ -72,11 +86,29 @@ type ScenarioPack struct {
 }
 
 type Evidence struct {
-	Ref        string  `json:"ref"`
-	Digest     string  `json:"digest"`
-	CapturedAt string  `json:"captured_at"`
-	RunID      *string `json:"run_id,omitempty"`
-	RunAttempt *int64  `json:"run_attempt,omitempty"`
+	Ref        string             `json:"ref"`
+	Digest     string             `json:"digest"`
+	CapturedAt string             `json:"captured_at"`
+	RunID      *string            `json:"run_id,omitempty"`
+	RunAttempt *int64             `json:"run_attempt,omitempty"`
+	Record     *EvidenceRecord    `json:"record,omitempty"`
+	Assurance  *EvidenceAssurance `json:"assurance,omitempty"`
+}
+
+// EvidenceRecord preserves the closed adapter contract that interpreted the
+// exact evidence bytes. It must appear together with EvidenceAssurance in new
+// v3 attachments; legacy v1/v2 evidence can have neither.
+type EvidenceRecord struct {
+	SchemaVersion string `json:"schema_version"`
+	ArtifactType  string `json:"artifact_type"`
+}
+
+// EvidenceAssurance separates record/content verification from remote
+// durability and producer authenticity. It is deliberately not a caller
+// supplied boolean and the current pair is never release-authorizing.
+type EvidenceAssurance struct {
+	Durability   string `json:"durability"`
+	Authenticity string `json:"authenticity"`
 }
 
 type Gate struct {
@@ -141,17 +173,28 @@ type Decision struct {
 	Reasons    []string `json:"reasons"`
 }
 
-// Verification is an independently recomputed view of an index. Gate lists and
-// Reasons are sorted and derived without trusting Decision.Status or
-// Decision.Reasons. Issues contains only structural or consistency defects; an
-// ordinary open or failed gate outcome is not itself a semantic defect.
+// Verification is an independently recomputed view of an index. Readiness is
+// the outcome-only legacy view; Status and Decision are the effective release
+// authorization after evidence qualification. RecordedDecision preserves the
+// input for explicit comparison. Gate lists, warnings, and reasons are sorted
+// and derived without trusting Decision.Status or Decision.Reasons. Issues
+// contains only structural or version-specific lifecycle defects; an ordinary
+// open, failed, legacy-unqualified, or operator-attested outcome is not itself
+// a semantic defect.
 type Verification struct {
-	Valid       bool     `json:"valid"`
-	Status      string   `json:"status"`
-	Decision    string   `json:"decision"`
-	OpenGates   []string `json:"open_gates"`
-	FailedGates []string `json:"failed_gates"`
-	PassedGates []string `json:"passed_gates"`
-	Reasons     []string `json:"reasons"`
-	Issues      []string `json:"issues"`
+	Valid                 bool     `json:"valid"`
+	Status                string   `json:"status"`
+	Decision              string   `json:"decision"`
+	RecordedDecision      string   `json:"recorded_decision"`
+	ReadinessStatus       string   `json:"readiness_status"`
+	ReadinessDecision     string   `json:"readiness_decision"`
+	AssuranceStatus       string   `json:"assurance_status"`
+	AuthorizationEligible bool     `json:"authorization_eligible"`
+	OpenGates             []string `json:"open_gates"`
+	FailedGates           []string `json:"failed_gates"`
+	PassedGates           []string `json:"passed_gates"`
+	UnqualifiedEvidence   []string `json:"unqualified_evidence"`
+	Reasons               []string `json:"reasons"`
+	Warnings              []string `json:"warnings"`
+	Issues                []string `json:"issues"`
 }

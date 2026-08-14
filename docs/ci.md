@@ -67,6 +67,14 @@ execution bytes are never copied into Actions or release evidence. This is a
 technical compliance boundary, not legal advice; license metadata explicitly
 leaves the complete dependency/source closure unattested.
 
+After the independent `verify-publication-evidence` job has reverified that
+metadata artifact and the authenticated draft archive/manifest, it emits
+`pgworkbench.release-external-driver-verification/v1` as a separate fact-only
+summary. The summary carries no `status` or `passed` field; the CLI adapter
+derives `draft_external_drivers=passed` only from its exact candidate and fixed
+assurance contract. Its Actions artifact is still 90-day transport and must be
+copied byte-for-byte to the durable URI supplied during attachment.
+
 `macos-15` is selected because it is the current arm64 GitHub-hosted image; the job still
 fails closed unless `uname -m` is exactly `arm64`. Runner availability depends
 on the repository and GitHub plan. If GitHub cannot allocate that label, the

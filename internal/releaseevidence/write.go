@@ -25,15 +25,17 @@ type WriteResult struct {
 
 // CommittedError reports that an exclusive destination was created but a
 // post-publication identity or directory-durability confirmation failed. The
-// Result names the exact destination and expected digest so callers do not
-// retry blindly and mistake ErrOutputExists for the original outcome.
+// Result preserves the requested destination and expected digest so callers do
+// not retry blindly and mistake ErrOutputExists for the original outcome. If a
+// directory pathname changed, the requested path may no longer resolve to the
+// committed inode and must not be presented as a confirmed current location.
 type CommittedError struct {
 	Result WriteResult
 	Err    error
 }
 
 func (err *CommittedError) Error() string {
-	return fmt.Sprintf("release evidence index committed at %s with expected digest %s, but final confirmation failed: %v", err.Result.Output, err.Result.Digest, err.Err)
+	return fmt.Sprintf("release evidence index publication reached committed state for requested output %s with expected digest %s, but final confirmation failed: %v", err.Result.Output, err.Result.Digest, err.Err)
 }
 
 func (err *CommittedError) Unwrap() error {

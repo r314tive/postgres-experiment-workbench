@@ -35,7 +35,7 @@ type CandidateInitResult struct {
 
 // InitializeCandidate verifies a downloaded release directory and a typed
 // provider asset inventory, derives one distribution identity, then writes an
-// active v2 evidence index with every readiness requirement still open.
+// active v3 evidence index with every readiness requirement still open.
 func InitializeCandidate(options CandidateInitOptions) (result CandidateInitResult, returnErr error) {
 	if options.ReleaseManifestPath == "" {
 		return CandidateInitResult{}, fmt.Errorf("release manifest path is required")
@@ -165,7 +165,7 @@ func CandidateFromArtifacts(manifest releasemanifest.Manifest, inventory release
 // It is intentionally active/no-go; candidate initialization closes no gate.
 func NewIndex(candidate Candidate, createdAt string) (Index, error) {
 	index := Index{
-		SchemaVersion: SchemaVersionV2,
+		SchemaVersion: SchemaVersionV3,
 		ArtifactType:  ArtifactType,
 		Lineage:       &Lineage{Revision: 0},
 		RecordStatus:  RecordStatusActive,
@@ -221,8 +221,9 @@ func boolPointer(value bool) *bool {
 	return &value
 }
 
-// GateNames returns the stable set of attachable gate names. Preventive
-// controls intentionally have separate typed adapters and are not gate names.
+// GateNames returns the stable set of readiness gate names. A gate becomes
+// attachable only when a closed typed adapter is implemented for its producer
+// record. Preventive controls intentionally use separate typed adapters.
 func GateNames() []string {
 	names := make([]string, 0, len(gateRequirements(Gates{})))
 	for _, item := range gateRequirements(Gates{}) {

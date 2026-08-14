@@ -13,53 +13,63 @@ import (
 	"unicode/utf8"
 )
 
-// LoadFile reads at most maxBytes from path and strictly parses the result into
-// target. The path and the opened file must identify the same regular,
-// non-symlink file. Files that change size while being read are rejected.
-func LoadFile(path string, maxBytes int64, target any) error {
+// ReadFile reads at most maxBytes from path through one pinned file descriptor.
+// The returned bytes are the exact bytes whose regular-file identity and size
+// were checked. Callers that both parse and hash evidence must use this single
+// buffer for both operations instead of reopening the path.
+func ReadFile(path string, maxBytes int64) ([]byte, error) {
 	if maxBytes <= 0 {
-		return fmt.Errorf("maximum JSON file size must be positive")
+		return nil, fmt.Errorf("maximum JSON file size must be positive")
 	}
 	pathInfo, err := os.Lstat(path)
 	if err != nil {
-		return fmt.Errorf("inspect JSON file: %w", err)
+		return nil, fmt.Errorf("inspect JSON file: %w", err)
 	}
 	if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.Mode().IsRegular() {
-		return fmt.Errorf("JSON file must be a regular non-symlink file")
+		return nil, fmt.Errorf("JSON file must be a regular non-symlink file")
 	}
 
-	file, err := os.Open(path)
+	file, err := openReadOnlyPath(path)
 	if err != nil {
-		return fmt.Errorf("open JSON file: %w", err)
+		return nil, fmt.Errorf("open JSON file: %w", err)
 	}
 	defer file.Close()
 
 	openedInfo, err := file.Stat()
 	if err != nil {
-		return fmt.Errorf("inspect opened JSON file: %w", err)
+		return nil, fmt.Errorf("inspect opened JSON file: %w", err)
 	}
 	if !openedInfo.Mode().IsRegular() || !os.SameFile(pathInfo, openedInfo) {
-		return fmt.Errorf("JSON file changed while it was being opened")
+		return nil, fmt.Errorf("JSON file changed while it was being opened")
 	}
 	if openedInfo.Size() > maxBytes {
-		return fmt.Errorf("JSON file exceeds %d bytes", maxBytes)
+		return nil, fmt.Errorf("JSON file exceeds %d bytes", maxBytes)
 	}
 
 	content, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
-		return fmt.Errorf("read JSON file: %w", err)
+		return nil, fmt.Errorf("read JSON file: %w", err)
 	}
 	if int64(len(content)) > maxBytes {
-		return fmt.Errorf("JSON file exceeds %d bytes", maxBytes)
+		return nil, fmt.Errorf("JSON file exceeds %d bytes", maxBytes)
 	}
 	finalInfo, err := file.Stat()
 	if err != nil {
-		return fmt.Errorf("inspect read JSON file: %w", err)
+		return nil, fmt.Errorf("inspect read JSON file: %w", err)
 	}
 	if !os.SameFile(openedInfo, finalInfo) || finalInfo.Size() != openedInfo.Size() || finalInfo.Size() != int64(len(content)) {
-		return fmt.Errorf("JSON file changed while it was being read")
+		return nil, fmt.Errorf("JSON file changed while it was being read")
 	}
+	return content, nil
+}
 
+// LoadFile reads one bounded regular non-symlink file and strictly parses the
+// exact returned byte snapshot into target.
+func LoadFile(path string, maxBytes int64, target any) error {
+	content, err := ReadFile(path, maxBytes)
+	if err != nil {
+		return err
+	}
 	return Parse(content, target)
 }
 

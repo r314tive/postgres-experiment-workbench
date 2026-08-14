@@ -137,6 +137,27 @@ func validateRepresentativeContracts(t *testing.T, registry *Registry) {
 		}
 	})
 
+	validExternalDriverVerification := externalDriverVerification(digest)
+	t.Run("positive/release-external-driver-verification", func(t *testing.T) {
+		if err := registry.Validate("release-external-driver-verification.schema.json", validExternalDriverVerification); err != nil {
+			t.Fatal(err)
+		}
+	})
+	wideExternalDriverIDs := externalDriverVerification(digest)
+	wideWorkflowRun := cloneMap(wideExternalDriverIDs["workflow_run"].(map[string]any))
+	wideWorkflowRun["id"] = "12345678901234567890123456789012"
+	wideExternalDriverIDs["workflow_run"] = wideWorkflowRun
+	wideSource := cloneMap(wideExternalDriverIDs["source"].(map[string]any))
+	wideProviderArtifact := cloneMap(wideSource["provider_artifact"].(map[string]any))
+	wideProviderArtifact["id"] = "98765432109876543210987654321098"
+	wideSource["provider_artifact"] = wideProviderArtifact
+	wideExternalDriverIDs["source"] = wideSource
+	t.Run("positive/release-external-driver-verification-32-digit-ids", func(t *testing.T) {
+		if err := registry.Validate("release-external-driver-verification.schema.json", wideExternalDriverIDs); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	invalidVerdict := cloneMap(validVerdict)
 	invalidVerdict["workload_exit"] = 1
 	assertRejected(t, registry, "run-verdict.schema.json", "passed-verdict-with-failed-workload", invalidVerdict)
@@ -169,6 +190,44 @@ func validateRepresentativeContracts(t *testing.T, registry *Registry) {
 	mismatchedComparison := cloneMap(validDescriptiveComparison)
 	mismatchedComparison["decision"] = "invalid"
 	assertRejected(t, registry, "benchmark-comparison.schema.json", "independent-comparison-status-decision-mismatch", mismatchedComparison)
+
+	userSelectedExternalDriverOutcome := externalDriverVerification(digest)
+	userSelectedExternalDriverOutcome["status"] = "passed"
+	assertRejected(t, registry, "release-external-driver-verification.schema.json", "external-driver-user-selected-outcome", userSelectedExternalDriverOutcome)
+	userSelectedExternalDriverBoolean := externalDriverVerification(digest)
+	userSelectedExternalDriverBoolean["passed"] = true
+	assertRejected(t, registry, "release-external-driver-verification.schema.json", "external-driver-user-selected-passed-flag", userSelectedExternalDriverBoolean)
+	tooLongExternalDriverRunID := externalDriverVerification(digest)
+	tooLongWorkflowRun := cloneMap(tooLongExternalDriverRunID["workflow_run"].(map[string]any))
+	tooLongWorkflowRun["id"] = strings.Repeat("9", 33)
+	tooLongExternalDriverRunID["workflow_run"] = tooLongWorkflowRun
+	assertRejected(t, registry, "release-external-driver-verification.schema.json", "external-driver-33-digit-run-id", tooLongExternalDriverRunID)
+
+	wrongExternalDriverSet := externalDriverVerification(digest)
+	wrongExternalDriverSet["drivers"] = []any{
+		"benchbase-postgresql-33c0047",
+		"hammerdb-postgresql-6.0",
+		"sysbench-postgresql-latest",
+	}
+	assertRejected(t, registry, "release-external-driver-verification.schema.json", "external-driver-wrong-driver-set", wrongExternalDriverSet)
+
+	missingExternalDriverPack := externalDriverVerification(digest)
+	candidate := cloneMap(missingExternalDriverPack["candidate"].(map[string]any))
+	delete(candidate, "scenario_pack")
+	missingExternalDriverPack["candidate"] = candidate
+	assertRejected(t, registry, "release-external-driver-verification.schema.json", "external-driver-missing-scenario-pack", missingExternalDriverPack)
+
+	unverifiedExternalDriverCandidate := externalDriverVerification(digest)
+	assurance := cloneMap(unverifiedExternalDriverCandidate["assurance"].(map[string]any))
+	assurance["candidate_identity_reverified"] = false
+	unverifiedExternalDriverCandidate["assurance"] = assurance
+	assertRejected(t, registry, "release-external-driver-verification.schema.json", "external-driver-unverified-candidate", unverifiedExternalDriverCandidate)
+
+	missingExternalDriverBoundary := externalDriverVerification(digest)
+	boundaryAssurance := cloneMap(missingExternalDriverBoundary["assurance"].(map[string]any))
+	delete(boundaryAssurance, "third_party_runtime_bytes_uploaded")
+	missingExternalDriverBoundary["assurance"] = boundaryAssurance
+	assertRejected(t, registry, "release-external-driver-verification.schema.json", "external-driver-missing-false-assurance", missingExternalDriverBoundary)
 
 	invalidFixtures := []struct {
 		name       string
@@ -309,6 +368,69 @@ func benchmarkComparison(digest string) map[string]any {
 		"status":                "inconclusive",
 		"decision":              "inconclusive",
 		"reasons":               []any{"independent series are descriptive only"},
+	}
+}
+
+func externalDriverVerification(digest string) map[string]any {
+	return map[string]any{
+		"schema_version":     "pgworkbench.release-external-driver-verification/v1",
+		"artifact_type":      "pgworkbench.release-external-driver-verification",
+		"qualification_mode": "draft-release-smoke",
+		"candidate": map[string]any{
+			"version":           "1.2.3",
+			"tag":               "v1.2.3",
+			"git_commit":        strings.Repeat("a", 40),
+			"asset_fingerprint": strings.Repeat("b", 64),
+			"scenario_pack": map[string]any{
+				"id":      "builtin",
+				"version": "1.2.3",
+				"digest":  digest,
+			},
+		},
+		"captured_at": "2026-08-13T00:00:01Z",
+		"workflow_run": map[string]any{
+			"id":         "123456789",
+			"attempt":    1,
+			"head_sha":   strings.Repeat("a", 40),
+			"repository": "r314tive/postgres-experiment-workbench",
+		},
+		"source": map[string]any{
+			"gate_digest":             digest,
+			"metadata_archive_digest": digest,
+			"provider_artifact": map[string]any{
+				"id":     "987654321",
+				"name":   "draft-external-driver-metadata-v1.2.3-candidate-1",
+				"digest": digest,
+			},
+			"release_archive_digest":  digest,
+			"release_manifest_digest": digest,
+		},
+		"drivers": []any{
+			"benchbase-postgresql-33c0047",
+			"hammerdb-postgresql-6.0",
+			"sysbench-postgresql-1.0.20",
+		},
+		"assurance": map[string]any{
+			"purpose":                                 "adapter-compatibility-release-smoke",
+			"artifact_payload":                        "metadata-only-no-third-party-runtime-bytes",
+			"verification_scope":                      "workflow-local-content-and-semantics",
+			"third_party_runtime_bytes_uploaded":      false,
+			"performance_claim":                       false,
+			"production_decision_eligible":            false,
+			"source_to_binary_attested":               false,
+			"driver_runtime_closure_attested":         true,
+			"host_runtime_dependencies_attested":      false,
+			"benchmark_comparability_claim":           false,
+			"project_redistribution":                  false,
+			"all_executions_locally_verified":         true,
+			"exact_source_to_staged_file_match":       true,
+			"disposable_loopback_target_acknowledged": true,
+			"system_databases_denied":                 true,
+			"candidate_identity_reverified":           true,
+			"provider_artifact_reverified":            true,
+			"release_archive_provenance_verified":     true,
+			"release_manifest_provenance_verified":    true,
+		},
 	}
 }
 

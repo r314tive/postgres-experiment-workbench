@@ -1614,12 +1614,16 @@ jobs:
       VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST: ${{ needs['draft-external-drivers'].outputs.artifact_digest }}
       VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID: ${{ needs['draft-external-drivers'].outputs.artifact_id }}
       VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME: ${{ needs['draft-external-drivers'].outputs.artifact_name }}
+      CANDIDATE_VERIFIER_SANDBOX_USER: pgwverify
     outputs:
       verified_external_driver_artifact_digest: ${{ steps.verify.outputs.verified_external_driver_artifact_digest }}
       verified_external_driver_artifact_id: ${{ steps.verify.outputs.verified_external_driver_artifact_id }}
       verified_external_driver_artifact_name: ${{ steps.verify.outputs.verified_external_driver_artifact_name }}
       verified_external_driver_archive_digest: ${{ steps.verify.outputs.verified_external_driver_archive_digest }}
       verified_external_driver_gate_digest: ${{ steps.verify.outputs.verified_external_driver_gate_digest }}
+      verification_artifact_digest: ${{ steps.upload_verification.outputs.artifact-digest }}
+      verification_artifact_id: ${{ steps.upload_verification.outputs.artifact-id }}
+      verification_artifact_name: ${{ steps.verification_summary.outputs.artifact_name }}
 
     steps:
       - name: Require exact external-driver artifact identity
@@ -1659,6 +1663,33 @@ jobs:
           path: draft-external-driver-package
           merge-multiple: true
 
+      - name: Create isolated candidate verifier identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE_VERIFIER_SANDBOX_ROOT="$RUNNER_TEMP/pgworkbench-publication-verifier-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$CANDIDATE_VERIFIER_SANDBOX_USER" = pgwverify
+          case "$CANDIDATE_VERIFIER_SANDBOX_ROOT" in
+            "$RUNNER_TEMP"/pgworkbench-publication-verifier-"$GITHUB_RUN_ID"-"$GITHUB_RUN_ATTEMPT") ;;
+            *) exit 1 ;;
+          esac
+          ownership_marker="$CANDIDATE_VERIFIER_SANDBOX_ROOT.owned-by-workflow"
+          test ! -e "$CANDIDATE_VERIFIER_SANDBOX_ROOT"
+          test ! -e "$ownership_marker"
+          if id "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1; then
+            echo 'candidate verifier sandbox identity already exists' >&2
+            exit 1
+          fi
+          install -m 0600 /dev/null "$ownership_marker"
+          sudo useradd --system --user-group --no-create-home \
+            --shell /usr/sbin/nologin "$CANDIDATE_VERIFIER_SANDBOX_USER"
+          sudo install -d -o root -g root -m 0755 \
+            "$CANDIDATE_VERIFIER_SANDBOX_ROOT"
+          sudo install -d -o "$CANDIDATE_VERIFIER_SANDBOX_USER" \
+            -g "$CANDIDATE_VERIFIER_SANDBOX_USER" -m 0700 \
+            "$CANDIDATE_VERIFIER_SANDBOX_ROOT/home" \
+            "$CANDIDATE_VERIFIER_SANDBOX_ROOT/tmp"
+
       - name: Reverify metadata-only gate and draft candidate
         id: verify
         env:
@@ -1666,6 +1697,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          CANDIDATE_VERIFIER_SANDBOX_ROOT="$RUNNER_TEMP/pgworkbench-publication-verifier-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           tag="$GITHUB_REF_NAME"
           remote_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
           test "$remote_sha" = "$GITHUB_SHA"
@@ -1789,7 +1821,10 @@ jobs:
                .execution.assurance.source_to_binary_attested == false and
                .execution.assurance.tpc_compliance_claim == false and
                .execution.assurance.driver_runtime_closure_attested == true and
-               .execution.assurance.host_runtime_dependencies_attested == false
+               .execution.assurance.host_runtime_dependencies_attested == false and
+               .execution.target.acknowledged == true and
+               .execution.target.loopback_only == true and
+               .execution.target.system_databases_denied == true
              )' draft-external-driver-evidence/gate.json >/dev/null
 
           jq -e '
@@ -1859,15 +1894,21 @@ jobs:
                .workflow_run == {id:$run_id,attempt:$run_attempt} and
                .local_verification.valid == true and
                .execution.status == "completed" and
-               .execution.exact_source_to_staged_file_match == true' "$report" >/dev/null
+               .execution.exact_source_to_staged_file_match == true and
+               .execution.target.acknowledged == true and
+               .execution.target.loopback_only == true and
+               .execution.target.system_databases_denied == true' "$report" >/dev/null
           done
 
-          mkdir draft-external-driver-reverify
+          mkdir draft-external-driver-reverify draft-external-driver-manifest
           archive="pgworkbench-$VERSION-linux-amd64.tar.gz"
           checksum="pgworkbench-$VERSION-SHA256SUMS.txt"
+          manifest="pgworkbench-$VERSION-release-manifest.json"
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
             --pattern "$archive" --pattern "$checksum" \
             --dir draft-external-driver-reverify
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$manifest" --dir draft-external-driver-manifest
           expected="$(awk -v name="$archive" '$2 == name {print $1}' \
             "draft-external-driver-reverify/$checksum")"
           actual="$(sha256sum "draft-external-driver-reverify/$archive" | awk '{print $1}')"
@@ -1877,13 +1918,80 @@ jobs:
           gh attestation verify "draft-external-driver-reverify/$archive" \
             -R "$GITHUB_REPOSITORY" \
             --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+          release_manifest_asset_digest="$(jq -r --arg name "$manifest" \
+            '.assets[] | select(.name == $name) | .digest' <<<"$release_json")"
+          release_manifest_digest="sha256:$(sha256sum \
+            "draft-external-driver-manifest/$manifest" | awk '{print $1}')"
+          test -n "$release_manifest_asset_digest"
+          test "$release_manifest_digest" = "$release_manifest_asset_digest"
+          gh attestation verify "draft-external-driver-manifest/$manifest" \
+            -R "$GITHUB_REPOSITORY" \
+            --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF"
+          jq -e --arg version "$VERSION" --arg commit "$GITHUB_SHA" '
+            .schema_version == "pgworkbench.release-manifest/v1" and
+            .version == $version and .git_commit == $commit and
+            (.scenario_pack | keys) == ["digest","id","version"] and
+            (.scenario_pack.id | type) == "string" and
+            (.scenario_pack.version | type) == "string" and
+            (.scenario_pack.digest | test("^sha256:[0-9a-f]{64}$"))
+          ' "draft-external-driver-manifest/$manifest" >/dev/null
+          scenario_pack_id="$(jq -r .scenario_pack.id \
+            "draft-external-driver-manifest/$manifest")"
+          scenario_pack_version="$(jq -r .scenario_pack.version \
+            "draft-external-driver-manifest/$manifest")"
+          scenario_pack_digest="$(jq -r .scenario_pack.digest \
+            "draft-external-driver-manifest/$manifest")"
+          [[ "$scenario_pack_id" =~ ^[a-z0-9._-]+$ ]]
+          [[ "$scenario_pack_id" =~ [a-z0-9] ]]
+          [[ "$scenario_pack_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          [[ "$scenario_pack_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          case "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" in
+            sha256:[0-9a-f][0-9a-f]*) provider_artifact_digest="$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" ;;
+            [0-9a-f][0-9a-f]*) provider_artifact_digest="sha256:$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" ;;
+            *) exit 1 ;;
+          esac
+          [[ "$provider_artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           unset GH_TOKEN
           tar -C draft-external-driver-reverify \
             -xzf "draft-external-driver-reverify/$archive"
           verifier_root="$GITHUB_WORKSPACE/draft-external-driver-reverify/pgworkbench-$VERSION-linux-amd64"
           verifier="$verifier_root/pgworkbench"
+          test -f "$verifier"
+          test ! -L "$verifier"
           test -x "$verifier"
-          identity="$("$verifier" version)"
+          chmod -R a-w "$verifier_root"
+          sudo --user "$CANDIDATE_VERIFIER_SANDBOX_USER" -- test -r "$verifier"
+          sudo --user "$CANDIDATE_VERIFIER_SANDBOX_USER" -- test -x "$verifier"
+          if sudo --user "$CANDIDATE_VERIFIER_SANDBOX_USER" -- \
+            test -w "$GITHUB_WORKSPACE"; then
+            echo 'candidate verifier sandbox identity can write the workspace' >&2
+            exit 1
+          fi
+          if sudo --user "$CANDIDATE_VERIFIER_SANDBOX_USER" -- \
+            test -w "$verifier_root"; then
+            echo 'candidate verifier sandbox identity can write the candidate root' >&2
+            exit 1
+          fi
+          writable_workspace_path="$(sudo --user "$CANDIDATE_VERIFIER_SANDBOX_USER" -- \
+            find "$GITHUB_WORKSPACE" -writable -print -quit)"
+          if [[ -n "$writable_workspace_path" ]]; then
+            echo "candidate verifier sandbox identity can write workspace path: $writable_workspace_path" >&2
+            exit 1
+          fi
+          sandbox_env=(
+            sudo --user "$CANDIDATE_VERIFIER_SANDBOX_USER" -- env -i
+            "HOME=$CANDIDATE_VERIFIER_SANDBOX_ROOT/home"
+            "TMPDIR=$CANDIDATE_VERIFIER_SANDBOX_ROOT/tmp"
+            "TMP=$CANDIDATE_VERIFIER_SANDBOX_ROOT/tmp"
+            "TEMP=$CANDIDATE_VERIFIER_SANDBOX_ROOT/tmp"
+            "XDG_CACHE_HOME=$CANDIDATE_VERIFIER_SANDBOX_ROOT/home/.cache"
+            "PATH=/usr/local/bin:/usr/bin:/bin"
+            "LANG=C" "LC_ALL=C" "TZ=UTC"
+            "USER=$CANDIDATE_VERIFIER_SANDBOX_USER"
+            "LOGNAME=$CANDIDATE_VERIFIER_SANDBOX_USER"
+            "PGWORKBENCH_ROOT=$verifier_root"
+          )
+          identity="$("${sandbox_env[@]}" "$verifier" version)"
           test "$(sed -n 's/.* version=\([^ ]*\).*/\1/p' <<<"$identity")" = "$VERSION"
           test "$(sed -n 's/.* commit=\([^ ]*\).*/\1/p' <<<"$identity")" = "$GITHUB_SHA"
           gate_binary_digest="$(jq -r .pgworkbench_binary_digest \
@@ -1892,9 +2000,11 @@ jobs:
           test "$verifier_digest" = "$gate_binary_digest"
           gate_registry_digest="$(jq -r .driver_registry_digest \
             draft-external-driver-evidence/gate.json)"
-          drivers_json="$(PGWORKBENCH_ROOT="$verifier_root" \
-            "$verifier" benchmark drivers --json)"
+          drivers_json="$("${sandbox_env[@]}" "$verifier" benchmark drivers --json)"
           test "$(jq -r .digest <<<"$drivers_json")" = "$gate_registry_digest"
+          summary_gate_digest="sha256:$external_gate_digest"
+          summary_metadata_archive_digest="sha256:$evidence_archive_digest"
+          summary_release_archive_digest="sha256:$actual"
           printf 'verified_external_driver_artifact_digest=%s\n' \
             "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" >> "$GITHUB_OUTPUT"
           printf 'verified_external_driver_artifact_id=%s\n' \
@@ -1905,6 +2015,268 @@ jobs:
             "$VERIFIED_EXTERNAL_DRIVER_ARCHIVE_DIGEST" >> "$GITHUB_OUTPUT"
           printf 'verified_external_driver_gate_digest=%s\n' \
             "$VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST" >> "$GITHUB_OUTPUT"
+          printf 'summary_version=%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
+          printf 'summary_tag=%s\n' "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          printf 'summary_git_commit=%s\n' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          printf 'summary_asset_fingerprint=%s\n' "$asset_fingerprint" >> "$GITHUB_OUTPUT"
+          printf 'summary_scenario_pack_id=%s\n' "$scenario_pack_id" >> "$GITHUB_OUTPUT"
+          printf 'summary_scenario_pack_version=%s\n' "$scenario_pack_version" >> "$GITHUB_OUTPUT"
+          printf 'summary_scenario_pack_digest=%s\n' "$scenario_pack_digest" >> "$GITHUB_OUTPUT"
+          printf 'summary_workflow_run_id=%s\n' "$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+          printf 'summary_workflow_run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          printf 'summary_repository=%s\n' "$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"
+          printf 'summary_gate_digest=%s\n' "$summary_gate_digest" >> "$GITHUB_OUTPUT"
+          printf 'summary_metadata_archive_digest=%s\n' "$summary_metadata_archive_digest" >> "$GITHUB_OUTPUT"
+          printf 'summary_provider_artifact_id=%s\n' "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID" >> "$GITHUB_OUTPUT"
+          printf 'summary_provider_artifact_name=%s\n' "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+          printf 'summary_provider_artifact_digest=%s\n' "$provider_artifact_digest" >> "$GITHUB_OUTPUT"
+          printf 'summary_release_archive_digest=%s\n' "$summary_release_archive_digest" >> "$GITHUB_OUTPUT"
+          printf 'summary_release_manifest_digest=%s\n' "$release_manifest_digest" >> "$GITHUB_OUTPUT"
+          printf 'summary_verifier_digest=%s\n' "$verifier_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Destroy isolated candidate verifier identity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE_VERIFIER_SANDBOX_ROOT="$RUNNER_TEMP/pgworkbench-publication-verifier-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$CANDIDATE_VERIFIER_SANDBOX_USER" = pgwverify
+          case "$CANDIDATE_VERIFIER_SANDBOX_ROOT" in
+            "$RUNNER_TEMP"/pgworkbench-publication-verifier-"$GITHUB_RUN_ID"-"$GITHUB_RUN_ATTEMPT") ;;
+            *) exit 1 ;;
+          esac
+          ownership_marker="$CANDIDATE_VERIFIER_SANDBOX_ROOT.owned-by-workflow"
+          if [[ ! -f "$ownership_marker" || -L "$ownership_marker" ]]; then
+            if id "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1 || \
+              [[ -e "$CANDIDATE_VERIFIER_SANDBOX_ROOT" ]]; then
+              echo 'refusing to clean an unowned candidate verifier identity or root' >&2
+              exit 1
+            fi
+            exit 0
+          fi
+          if id "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1; then
+            sudo pkill -TERM -u "$CANDIDATE_VERIFIER_SANDBOX_USER" 2>/dev/null || true
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+              if ! sudo pgrep -u "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1; then
+                break
+              fi
+              sleep 0.2
+            done
+            sudo pkill -KILL -u "$CANDIDATE_VERIFIER_SANDBOX_USER" 2>/dev/null || true
+            if sudo pgrep -u "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1; then
+              echo 'candidate verifier sandbox processes survived cleanup' >&2
+              exit 1
+            fi
+          fi
+          if [[ -e "$CANDIDATE_VERIFIER_SANDBOX_ROOT" ]]; then
+            sudo find "$CANDIDATE_VERIFIER_SANDBOX_ROOT" -depth -delete
+          fi
+          test ! -e "$CANDIDATE_VERIFIER_SANDBOX_ROOT"
+          if id "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1; then
+            sudo userdel "$CANDIDATE_VERIFIER_SANDBOX_USER"
+          fi
+          if getent group "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1; then
+            sudo groupdel "$CANDIDATE_VERIFIER_SANDBOX_USER"
+          fi
+          if id "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1; then
+            echo 'candidate verifier sandbox identity survived cleanup' >&2
+            exit 1
+          fi
+          if getent group "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1; then
+            echo 'candidate verifier sandbox group survived cleanup' >&2
+            exit 1
+          fi
+          unlink "$ownership_marker"
+          test ! -e "$ownership_marker"
+
+      - name: Write typed external-driver verification summary
+        id: verification_summary
+        env:
+          SUMMARY_VERSION: ${{ steps.verify.outputs.summary_version }}
+          SUMMARY_TAG: ${{ steps.verify.outputs.summary_tag }}
+          SUMMARY_GIT_COMMIT: ${{ steps.verify.outputs.summary_git_commit }}
+          SUMMARY_ASSET_FINGERPRINT: ${{ steps.verify.outputs.summary_asset_fingerprint }}
+          SUMMARY_SCENARIO_PACK_ID: ${{ steps.verify.outputs.summary_scenario_pack_id }}
+          SUMMARY_SCENARIO_PACK_VERSION: ${{ steps.verify.outputs.summary_scenario_pack_version }}
+          SUMMARY_SCENARIO_PACK_DIGEST: ${{ steps.verify.outputs.summary_scenario_pack_digest }}
+          SUMMARY_WORKFLOW_RUN_ID: ${{ steps.verify.outputs.summary_workflow_run_id }}
+          SUMMARY_WORKFLOW_RUN_ATTEMPT: ${{ steps.verify.outputs.summary_workflow_run_attempt }}
+          SUMMARY_REPOSITORY: ${{ steps.verify.outputs.summary_repository }}
+          SUMMARY_GATE_DIGEST: ${{ steps.verify.outputs.summary_gate_digest }}
+          SUMMARY_METADATA_ARCHIVE_DIGEST: ${{ steps.verify.outputs.summary_metadata_archive_digest }}
+          SUMMARY_PROVIDER_ARTIFACT_ID: ${{ steps.verify.outputs.summary_provider_artifact_id }}
+          SUMMARY_PROVIDER_ARTIFACT_NAME: ${{ steps.verify.outputs.summary_provider_artifact_name }}
+          SUMMARY_PROVIDER_ARTIFACT_DIGEST: ${{ steps.verify.outputs.summary_provider_artifact_digest }}
+          SUMMARY_RELEASE_ARCHIVE_DIGEST: ${{ steps.verify.outputs.summary_release_archive_digest }}
+          SUMMARY_RELEASE_MANIFEST_DIGEST: ${{ steps.verify.outputs.summary_release_manifest_digest }}
+          SUMMARY_VERIFIER_DIGEST: ${{ steps.verify.outputs.summary_verifier_digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE_VERIFIER_SANDBOX_ROOT="$RUNNER_TEMP/pgworkbench-publication-verifier-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          archive="pgworkbench-$SUMMARY_VERSION-linux-amd64.tar.gz"
+          manifest="pgworkbench-$SUMMARY_VERSION-release-manifest.json"
+          summary_dir="draft-external-driver-verification"
+          summary="$summary_dir/verification.json"
+          verifier="draft-external-driver-reverify/pgworkbench-$SUMMARY_VERSION-linux-amd64/pgworkbench"
+          sources=(
+            draft-external-driver-evidence/gate.json
+            draft-external-driver-package/metadata-only.tar.gz
+            "draft-external-driver-reverify/$archive"
+            "draft-external-driver-manifest/$manifest"
+            "$verifier"
+          )
+          for source in "${sources[@]}"; do
+            test -f "$source"
+            test ! -L "$source"
+          done
+          test "sha256:$(sha256sum draft-external-driver-evidence/gate.json | awk '{print $1}')" = \
+            "$SUMMARY_GATE_DIGEST"
+          test "sha256:$(sha256sum draft-external-driver-package/metadata-only.tar.gz | awk '{print $1}')" = \
+            "$SUMMARY_METADATA_ARCHIVE_DIGEST"
+          test "sha256:$(sha256sum "draft-external-driver-reverify/$archive" | awk '{print $1}')" = \
+            "$SUMMARY_RELEASE_ARCHIVE_DIGEST"
+          test "sha256:$(sha256sum "draft-external-driver-manifest/$manifest" | awk '{print $1}')" = \
+            "$SUMMARY_RELEASE_MANIFEST_DIGEST"
+          test "sha256:$(sha256sum "$verifier" | awk '{print $1}')" = \
+            "$SUMMARY_VERIFIER_DIGEST"
+          [[ "$SUMMARY_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          test "$SUMMARY_TAG" = "v$SUMMARY_VERSION"
+          [[ "$SUMMARY_GIT_COMMIT" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]]
+          [[ "$SUMMARY_ASSET_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$SUMMARY_SCENARIO_PACK_ID" =~ ^[a-z0-9._-]+$ ]]
+          [[ "$SUMMARY_SCENARIO_PACK_ID" =~ [a-z0-9] ]]
+          [[ "$SUMMARY_SCENARIO_PACK_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          [[ "$SUMMARY_SCENARIO_PACK_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$SUMMARY_WORKFLOW_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          test "${#SUMMARY_WORKFLOW_RUN_ID}" -le 32
+          [[ "$SUMMARY_WORKFLOW_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          jq -en --arg value "$SUMMARY_WORKFLOW_RUN_ATTEMPT" \
+            '($value | tonumber) <= 9007199254740991' >/dev/null
+          [[ "$SUMMARY_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          test "${#SUMMARY_REPOSITORY}" -le 201
+          [[ "$SUMMARY_PROVIDER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          test "${#SUMMARY_PROVIDER_ARTIFACT_ID}" -le 32
+          [[ "$SUMMARY_PROVIDER_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          expected_provider_name="draft-external-driver-metadata-${SUMMARY_TAG}-${SUMMARY_GIT_COMMIT}-${SUMMARY_WORKFLOW_RUN_ATTEMPT}"
+          test "$SUMMARY_PROVIDER_ARTIFACT_NAME" = "$expected_provider_name"
+          test "${#SUMMARY_PROVIDER_ARTIFACT_NAME}" -le 256
+          if id "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1 || \
+            getent group "$CANDIDATE_VERIFIER_SANDBOX_USER" >/dev/null 2>&1 || \
+            [[ -e "$CANDIDATE_VERIFIER_SANDBOX_ROOT" ]] || \
+            [[ -e "$CANDIDATE_VERIFIER_SANDBOX_ROOT.owned-by-workflow" ]]; then
+            echo 'candidate verifier sandbox was not completely destroyed' >&2
+            exit 1
+          fi
+          mkdir "$summary_dir"
+          jq -n \
+            --arg schema_version pgworkbench.release-external-driver-verification/v1 \
+            --arg artifact_type pgworkbench.release-external-driver-verification \
+            --arg version "$SUMMARY_VERSION" \
+            --arg tag "$SUMMARY_TAG" \
+            --arg git_commit "$SUMMARY_GIT_COMMIT" \
+            --arg asset_fingerprint "$SUMMARY_ASSET_FINGERPRINT" \
+            --arg scenario_pack_id "$SUMMARY_SCENARIO_PACK_ID" \
+            --arg scenario_pack_version "$SUMMARY_SCENARIO_PACK_VERSION" \
+            --arg scenario_pack_digest "$SUMMARY_SCENARIO_PACK_DIGEST" \
+            --arg captured_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg run_id "$SUMMARY_WORKFLOW_RUN_ID" \
+            --argjson run_attempt "$SUMMARY_WORKFLOW_RUN_ATTEMPT" \
+            --arg repository "$SUMMARY_REPOSITORY" \
+            --arg gate_digest "$SUMMARY_GATE_DIGEST" \
+            --arg metadata_archive_digest "$SUMMARY_METADATA_ARCHIVE_DIGEST" \
+            --arg provider_artifact_id "$SUMMARY_PROVIDER_ARTIFACT_ID" \
+            --arg provider_artifact_name "$SUMMARY_PROVIDER_ARTIFACT_NAME" \
+            --arg provider_artifact_digest "$SUMMARY_PROVIDER_ARTIFACT_DIGEST" \
+            --arg release_archive_digest "$SUMMARY_RELEASE_ARCHIVE_DIGEST" \
+            --arg release_manifest_digest "$SUMMARY_RELEASE_MANIFEST_DIGEST" \
+            '{
+              schema_version: $schema_version,
+              artifact_type: $artifact_type,
+              qualification_mode: "draft-release-smoke",
+              candidate: {
+                version: $version,
+                tag: $tag,
+                git_commit: $git_commit,
+                asset_fingerprint: $asset_fingerprint,
+                scenario_pack: {
+                  id: $scenario_pack_id,
+                  version: $scenario_pack_version,
+                  digest: $scenario_pack_digest
+                }
+              },
+              captured_at: $captured_at,
+              workflow_run: {
+                id: $run_id,
+                attempt: $run_attempt,
+                head_sha: $git_commit,
+                repository: $repository
+              },
+              source: {
+                gate_digest: $gate_digest,
+                metadata_archive_digest: $metadata_archive_digest,
+                provider_artifact: {
+                  id: $provider_artifact_id,
+                  name: $provider_artifact_name,
+                  digest: $provider_artifact_digest
+                },
+                release_archive_digest: $release_archive_digest,
+                release_manifest_digest: $release_manifest_digest
+              },
+              drivers: [
+                "benchbase-postgresql-33c0047",
+                "hammerdb-postgresql-6.0",
+                "sysbench-postgresql-1.0.20"
+              ],
+              assurance: {
+                purpose: "adapter-compatibility-release-smoke",
+                artifact_payload: "metadata-only-no-third-party-runtime-bytes",
+                verification_scope: "workflow-local-content-and-semantics",
+                third_party_runtime_bytes_uploaded: false,
+                performance_claim: false,
+                production_decision_eligible: false,
+                source_to_binary_attested: false,
+                driver_runtime_closure_attested: true,
+                host_runtime_dependencies_attested: false,
+                benchmark_comparability_claim: false,
+                project_redistribution: false,
+                all_executions_locally_verified: true,
+                exact_source_to_staged_file_match: true,
+                disposable_loopback_target_acknowledged: true,
+                system_databases_denied: true,
+                candidate_identity_reverified: true,
+                provider_artifact_reverified: true,
+                release_archive_provenance_verified: true,
+                release_manifest_provenance_verified: true
+              }
+            }' > "$summary"
+          test -f "$summary"
+          test ! -L "$summary"
+          test "$(stat -c %s "$summary")" -le 65536
+          jq -e '
+            .schema_version == "pgworkbench.release-external-driver-verification/v1" and
+            .artifact_type == "pgworkbench.release-external-driver-verification" and
+            .qualification_mode == "draft-release-smoke" and
+            (.candidate.scenario_pack | keys) == ["digest","id","version"] and
+            .workflow_run.head_sha == .candidate.git_commit and
+            ([.drivers[]] == [
+              "benchbase-postgresql-33c0047",
+              "hammerdb-postgresql-6.0",
+              "sysbench-postgresql-1.0.20"
+            ]) and
+            ((has("status") or has("passed")) | not)
+          ' "$summary" >/dev/null
+          artifact_name="draft-external-driver-verification-${SUMMARY_TAG}-${SUMMARY_GIT_COMMIT}-${SUMMARY_WORKFLOW_RUN_ATTEMPT}"
+          printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload typed external-driver verification summary
+        id: upload_verification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.verification_summary.outputs.artifact_name }}
+          path: draft-external-driver-verification/verification.json
+          if-no-files-found: error
+          retention-days: 90
 
   publish-release:
     if: github.ref_type == 'tag'

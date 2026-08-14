@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/release-evidence-index.schema.json",
-  "title": "pgworkbench release evidence index v1 and v2",
-  "description": "Durable v1 readiness index for one immutable candidate. An Actions artifact reference is not durable evidence by itself.",
+  "title": "pgworkbench release evidence index v1, v2, and v3",
+  "description": "Durable v1 readiness index for one immutable candidate. V3 persists the typed record and trust boundary of new attachments; the current operator-attested assurance class is not release-authorizing. An Actions artifact reference is not durable evidence by itself.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,7 +16,7 @@
     "decision"
   ],
   "properties": {
-    "schema_version": {"enum": ["pgworkbench.release-evidence-index/v1", "pgworkbench.release-evidence-index/v2"]},
+    "schema_version": {"enum": ["pgworkbench.release-evidence-index/v1", "pgworkbench.release-evidence-index/v2", "pgworkbench.release-evidence-index/v3"]},
     "artifact_type": {"const": "pgworkbench.release-evidence-index"},
     "lineage": {"$ref": "#/$defs/lineage"},
     "record_status": {"enum": ["template", "active", "complete"]},
@@ -40,6 +40,22 @@
         "required": ["schema_version"]
       },
       "then": {"required": ["lineage"]}
+    },
+    {
+      "if": {
+        "properties": {"schema_version": {"const": "pgworkbench.release-evidence-index/v3"}},
+        "required": ["schema_version"]
+      },
+      "then": {
+        "required": ["lineage"],
+        "properties": {
+          "record_status": {"enum": ["template", "active"]},
+          "decision": {
+            "properties": {"status": {"const": "no-go"}},
+            "required": ["status"]
+          }
+        }
+      }
     },
     {
       "if": {
@@ -136,7 +152,31 @@
         "digest": {"$ref": "#/$defs/digest"},
         "captured_at": {"type": "string", "format": "date-time"},
         "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "run_attempt": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
+        "run_attempt": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "record": {"$ref": "#/$defs/evidence_record"},
+        "assurance": {"$ref": "#/$defs/evidence_assurance"}
+      },
+      "dependentRequired": {
+        "record": ["assurance"],
+        "assurance": ["record"]
+      }
+    },
+    "evidence_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "artifact_type"],
+      "properties": {
+        "schema_version": {"type": "string", "minLength": 1, "maxLength": 256},
+        "artifact_type": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "evidence_assurance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["durability", "authenticity"],
+      "properties": {
+        "durability": {"const": "operator-asserted-not-verified"},
+        "authenticity": {"const": "record-semantics-verified-remote-authenticity-not-verified"}
       }
     },
     "candidate": {

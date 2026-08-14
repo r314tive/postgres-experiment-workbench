@@ -38,22 +38,95 @@ func TestRepositoryTemplateIsAConsistentOpenNoGoIndex(t *testing.T) {
 	}
 }
 
-func TestVerifyCompleteGoIndex(t *testing.T) {
-	verification := Verify(completeIndex())
-	if !verification.Valid {
-		t.Fatalf("complete index issues: %v", verification.Issues)
+func TestLegacyCompleteGoRemainsReadableButIsNotReleaseAuthorization(t *testing.T) {
+	registry, err := schemavalidation.CompileDir(filepath.Join("..", "..", "schemas"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if verification.Status != StatusPassed || verification.Decision != DecisionGo {
-		t.Fatalf("complete result = status %q decision %q", verification.Status, verification.Decision)
+	for name, index := range map[string]Index{"v1": completeIndex(), "v2": completeV2Index()} {
+		t.Run(name, func(t *testing.T) {
+			verification := Verify(index)
+			if !verification.Valid || verification.Status != StatusOpen || verification.Decision != DecisionNoGo {
+				t.Fatalf("legacy complete index effective result = %+v", verification)
+			}
+			if verification.RecordedDecision != DecisionGo || verification.ReadinessStatus != StatusPassed || verification.ReadinessDecision != DecisionGo {
+				t.Fatalf("legacy lifecycle was not preserved separately: %+v", verification)
+			}
+			if verification.AssuranceStatus != AssuranceLegacyUnspecified || verification.AuthorizationEligible || len(verification.UnqualifiedEvidence) != 16 || len(verification.Warnings) != 16 {
+				t.Fatalf("legacy trust classification = %+v", verification)
+			}
+			if len(verification.OpenGates) != 0 || len(verification.FailedGates) != 0 || len(verification.PassedGates) != 16 {
+				t.Fatalf("legacy readiness requirements = %+v", verification)
+			}
+			if err := registry.ValidateJSON("release-evidence-index.schema.json", []byte(marshalIndex(t, index))); err != nil {
+				t.Fatalf("legacy index no longer conforms to schema: %v", err)
+			}
+		})
 	}
-	if len(verification.OpenGates) != 0 || len(verification.FailedGates) != 0 {
-		t.Fatalf("complete requirements: open=%v failed=%v", verification.OpenGates, verification.FailedGates)
+}
+
+func TestV3StoresOnlyNoGoUntilAProofBackedAssuranceClassExists(t *testing.T) {
+	registry, err := schemavalidation.CompileDir(filepath.Join("..", "..", "schemas"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(verification.PassedGates) != 16 {
-		t.Fatalf("passed requirements = %d, want 16: %v", len(verification.PassedGates), verification.PassedGates)
+	index := completeV3NoGoIndex()
+	verification := Verify(index)
+	if !verification.Valid || verification.Status != StatusOpen || verification.Decision != DecisionNoGo || verification.ReadinessDecision != DecisionGo || verification.AssuranceStatus != AssuranceLegacyUnspecified || len(verification.UnqualifiedEvidence) != 16 {
+		t.Fatalf("v3 unqualified no-go = %+v", verification)
 	}
-	if len(verification.Reasons) != 1 || verification.Reasons[0] != "all readiness requirements passed" {
-		t.Fatalf("derived complete reasons = %v", verification.Reasons)
+	for _, name := range []string{
+		"preventive_controls.tag_ruleset",
+		"preventive_controls.tag_ruleset.bypass_review",
+		"preventive_controls.immutable_releases",
+	} {
+		if !contains(verification.UnqualifiedEvidence, name) {
+			t.Fatalf("preventive-control evidence escaped assurance evaluation: %+v", verification)
+		}
+	}
+	if err := registry.ValidateJSON("release-evidence-index.schema.json", []byte(marshalIndex(t, index))); err != nil {
+		t.Fatalf("valid v3 no-go does not conform to schema: %v", err)
+	}
+	index.RecordStatus = RecordStatusComplete
+	index.Decision.Status = DecisionGo
+	if verification := Verify(index); verification.Valid || verification.Decision != DecisionNoGo {
+		t.Fatalf("v3 self-declared GO was accepted: %+v", verification)
+	}
+	if err := registry.ValidateJSON("release-evidence-index.schema.json", []byte(marshalIndex(t, index))); err == nil {
+		t.Fatal("release evidence schema accepted v3 GO before a proof-backed assurance class exists")
+	}
+}
+
+func TestEvidenceRecordAndAssuranceArePairedAndClosed(t *testing.T) {
+	registry, err := schemavalidation.CompileDir(filepath.Join("..", "..", "schemas"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*Evidence)
+	}{
+		{name: "record without assurance", mutate: func(value *Evidence) { value.Assurance = nil }},
+		{name: "assurance without record", mutate: func(value *Evidence) { value.Record = nil }},
+		{name: "self declared verified", mutate: func(value *Evidence) {
+			value.Assurance.Durability = "durable-object-presence-and-digest-verified"
+			value.Assurance.Authenticity = "producer-and-remote-object-authenticated"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			index := openIndex(RecordStatusActive)
+			index.SchemaVersion = SchemaVersionV3
+			index.Lineage = &Lineage{Revision: 0}
+			index.Gates.DraftExternalDrivers = Gate{Status: GateStatusPassed, Evidence: typedExternalDriverEvidence("https://example.test/external.json")}
+			test.mutate(index.Gates.DraftExternalDrivers.Evidence)
+			verification := Verify(index)
+			if verification.Valid || !sliceContainsSubstring(verification.Issues, "assurance") {
+				t.Fatalf("invalid persisted trust pair accepted: %+v", verification)
+			}
+			if err := registry.ValidateJSON("release-evidence-index.schema.json", []byte(marshalIndex(t, index))); err == nil {
+				t.Fatal("release evidence schema accepted invalid persisted trust pair")
+			}
+		})
 	}
 }
 
@@ -521,6 +594,8 @@ func TestDurableEvidenceSchemes(t *testing.T) {
 		"s3://evidence-bucket/releases/evidence.json",
 		"gs://evidence-bucket/releases/evidence.json",
 		"urn:pgworkbench:evidence:1234",
+		"urn:pg-workbench:evidence/1234",
+		"urn:ab:content%20address",
 	}
 	for _, ref := range valid {
 		if !validDurableRef(ref) {
@@ -530,9 +605,29 @@ func TestDurableEvidenceSchemes(t *testing.T) {
 	invalid := []string{
 		"http://example.test/evidence.json",
 		"https:evidence.json",
+		"https://example.test",
+		"https://user@example.test/evidence.json",
+		"https://example.test/evidence.json#mutable-view",
+		"https://github.com/r314tive/postgres-experiment-workbench/actions/runs/123/artifacts/456",
+		"https://github.com:443/r314tive/postgres-experiment-workbench/actions/runs/123/artifacts/456",
+		"https://github.com./r314tive/postgres-experiment-workbench/actions/runs/123/artifacts/456",
+		"https://api.github.com:443/repos/r314tive/postgres-experiment-workbench/actions/artifacts/456",
+		"https://objects.githubusercontent.com:443/actions/artifacts/456/archive.zip",
 		"s3:///evidence.json",
+		"s3://evidence-bucket",
+		"gs://evidence-bucket/",
 		"file:///tmp/evidence.json",
 		"urn:",
+		"urn::",
+		"urn:a:value",
+		"urn:ab:",
+		"urn:-ab:value",
+		"urn:ab-:value",
+		"urn:urn:value",
+		"urn:ab:/value",
+		"urn:ab:value%zz",
+		"urn:ab:value\\path",
+		"urn:single-component",
 		"relative/evidence.json",
 	}
 	for _, ref := range invalid {
@@ -600,6 +695,23 @@ func completeIndex() Index {
 	return index
 }
 
+func completeV2Index() Index {
+	index := completeIndex()
+	index.SchemaVersion = SchemaVersionV2
+	index.Lineage = &Lineage{Revision: 0}
+	return index
+}
+
+func completeV3NoGoIndex() Index {
+	index := completeIndex()
+	index.SchemaVersion = SchemaVersionV3
+	index.Lineage = &Lineage{Revision: 0}
+	index.RecordStatus = RecordStatusActive
+	index.Decision.Status = DecisionNoGo
+	index.Decision.Reasons = []string{"Evidence assurance is not authorization-eligible."}
+	return index
+}
+
 func gates(status string, attached *Evidence) Gates {
 	gate := func(name string) Gate {
 		if attached == nil {
@@ -628,6 +740,19 @@ func gates(status string, attached *Evidence) Gates {
 
 func evidence(ref string) *Evidence {
 	return &Evidence{Ref: ref, Digest: testDigest(), CapturedAt: testTime}
+}
+
+func typedExternalDriverEvidence(ref string) *Evidence {
+	value := evidence(ref)
+	value.Record = &EvidenceRecord{
+		SchemaVersion: ExternalDriverVerificationSchema,
+		ArtifactType:  ExternalDriverVerificationType,
+	}
+	value.Assurance = &EvidenceAssurance{
+		Durability:   EvidenceDurabilityAsserted,
+		Authenticity: EvidenceAuthenticityUnverified,
+	}
+	return value
 }
 
 func testDigest() string {

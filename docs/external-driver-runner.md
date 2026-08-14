@@ -248,6 +248,17 @@ publish any upstream runtime bytes. Until a protected tag run and its retained
 metadata exist, this document and local tests prove only the workflow contract,
 not a completed live external-driver gate.
 
+The downstream read-only verifier also emits a small
+`pgworkbench.release-external-driver-verification/v1` summary after rechecking the provider
+artifact, archive, manifest, candidate identity, exact driver set, and bounded
+assurance facts. That summary is the input to `evidence gate attach`; neither
+the raw metadata archive nor mere artifact existence is interpreted as a passed
+gate. Preserve the summary's exact bytes at a durable URI before attachment.
+Offline attachment still records the URI as operator-asserted and remote
+authenticity as unverified. Those fields remain in the evidence index and keep
+the release decision at `NO-GO` until a typed adapter independently verifies
+the durable remote object and its producer.
+
 ## Local fail-closed checks
 
 Run:

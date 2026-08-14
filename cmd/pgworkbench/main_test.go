@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -146,6 +147,170 @@ func TestCandidateInitCommittedErrorHasMachineReadableNonRetryableOutcome(t *tes
 		t.Fatalf("render error = %v, want committed sentinel", err)
 	}
 	var decoded candidateInitCommittedOutput
+	if decodeErr := json.Unmarshal(rendered.Bytes(), &decoded); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if decoded.Status != "committed-unconfirmed" || !decoded.Committed || decoded.Confirmed || decoded.RetrySafe {
+		t.Fatalf("unexpected committed outcome: %+v", decoded)
+	}
+	if decoded.Result.Output != result.Output || decoded.Result.Digest != result.Digest || !strings.Contains(decoded.Error, sentinel.Error()) {
+		t.Fatalf("committed outcome lost identity: %+v", decoded)
+	}
+}
+
+func TestRunEvidenceGateAttachCreatesStandaloneTypedRevision(t *testing.T) {
+	directory := t.TempDir()
+	candidate := releaseevidence.Candidate{
+		Version:          "0.3.0",
+		Tag:              "v0.3.0",
+		GitCommit:        strings.Repeat("3", 40),
+		AssetFingerprint: strings.Repeat("2", 64),
+		ScenarioPack: releaseevidence.ScenarioPack{
+			ID: "builtin", Version: "0.3.0", Digest: "sha256:" + strings.Repeat("a", 64),
+		},
+	}
+	index, err := releaseevidence.NewIndex(candidate, "2026-08-14T12:34:56Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(directory, "index-r0.json")
+	if _, err := releaseevidence.WriteNew(indexPath, index); err != nil {
+		t.Fatal(err)
+	}
+	falseValue := false
+	trueValue := true
+	record := releaseevidence.ExternalDriverVerification{
+		SchemaVersion:     releaseevidence.ExternalDriverVerificationSchema,
+		ArtifactType:      releaseevidence.ExternalDriverVerificationType,
+		QualificationMode: "draft-release-smoke",
+		Candidate:         candidate,
+		CapturedAt:        "2026-08-14T12:35:00Z",
+		WorkflowRun: releaseevidence.ExternalDriverWorkflowRun{
+			ID: "123456", Attempt: 1, HeadSHA: candidate.GitCommit, Repository: "r314tive/postgres-experiment-workbench",
+		},
+		Source: releaseevidence.ExternalDriverVerificationSource{
+			GateDigest:            "sha256:" + strings.Repeat("b", 64),
+			MetadataArchiveDigest: "sha256:" + strings.Repeat("c", 64),
+			ProviderArtifact: releaseevidence.ExternalDriverProviderArtifact{
+				ID: "654321", Name: "draft-external-driver-metadata-v0.3.0-" + candidate.GitCommit + "-1", Digest: "sha256:" + strings.Repeat("d", 64),
+			},
+			ReleaseArchiveDigest:  "sha256:" + strings.Repeat("e", 64),
+			ReleaseManifestDigest: "sha256:" + strings.Repeat("f", 64),
+		},
+		Drivers: []string{"benchbase-postgresql-33c0047", "hammerdb-postgresql-6.0", "sysbench-postgresql-1.0.20"},
+		Assurance: releaseevidence.ExternalDriverAssurance{
+			Purpose:                              "adapter-compatibility-release-smoke",
+			ArtifactPayload:                      "metadata-only-no-third-party-runtime-bytes",
+			VerificationScope:                    "workflow-local-content-and-semantics",
+			ThirdPartyRuntimeBytesUploaded:       &falseValue,
+			PerformanceClaim:                     &falseValue,
+			ProductionDecisionEligible:           &falseValue,
+			SourceToBinaryAttested:               &falseValue,
+			DriverRuntimeClosureAttested:         &trueValue,
+			HostRuntimeDependenciesAttested:      &falseValue,
+			BenchmarkComparabilityClaim:          &falseValue,
+			ProjectRedistribution:                &falseValue,
+			AllExecutionsLocallyVerified:         &trueValue,
+			ExactSourceToStagedFileMatch:         &trueValue,
+			DisposableLoopbackTargetAcknowledged: &trueValue,
+			SystemDatabasesDenied:                &trueValue,
+			CandidateIdentityReverified:          &trueValue,
+			ProviderArtifactReverified:           &trueValue,
+			ReleaseArchiveProvenanceVerified:     &trueValue,
+			ReleaseManifestProvenanceVerified:    &trueValue,
+		},
+	}
+	recordContent, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPath := filepath.Join(directory, "verification.json")
+	if err := os.WriteFile(recordPath, append(recordContent, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(directory, "index-r1.json")
+	var rendered bytes.Buffer
+	if err := runEvidenceTo(&rendered, []string{
+		"gate", "attach",
+		"--index", indexPath,
+		"--gate", "draft_external_drivers",
+		"--evidence-file", recordPath,
+		"--evidence-ref", "urn:pgworkbench:evidence:cli",
+		"--output", output,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"ATTACHED:", "gate=draft_external_drivers", "outcome=passed", "revision=1", "durability=operator-asserted-not-verified", "authenticity=record-semantics-verified-remote-authenticity-not-verified", "unqualified=1", "assurance=operator-attested-not-verified", "authorization_eligible=false", "release_status=open", "decision=no-go"} {
+		if !strings.Contains(rendered.String(), want) {
+			t.Fatalf("gate attach output missing %q: %s", want, rendered.String())
+		}
+	}
+	if strings.Contains(strings.ToLower(rendered.String()), "authorized") {
+		t.Fatalf("gate attach overstated release authorization: %s", rendered.String())
+	}
+	verification, err := releaseevidence.VerifyFile(output)
+	if err != nil || !verification.Valid || verification.Status != releaseevidence.StatusOpen || verification.Decision != releaseevidence.DecisionNoGo || len(verification.PassedGates) != 1 || !reflect.DeepEqual(verification.UnqualifiedEvidence, []string{"draft_external_drivers"}) || verification.AuthorizationEligible {
+		t.Fatalf("standalone attached index = %+v, %v", verification, err)
+	}
+}
+
+func TestRenderGateAttachResultJSONIncludesEvidenceTrustBoundaries(t *testing.T) {
+	result := releaseevidence.GateAttachResult{
+		Output:               "/tmp/evidence/index-r1.json",
+		Digest:               "sha256:" + strings.Repeat("a", 64),
+		Gate:                 "draft_external_drivers",
+		GateStatus:           "passed",
+		EvidenceDurability:   releaseevidence.EvidenceDurabilityAsserted,
+		EvidenceAuthenticity: releaseevidence.EvidenceAuthenticityUnverified,
+	}
+	var rendered bytes.Buffer
+	if err := renderGateAttachResult(&rendered, true, result, nil); err != nil {
+		t.Fatal(err)
+	}
+	var decoded releaseevidence.GateAttachResult
+	if err := json.Unmarshal(rendered.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.EvidenceDurability != releaseevidence.EvidenceDurabilityAsserted || decoded.EvidenceAuthenticity != releaseevidence.EvidenceAuthenticityUnverified {
+		t.Fatalf("machine-readable trust boundaries missing: %+v", decoded)
+	}
+}
+
+func TestRunEvidenceGateAttachRejectsAmbiguousArguments(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"gate", "attach"}, want: "--index is required"},
+		{args: []string{"gate", "attach", "--index", "index.json"}, want: "--gate is required"},
+		{args: []string{"gate", "attach", "--unknown", "value"}, want: "unknown option"},
+		{args: []string{"gate", "attach", "--json", "--json"}, want: "duplicate option"},
+		{args: []string{"gate", "attach", "--output"}, want: "requires a value"},
+		{args: []string{"gate", "unknown"}, want: "usage:"},
+	} {
+		if err := runEvidenceTo(io.Discard, test.args); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("runEvidenceTo(%q) error = %v, want %q", test.args, err, test.want)
+		}
+	}
+}
+
+func TestGateAttachCommittedErrorHasMachineReadableNonRetryableOutcome(t *testing.T) {
+	sentinel := errors.New("injected directory sync failure")
+	result := releaseevidence.GateAttachResult{
+		Output: "/tmp/evidence/index-r1.json",
+		Digest: "sha256:" + strings.Repeat("a", 64),
+		Gate:   "draft_external_drivers",
+	}
+	committed := &releaseevidence.CommittedError{
+		Result: releaseevidence.WriteResult{Output: result.Output, Digest: result.Digest},
+		Err:    sentinel,
+	}
+	var rendered bytes.Buffer
+	err := renderGateAttachResult(&rendered, true, result, committed)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("render error = %v, want committed sentinel", err)
+	}
+	var decoded gateAttachCommittedOutput
 	if decodeErr := json.Unmarshal(rendered.Bytes(), &decoded); decodeErr != nil {
 		t.Fatal(decodeErr)
 	}
