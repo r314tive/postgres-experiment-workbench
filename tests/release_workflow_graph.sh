@@ -229,6 +229,10 @@ require_line "$draft_verify" "    if: github.ref_type == 'tag'" 'draft verificat
 require_line "$draft_verify" '      - attest-and-create-draft' \
   'draft verification must depend on protected draft creation'
 require_text "$draft_verify" 'asset_fingerprint=' 'draft verification must bind the verified asset inventory'
+require_text "$draft_verify" 'pgworkbench.release-asset-inventory/v1' \
+  'draft verification must retain a typed asset inventory'
+require_text "$draft_verify" 'draft-verification/asset-inventory.json' \
+  'draft typed asset inventory must remain outside the fingerprinted release assets'
 require_text "$draft_verify" '--package-root "$package_root" "$sbom"' \
   'draft SPDX verification must bind each document to its extracted platform package'
 require_line "$draft_compatibility" "    if: github.ref_type == 'tag'" 'draft compatibility must be tag-only'
@@ -530,6 +534,10 @@ require_text "$public_verify" '.assets | length == 16' \
   'public verification must require the complete fixed asset set'
 require_text "$public_verify" 'test "$asset_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"' \
   'public verification must bind the public asset set to the verified draft'
+require_text "$public_verify" 'pgworkbench.release-asset-inventory/v1' \
+  'public verification must retain a typed asset inventory'
+require_text "$public_verify" 'public-verification/asset-inventory.json' \
+  'public typed asset inventory must remain outside the fingerprinted release assets'
 require_text "$public_verify" 'gh release download "$tag"' \
   'public verification must download the public release into its clean job'
 require_text "$public_verify" 'gh attestation verify "$subject"' \

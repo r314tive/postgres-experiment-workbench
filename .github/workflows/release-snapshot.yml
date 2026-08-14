@@ -774,6 +774,27 @@ jobs:
           asset_fingerprint="$(printf '%s' "$asset_inventory" | sha256sum | awk '{print $1}')"
           printf 'asset_fingerprint=%s\n' "$asset_fingerprint" >> "$GITHUB_OUTPUT"
           mkdir -p downloaded draft-verification
+          jq -n \
+            --arg schema_version pgworkbench.release-asset-inventory/v1 \
+            --arg artifact_type pgworkbench.release-asset-inventory \
+            --arg release_state draft \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg git_commit "$GITHUB_SHA" \
+            --arg captured_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg fingerprint_algorithm github-release-assets-jq-cS/v1 \
+            --arg asset_fingerprint "$asset_fingerprint" \
+            --argjson assets "$asset_inventory" \
+            '{
+              schema_version: $schema_version,
+              artifact_type: $artifact_type,
+              release_state: $release_state,
+              tag: $tag,
+              git_commit: $git_commit,
+              captured_at: $captured_at,
+              fingerprint_algorithm: $fingerprint_algorithm,
+              asset_fingerprint: $asset_fingerprint,
+              assets: $assets
+            }' > draft-verification/asset-inventory.json
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir downloaded
           test "$(find downloaded -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 16
 
@@ -2108,6 +2129,27 @@ jobs:
           test "$asset_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"
 
           mkdir -p public-download public-verification
+          jq -n \
+            --arg schema_version pgworkbench.release-asset-inventory/v1 \
+            --arg artifact_type pgworkbench.release-asset-inventory \
+            --arg release_state published \
+            --arg tag "$tag" \
+            --arg git_commit "$GITHUB_SHA" \
+            --arg captured_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg fingerprint_algorithm github-release-assets-jq-cS/v1 \
+            --arg asset_fingerprint "$asset_fingerprint" \
+            --argjson assets "$asset_inventory" \
+            '{
+              schema_version: $schema_version,
+              artifact_type: $artifact_type,
+              release_state: $release_state,
+              tag: $tag,
+              git_commit: $git_commit,
+              captured_at: $captured_at,
+              fingerprint_algorithm: $fingerprint_algorithm,
+              asset_fingerprint: $asset_fingerprint,
+              assets: $assets
+            }' > public-verification/asset-inventory.json
           gh release verify "$tag" --repo "$GITHUB_REPOSITORY" --format json \
             > public-verification/release-attestation.json
           gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir public-download

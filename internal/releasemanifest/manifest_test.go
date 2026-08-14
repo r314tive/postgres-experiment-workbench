@@ -355,7 +355,11 @@ func TestCreateRejectsChecksumMismatchAndNoncanonicalText(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		content[0] = 'f'
+		if content[0] == 'f' {
+			content[0] = 'e'
+		} else {
+			content[0] = 'f'
+		}
 		if err := os.WriteFile(checksumPath, content, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -488,8 +492,106 @@ func TestReadRejectsUnknownFieldsAndSymlinkManifest(t *testing.T) {
 	if err := os.Symlink("unknown.json", filepath.Join(releaseDir, "linked.json")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := Read(filepath.Join(releaseDir, "linked.json")); err == nil || !strings.Contains(err.Error(), "regular non-symlink") {
+		t.Fatalf("expected direct read symlink rejection, got %v", err)
+	}
 	if _, err := Verify(releaseDir, "linked.json"); err == nil || !strings.Contains(err.Error(), "not a regular file") {
 		t.Fatalf("expected symlink rejection, got %v", err)
+	}
+}
+
+func TestReadRejectsDuplicateNullTrailingAndOversizeJSON(t *testing.T) {
+	releaseDir, packRoot := releaseFixture(t, "1.2.3")
+	manifest, err := Create(CreateOptions{
+		ReleaseDir:  releaseDir,
+		Version:     "1.2.3",
+		GitCommit:   testCommit,
+		PackRoot:    packRoot,
+		GeneratedAt: time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := string(encoded)
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{
+			name:    "duplicate top-level property",
+			content: strings.Replace(valid, `"schema_version":`, `"schema_version":"duplicate","schema_version":`, 1),
+			want:    "duplicate property",
+		},
+		{
+			name:    "duplicate nested property",
+			content: strings.Replace(valid, `"scenario_pack":{"id":`, `"scenario_pack":{"id":"duplicate","id":`, 1),
+			want:    "duplicate property",
+		},
+		{
+			name:    "explicit null",
+			content: strings.Replace(valid, `"git_commit":"`+testCommit+`"`, `"git_commit":null`, 1),
+			want:    "null is not allowed",
+		},
+		{
+			name:    "trailing JSON",
+			content: valid + ` {}`,
+			want:    "trailing JSON",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(releaseDir, strings.ReplaceAll(test.name, " ", "-")+".json")
+			if err := os.WriteFile(path, []byte(test.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Read(path); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Read() error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+
+	oversize := filepath.Join(releaseDir, "oversize.json")
+	if err := os.WriteFile(oversize, make([]byte, maxReleaseManifestBytes+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(oversize); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("Read(oversize) error = %v, want size rejection", err)
+	}
+	if _, err := Read(releaseDir); err == nil || !strings.Contains(err.Error(), "regular non-symlink") {
+		t.Fatalf("Read(directory) error = %v, want regular-file rejection", err)
+	}
+}
+
+func TestVerifyPathDerivesReleaseDirectory(t *testing.T) {
+	releaseDir, packRoot := releaseFixture(t, "1.2.3")
+	manifest, err := Create(CreateOptions{
+		ReleaseDir:  releaseDir,
+		Version:     "1.2.3",
+		GitCommit:   testCommit,
+		PackRoot:    packRoot,
+		GeneratedAt: time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestName := DefaultManifestPath(manifest.Version)
+	if err := Write(releaseDir, manifestName, manifest); err != nil {
+		t.Fatal(err)
+	}
+	verified, err := VerifyPath(filepath.Join(releaseDir, manifestName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verified.Version != manifest.Version || verified.GitCommit != manifest.GitCommit || verified.ScenarioPack != manifest.ScenarioPack {
+		t.Fatalf("VerifyPath() changed verified identity: %#v", verified)
+	}
+	if _, err := VerifyPath(""); err == nil || !strings.Contains(err.Error(), "path is required") {
+		t.Fatalf("VerifyPath(empty) error = %v", err)
 	}
 }
 

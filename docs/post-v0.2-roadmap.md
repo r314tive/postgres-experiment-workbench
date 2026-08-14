@@ -55,6 +55,16 @@ and repeating every release gate.
 | M8 | Portable trusted execution | Signed job/result capsules run on a single-use worker before any scheduler or Kubernetes control plane |
 | M9 | v1 product gate | Published immutable candidate plus independent adoption and zero open critical integrity findings |
 
+Current execution state on `next/v0.3`:
+
+- M1.1 is implemented and committed: strict semantic status/verification works
+  outside a checkout and derives `GO`/`NO-GO` independently.
+- The candidate-initialization half of M1.2 is implemented in the current
+  tranche: exact 16-asset snapshot, manifest/inventory cross-binding, revision
+  zero, copy-on-write publication, and typed ambiguous-commit handling.
+- Typed gate attachment is the next open dependency. M1.2 is not complete until
+  that command and its adversarial matrix pass.
+
 ## M0 — publish the frozen v0.2.0 candidate
 
 No feature or documentation bytes may change in this milestone.
@@ -117,14 +127,21 @@ The verifier must:
 CLI:
 
 ```text
-pgworkbench evidence candidate init --release-manifest ... --output ...
-pgworkbench evidence gate attach --index ... --gate ... --evidence ...
+pgworkbench evidence candidate init --release-manifest ... \
+  --asset-inventory ... --output index-r0.json
+pgworkbench evidence gate attach --index index-r0.json --gate ... \
+  --evidence-file ... --evidence-ref ... --output index-r1.json
 ```
 
 Candidate identity is derived from verified release artifacts. Version, commit,
 pack identity, and asset fingerprint are never accepted as unrelated free-text
-values. Gate attachment rehashes a supplied downloaded object and records its
-durable URI separately from the local verification path.
+values. The asset fingerprint is recomputed from the typed 16-asset provider
+inventory with the same canonical algorithm as the release workflow. Offline
+initialization proves local byte/content binding, not GitHub or Sigstore
+authenticity; those remain separate gates. Gate attachment rehashes a supplied
+downloaded object and records its durable URI separately from the local
+verification path. Every mutation creates a new index revision bound to the
+exact previous index digest; an existing index is never rewritten in place.
 
 ### M1.3 Pilot and critical-review readers
 
@@ -406,17 +423,27 @@ them as supported.
 
 ## Immediate implementation slice
 
-Development begins with M1.1 on `next/v0.3`:
+The next tranche completes M1.2 with typed gate attachment:
 
-1. strict typed release-index reader;
-2. independently derived gate summary and `GO`/`NO-GO` decision;
-3. stable CLI and JSON output;
-4. malformed, open, failed, forged-GO, and fully passed test fixtures;
-5. schema registry and documentation integration;
-6. focused tests, then the complete non-Docker gate.
+1. define one typed attachment adapter per release gate/control rather than a
+   generic user-authored `passed` flag;
+2. strictly load and hash the previous index and require v2 lineage;
+3. strictly load the gate record, recompute its local digest, and validate its
+   candidate identity and gate-specific invariants;
+4. record the durable evidence URI separately from the local verification path;
+5. produce revision `N+1` with `previous_index_digest` bound to the exact prior
+   bytes and refuse in-place or pre-existing output;
+6. rederive aggregate status/decision after attachment; a passed record may
+   close only its own gate and cannot directly set top-level `GO`;
+7. cover wrong-candidate, wrong-gate, digest drift, symlink, source/output
+   containment, stale revision, concurrent publication, and committed-but-
+   unconfirmed fault paths;
+8. run focused, race, workflow-graph, standalone-binary, and full repository
+   gates before committing M1.2.
 
-M2.1 A/A calibration follows immediately after this evidence surface can retain
-and report its own release/adoption state.
+M1.3 typed pilot/critical-review readers and M1.4 relocated closed bundles then
+complete the control plane. M2.1 A/A calibration starts only after the M1 exit
+gate can retain and independently reverify its own release/adoption state.
 
 ## Method references
 

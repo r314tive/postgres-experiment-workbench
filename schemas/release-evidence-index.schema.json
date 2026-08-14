@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/release-evidence-index.schema.json",
-  "title": "pgworkbench release evidence index v1",
+  "title": "pgworkbench release evidence index v1 and v2",
   "description": "Durable v1 readiness index for one immutable candidate. An Actions artifact reference is not durable evidence by itself.",
   "type": "object",
   "additionalProperties": false,
@@ -16,8 +16,9 @@
     "decision"
   ],
   "properties": {
-    "schema_version": {"const": "pgworkbench.release-evidence-index/v1"},
+    "schema_version": {"enum": ["pgworkbench.release-evidence-index/v1", "pgworkbench.release-evidence-index/v2"]},
     "artifact_type": {"const": "pgworkbench.release-evidence-index"},
+    "lineage": {"$ref": "#/$defs/lineage"},
     "record_status": {"enum": ["template", "active", "complete"]},
     "created_at": {"type": "string", "format": "date-time"},
     "candidate": {"$ref": "#/$defs/candidate"},
@@ -26,6 +27,20 @@
     "decision": {"$ref": "#/$defs/decision"}
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {"schema_version": {"const": "pgworkbench.release-evidence-index/v1"}},
+        "required": ["schema_version"]
+      },
+      "then": {"not": {"required": ["lineage"]}}
+    },
+    {
+      "if": {
+        "properties": {"schema_version": {"const": "pgworkbench.release-evidence-index/v2"}},
+        "required": ["schema_version"]
+      },
+      "then": {"required": ["lineage"]}
+    },
     {
       "if": {
         "properties": {"record_status": {"const": "complete"}},
@@ -89,6 +104,25 @@
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
     },
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision"],
+      "properties": {
+        "revision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "previous_index_digest": {"$ref": "#/$defs/digest"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"revision": {"const": 0}},
+            "required": ["revision"]
+          },
+          "then": {"not": {"required": ["previous_index_digest"]}},
+          "else": {"required": ["previous_index_digest"]}
+        }
+      ]
+    },
     "commit": {
       "type": "string",
       "pattern": "^(?!(?:0{40}|0{64})$)(?:[0-9a-f]{40}|[0-9a-f]{64})$"
@@ -102,7 +136,7 @@
         "digest": {"$ref": "#/$defs/digest"},
         "captured_at": {"type": "string", "format": "date-time"},
         "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "run_attempt": {"type": "integer", "minimum": 1}
+        "run_attempt": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
       }
     },
     "candidate": {
@@ -111,7 +145,7 @@
       "required": ["version", "tag", "git_commit", "asset_fingerprint", "scenario_pack"],
       "properties": {
         "version": {"$ref": "#/$defs/semver"},
-        "tag": {"type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"},
+        "tag": {"type": "string", "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"},
         "git_commit": {"$ref": "#/$defs/commit"},
         "asset_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "scenario_pack": {
@@ -154,7 +188,7 @@
         "status": {"enum": ["open", "admin-reviewed"]},
         "reviewer": {"type": "string", "minLength": 1, "maxLength": 128},
         "reviewed_at": {"type": "string", "format": "date-time"},
-        "ruleset_id": {"type": "integer", "minimum": 1},
+        "ruleset_id": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "ruleset_updated_at": {"type": "string", "format": "date-time"},
         "evidence": {"$ref": "#/$defs/evidence"}
       },

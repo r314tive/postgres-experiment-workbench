@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,8 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/benchmarkab"
 	"github.com/r314tive/postgres-experiment-workbench/internal/benchmarkexternal"
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentrun"
+	"github.com/r314tive/postgres-experiment-workbench/internal/releaseassets"
+	"github.com/r314tive/postgres-experiment-workbench/internal/releaseevidence"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 )
 
@@ -55,6 +59,101 @@ func TestRunEvidenceReleaseRejectsAmbiguousArguments(t *testing.T) {
 		if err := runEvidenceTo(io.Discard, args); err == nil || !strings.Contains(err.Error(), "usage:") {
 			t.Fatalf("runEvidenceTo(%q) error = %v, want usage", args, err)
 		}
+	}
+}
+
+func TestRunEvidenceCandidateInitRejectsAmbiguousArguments(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"candidate", "init"}, want: "--release-manifest is required"},
+		{args: []string{"candidate", "init", "--release-manifest", "manifest.json"}, want: "--asset-inventory is required"},
+		{args: []string{"candidate", "init", "--release-manifest", "manifest.json", "--asset-inventory", "assets.json"}, want: "--output is required"},
+		{args: []string{"candidate", "init", "--unknown", "value"}, want: "unknown option"},
+		{args: []string{"candidate", "init", "--json", "--json"}, want: "duplicate option"},
+		{args: []string{"candidate", "init", "--output"}, want: "requires a value"},
+		{args: []string{"candidate", "unknown"}, want: "usage:"},
+	} {
+		if err := runEvidenceTo(io.Discard, test.args); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("runEvidenceTo(%q) error = %v, want %q", test.args, err, test.want)
+		}
+	}
+}
+
+func TestRunEvidenceCandidateInitCreatesStandaloneNoGoIndex(t *testing.T) {
+	releaseDir, manifestPath, inventoryPath := candidateInitCLIFixture(t)
+	output := filepath.Join(t.TempDir(), "evidence", "index-r0.json")
+	var rendered bytes.Buffer
+	if err := runEvidenceTo(&rendered, []string{
+		"candidate", "init",
+		"--release-manifest", manifestPath,
+		"--asset-inventory", inventoryPath,
+		"--output", output,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"CREATED:", "candidate=v1.0.0", "revision=0", "status=open", "decision=no-go"} {
+		if !strings.Contains(rendered.String(), want) {
+			t.Fatalf("candidate init output missing %q: %s", want, rendered.String())
+		}
+	}
+	verification, err := releaseevidence.VerifyFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.Valid || verification.Status != releaseevidence.StatusOpen || verification.Decision != releaseevidence.DecisionNoGo {
+		t.Fatalf("created index verification = %+v", verification)
+	}
+	if _, err := os.Stat(releaseDir); err != nil {
+		t.Fatalf("candidate initializer mutated release directory: %v", err)
+	}
+	if err := runEvidenceTo(io.Discard, []string{
+		"candidate", "init",
+		"--release-manifest", manifestPath,
+		"--asset-inventory", inventoryPath,
+		"--output", output,
+	}); err == nil || !strings.Contains(err.Error(), "output already exists") {
+		t.Fatalf("candidate init replaced immutable output: %v", err)
+	}
+	insideOutput := filepath.Join(releaseDir, "evidence", "index-r0.json")
+	if err := runEvidenceTo(io.Discard, []string{
+		"candidate", "init",
+		"--release-manifest", manifestPath,
+		"--asset-inventory", inventoryPath,
+		"--output", insideOutput,
+	}); err == nil || !strings.Contains(err.Error(), "output resolves within source directory") {
+		t.Fatalf("candidate init accepted output inside immutable release root: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(releaseDir, "evidence")); !os.IsNotExist(err) {
+		t.Fatalf("rejected inside output mutated release root: %v", err)
+	}
+}
+
+func TestCandidateInitCommittedErrorHasMachineReadableNonRetryableOutcome(t *testing.T) {
+	sentinel := errors.New("injected directory sync failure")
+	result := releaseevidence.CandidateInitResult{
+		Output: "/tmp/evidence/index-r0.json",
+		Digest: "sha256:" + strings.Repeat("a", 64),
+	}
+	committed := &releaseevidence.CommittedError{
+		Result: releaseevidence.WriteResult{Output: result.Output, Digest: result.Digest},
+		Err:    sentinel,
+	}
+	var rendered bytes.Buffer
+	err := renderCandidateInitResult(&rendered, true, result, committed)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("render error = %v, want committed sentinel", err)
+	}
+	var decoded candidateInitCommittedOutput
+	if decodeErr := json.Unmarshal(rendered.Bytes(), &decoded); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if decoded.Status != "committed-unconfirmed" || !decoded.Committed || decoded.Confirmed || decoded.RetrySafe {
+		t.Fatalf("unexpected committed outcome: %+v", decoded)
+	}
+	if decoded.Result.Output != result.Output || decoded.Result.Digest != result.Digest || !strings.Contains(decoded.Error, sentinel.Error()) {
+		t.Fatalf("committed outcome lost identity: %+v", decoded)
 	}
 }
 
@@ -945,6 +1044,152 @@ func TestReleaseManifestCreateAndVerifyCLI(t *testing.T) {
 	if err := runRelease(root, []string{"manifest", "verify", "--release-dir", releaseDir, "--manifest", manifestName}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func candidateInitCLIFixture(t *testing.T) (string, string, string) {
+	t.Helper()
+	const (
+		fixtureVersion = "1.0.0"
+		fixtureCommit  = "0123456789abcdef0123456789abcdef01234567"
+	)
+	root := testScenarioPack(t, ">=0.2.0")
+	addCLISupplyChainFixture(t, root)
+	releaseDir := t.TempDir()
+	platforms := []string{"darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"}
+	sbomNames := make([]string, 0, len(platforms))
+	bundleNames := make([]string, 0, len(platforms))
+	var checksum strings.Builder
+	for _, platform := range platforms {
+		rootName := "pgworkbench-" + fixtureVersion + "-" + platform
+		archiveName := rootName + ".tar.gz"
+		archivePath := filepath.Join(releaseDir, archiveName)
+		sbomName := rootName + ".spdx.json"
+		sbomNames = append(sbomNames, sbomName)
+		bundleNames = append(bundleNames, rootName+"-sbom.sigstore.json")
+		if err := runRelease("", []string{
+			"sbom", "create",
+			"--root", root,
+			"--output", filepath.Join(releaseDir, sbomName),
+			"--name", rootName,
+			"--version", fixtureVersion,
+			"--commit", fixtureCommit,
+			"--epoch", "1700000000",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := runRelease("", []string{
+			"archive", "create",
+			"--source", root,
+			"--output", archivePath,
+			"--root-name", rootName,
+			"--epoch", "1700000000",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		checksum.WriteString(fileSHA256Hex(t, archivePath))
+		checksum.WriteString("  ")
+		checksum.WriteString(archiveName)
+		checksum.WriteByte('\n')
+	}
+	checksumName := "pgworkbench-" + fixtureVersion + "-SHA256SUMS.txt"
+	if err := os.WriteFile(filepath.Join(releaseDir, checksumName), []byte(checksum.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestName := "pgworkbench-" + fixtureVersion + "-release-manifest.json"
+	if err := runRelease(root, []string{
+		"manifest", "create",
+		"--release-dir", releaseDir,
+		"--version", fixtureVersion,
+		"--commit", fixtureCommit,
+		"--source-date-epoch", "1700000000",
+		"--output", manifestName,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	provenanceName := "pgworkbench-" + fixtureVersion + "-provenance.sigstore.json"
+	for _, name := range bundleNames {
+		if err := os.WriteFile(filepath.Join(releaseDir, name), []byte("fixture sbom attestation\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(releaseDir, provenanceName), []byte("fixture provenance attestation\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	metadataName := "pgworkbench-" + fixtureVersion + "-METADATA-SHA256SUMS.txt"
+	metadataOrder := append([]string(nil), sbomNames...)
+	metadataOrder = append(metadataOrder, bundleNames...)
+	metadataOrder = append(metadataOrder, provenanceName, manifestName)
+	var metadata strings.Builder
+	for _, name := range metadataOrder {
+		metadata.WriteString(fileSHA256Hex(t, filepath.Join(releaseDir, name)))
+		metadata.WriteString("  ./")
+		metadata.WriteString(name)
+		metadata.WriteByte('\n')
+	}
+	if err := os.WriteFile(filepath.Join(releaseDir, metadataName), []byte(metadata.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(releaseDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assets := make([]releaseassets.Asset, 0, len(entries))
+	for index, entry := range entries {
+		if !entry.Type().IsRegular() {
+			t.Fatalf("unexpected release fixture entry: %s", entry.Name())
+		}
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := releaseassets.NewIntegerAssetID(uint64(index + 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assets = append(assets, releaseassets.Asset{
+			ID:     id,
+			Name:   entry.Name(),
+			Size:   info.Size(),
+			Digest: "sha256:" + fileSHA256Hex(t, filepath.Join(releaseDir, entry.Name())),
+		})
+	}
+	sort.Slice(assets, func(left, right int) bool { return assets[left].Name < assets[right].Name })
+	fingerprint, err := releaseassets.ComputeFingerprint(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory := releaseassets.Inventory{
+		SchemaVersion:        releaseassets.SchemaVersion,
+		ArtifactType:         releaseassets.ArtifactType,
+		ReleaseState:         releaseassets.ReleaseStateDraft,
+		Tag:                  "v" + fixtureVersion,
+		GitCommit:            fixtureCommit,
+		CapturedAt:           "2026-08-14T00:00:00Z",
+		FingerprintAlgorithm: releaseassets.FingerprintAlgorithm,
+		AssetFingerprint:     fingerprint,
+		Assets:               assets,
+	}
+	inventoryContent, err := json.MarshalIndent(inventory, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventoryPath := filepath.Join(t.TempDir(), "asset-inventory.json")
+	if err := os.WriteFile(inventoryPath, append(inventoryContent, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return releaseDir, filepath.Join(releaseDir, manifestName), inventoryPath
+}
+
+func fileSHA256Hex(t *testing.T, path string) string {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	return hex.EncodeToString(digest[:])
 }
 
 func TestUtilityRunCLIForwardsRuntimeAndRunID(t *testing.T) {

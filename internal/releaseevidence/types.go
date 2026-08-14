@@ -4,7 +4,11 @@
 package releaseevidence
 
 const (
-	SchemaVersion = "pgworkbench.release-evidence-index/v1"
+	SchemaVersionV1 = "pgworkbench.release-evidence-index/v1"
+	SchemaVersionV2 = "pgworkbench.release-evidence-index/v2"
+	// SchemaVersion remains the v1 name for source compatibility. New indexes
+	// are created with SchemaVersionV2 and an explicit immutable lineage.
+	SchemaVersion = SchemaVersionV1
 	ArtifactType  = "pgworkbench.release-evidence-index"
 	DecisionScope = "v1-readiness"
 
@@ -30,17 +34,27 @@ const (
 	StatusOpen   = "open"
 	StatusFailed = "failed"
 	StatusPassed = "passed"
+
+	maxJSONSafeInteger = int64(9007199254740991)
 )
 
 type Index struct {
 	SchemaVersion      string             `json:"schema_version"`
 	ArtifactType       string             `json:"artifact_type"`
+	Lineage            *Lineage           `json:"lineage,omitempty"`
 	RecordStatus       string             `json:"record_status"`
 	CreatedAt          string             `json:"created_at"`
 	Candidate          Candidate          `json:"candidate"`
 	PreventiveControls PreventiveControls `json:"preventive_controls"`
 	Gates              Gates              `json:"gates"`
 	Decision           Decision           `json:"decision"`
+}
+
+// Lineage makes copy-on-write evidence-index revisions explicit. Revision zero
+// has no predecessor; later revisions bind the exact previous index bytes.
+type Lineage struct {
+	Revision            int64   `json:"revision"`
+	PreviousIndexDigest *string `json:"previous_index_digest,omitempty"`
 }
 
 type Candidate struct {
@@ -62,7 +76,7 @@ type Evidence struct {
 	Digest     string  `json:"digest"`
 	CapturedAt string  `json:"captured_at"`
 	RunID      *string `json:"run_id,omitempty"`
-	RunAttempt *int    `json:"run_attempt,omitempty"`
+	RunAttempt *int64  `json:"run_attempt,omitempty"`
 }
 
 type Gate struct {
@@ -75,7 +89,7 @@ type AdminReview struct {
 	Status           string    `json:"status"`
 	Reviewer         *string   `json:"reviewer,omitempty"`
 	ReviewedAt       *string   `json:"reviewed_at,omitempty"`
-	RulesetID        *int      `json:"ruleset_id,omitempty"`
+	RulesetID        *int64    `json:"ruleset_id,omitempty"`
 	RulesetUpdatedAt *string   `json:"ruleset_updated_at,omitempty"`
 	Evidence         *Evidence `json:"evidence,omitempty"`
 }

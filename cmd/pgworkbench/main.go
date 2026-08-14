@@ -199,6 +199,7 @@ func usage() {
 	pgworkbench release sbom verify --package-root dir <document.spdx.json>
 	pgworkbench evidence release verify [--json] <release-evidence-index.json>
 	pgworkbench evidence release status [--json] <release-evidence-index.json>
+	pgworkbench evidence candidate init --release-manifest file --asset-inventory file --output index.json [--json]
 	pgworkbench bridge pgdrill export [--json] [--bundle] [--reviewed-predicate-file file] <run-or-bundle> <output.json>
 	pgworkbench bridge pgdrill verify [--json] [--source run-or-bundle] <baseline.json>
   pgworkbench dataset list [--raw]
@@ -538,8 +539,11 @@ func runEvidence(args []string) error {
 }
 
 func runEvidenceTo(writer io.Writer, args []string) error {
+	if len(args) >= 2 && args[0] == "candidate" && args[1] == "init" {
+		return runEvidenceCandidateInit(writer, args[2:])
+	}
 	if len(args) < 2 || args[0] != "release" || (args[1] != "verify" && args[1] != "status") {
-		return fmt.Errorf("usage: pgworkbench evidence release <verify|status> [--json] <release-evidence-index.json>")
+		return fmt.Errorf("usage: pgworkbench evidence <release <verify|status>|candidate init> [options]")
 	}
 	action := args[1]
 	jsonOutput, inputs, err := parseJSONOptionArgs(args[2:])
@@ -589,6 +593,94 @@ func runEvidenceTo(writer io.Writer, args []string) error {
 	if !verification.Valid {
 		return fmt.Errorf("release evidence index verification failed: %s", strings.Join(verification.Issues, "; "))
 	}
+	return nil
+}
+
+func runEvidenceCandidateInit(writer io.Writer, args []string) error {
+	values := make(map[string]string)
+	jsonOutput := false
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--json":
+			if jsonOutput {
+				return fmt.Errorf("duplicate option: --json")
+			}
+			jsonOutput = true
+		case "--release-manifest", "--asset-inventory", "--output":
+			if index+1 >= len(args) {
+				return fmt.Errorf("%s requires a value", args[index])
+			}
+			key := strings.TrimPrefix(args[index], "--")
+			if _, exists := values[key]; exists {
+				return fmt.Errorf("duplicate option: %s", args[index])
+			}
+			values[key] = args[index+1]
+			index++
+		default:
+			return fmt.Errorf("unknown option: %s", args[index])
+		}
+	}
+	for _, required := range []string{"release-manifest", "asset-inventory", "output"} {
+		if values[required] == "" {
+			return fmt.Errorf("--%s is required", required)
+		}
+	}
+	result, err := releaseevidence.InitializeCandidate(releaseevidence.CandidateInitOptions{
+		ReleaseManifestPath: values["release-manifest"],
+		AssetInventoryPath:  values["asset-inventory"],
+		Output:              values["output"],
+	})
+	return renderCandidateInitResult(writer, jsonOutput, result, err)
+}
+
+type candidateInitCommittedOutput struct {
+	Status    string                              `json:"status"`
+	Committed bool                                `json:"committed"`
+	Confirmed bool                                `json:"confirmed"`
+	RetrySafe bool                                `json:"retry_safe"`
+	Error     string                              `json:"error"`
+	Result    releaseevidence.CandidateInitResult `json:"result"`
+}
+
+func renderCandidateInitResult(writer io.Writer, jsonOutput bool, result releaseevidence.CandidateInitResult, initErr error) error {
+	if initErr != nil {
+		var committed *releaseevidence.CommittedError
+		if !errors.As(initErr, &committed) {
+			return initErr
+		}
+		if jsonOutput {
+			encoder := json.NewEncoder(writer)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(candidateInitCommittedOutput{
+				Status:    "committed-unconfirmed",
+				Committed: true,
+				Confirmed: false,
+				RetrySafe: false,
+				Error:     initErr.Error(),
+				Result:    result,
+			}); err != nil {
+				return errors.Join(initErr, err)
+			}
+		} else {
+			fmt.Fprintf(writer, "COMMITTED-UNCONFIRMED: release evidence index output=%s digest=%s retry-safe=false\n", result.Output, result.Digest)
+		}
+		return initErr
+	}
+	if jsonOutput {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+	fmt.Fprintf(
+		writer,
+		"CREATED: release evidence index output=%s digest=%s candidate=%s commit=%s revision=0 status=%s decision=%s\n",
+		result.Output,
+		result.Digest,
+		result.Candidate.Tag,
+		result.Candidate.GitCommit,
+		result.IndexVerification.Status,
+		result.IndexVerification.Decision,
+	)
 	return nil
 }
 

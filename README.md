@@ -654,6 +654,11 @@ go run ./cmd/pgworkbench evidence release verify \
   evidence/templates/release-evidence-index.json
 go run ./cmd/pgworkbench evidence release status --json \
   evidence/templates/release-evidence-index.json
+# Once a complete downloaded release set and typed provider inventory exist:
+go run ./cmd/pgworkbench evidence candidate init \
+  --release-manifest downloaded/pgworkbench-0.2.0-release-manifest.json \
+  --asset-inventory draft-verification/asset-inventory.json \
+  --output evidence/index-r0.json
 ```
 
 Run `go run ./cmd/pgworkbench` without arguments for the complete command tree.

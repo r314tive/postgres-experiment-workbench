@@ -13,7 +13,6 @@ import (
 
 var (
 	semVerPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`)
-	tagPattern    = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$`)
 	lowerHex40    = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	lowerHex64    = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
@@ -48,8 +47,11 @@ func Verify(index Index) Verification {
 	}
 
 	integrityOK := true
-	if index.SchemaVersion != SchemaVersion {
-		add("schema_version = %q, want %q", index.SchemaVersion, SchemaVersion)
+	if !oneOf(index.SchemaVersion, SchemaVersionV1, SchemaVersionV2) {
+		add("schema_version = %q, want %q or %q", index.SchemaVersion, SchemaVersionV1, SchemaVersionV2)
+		integrityOK = false
+	}
+	if !validateLineage(add, index.SchemaVersion, index.Lineage) {
 		integrityOK = false
 	}
 	if index.ArtifactType != ArtifactType {
@@ -182,10 +184,7 @@ func validateCandidate(add func(string, ...any), candidate Candidate) bool {
 		add("candidate.version = %q, want canonical SemVer", candidate.Version)
 		valid = false
 	}
-	if !tagPattern.MatchString(candidate.Tag) {
-		add("candidate.tag = %q, want a schema-conforming v-prefixed release tag", candidate.Tag)
-		valid = false
-	} else if candidate.Tag != "v"+candidate.Version {
+	if candidate.Tag != "v"+candidate.Version {
 		add("candidate.tag = %q, want %q", candidate.Tag, "v"+candidate.Version)
 		valid = false
 	}
@@ -210,6 +209,42 @@ func validateCandidate(add func(string, ...any), candidate Candidate) bool {
 		valid = false
 	}
 	return valid
+}
+
+func validateLineage(add func(string, ...any), schemaVersion string, lineage *Lineage) bool {
+	switch schemaVersion {
+	case SchemaVersionV1:
+		if lineage != nil {
+			add("lineage must be absent for schema_version %q", SchemaVersionV1)
+			return false
+		}
+		return true
+	case SchemaVersionV2:
+		if lineage == nil {
+			add("lineage is required for schema_version %q", SchemaVersionV2)
+			return false
+		}
+		valid := true
+		if lineage.Revision < 0 {
+			add("lineage.revision must be non-negative")
+			valid = false
+		} else if lineage.Revision > maxJSONSafeInteger {
+			add("lineage.revision must be no greater than %d", maxJSONSafeInteger)
+			valid = false
+		}
+		if lineage.Revision == 0 {
+			if lineage.PreviousIndexDigest != nil {
+				add("lineage.previous_index_digest must be absent for revision zero")
+				valid = false
+			}
+		} else if lineage.PreviousIndexDigest == nil || !validDigest(*lineage.PreviousIndexDigest) {
+			add("lineage.previous_index_digest must be a lowercase sha256 digest for revision %d", lineage.Revision)
+			valid = false
+		}
+		return valid
+	default:
+		return false
+	}
 }
 
 func validateDecisionShape(add func(string, ...any), decision Decision) bool {
@@ -378,6 +413,9 @@ func validateAdminReview(add func(string, ...any), review AdminReview) (string, 
 		if review.RulesetID == nil || *review.RulesetID < 1 {
 			add("%s.ruleset_id must be at least 1", path)
 			valid = false
+		} else if *review.RulesetID > maxJSONSafeInteger {
+			add("%s.ruleset_id must be no greater than %d", path, maxJSONSafeInteger)
+			valid = false
 		}
 		if review.RulesetUpdatedAt == nil || !validDateTime(valueOrEmpty(review.RulesetUpdatedAt)) {
 			add("%s.ruleset_updated_at must be an RFC3339 date-time", path)
@@ -461,9 +499,14 @@ func validateEvidence(add func(string, ...any), path string, evidence Evidence) 
 		add("%s.run_id must contain 1 to 128 characters when present", path)
 		valid = false
 	}
-	if evidence.RunAttempt != nil && *evidence.RunAttempt < 1 {
-		add("%s.run_attempt must be at least 1 when present", path)
-		valid = false
+	if evidence.RunAttempt != nil {
+		if *evidence.RunAttempt < 1 {
+			add("%s.run_attempt must be at least 1 when present", path)
+			valid = false
+		} else if *evidence.RunAttempt > maxJSONSafeInteger {
+			add("%s.run_attempt must be no greater than %d", path, maxJSONSafeInteger)
+			valid = false
+		}
 	}
 	return valid
 }

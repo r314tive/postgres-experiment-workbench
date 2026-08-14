@@ -21,11 +21,13 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/pathguard"
 	"github.com/r314tive/postgres-experiment-workbench/internal/releasesbom"
 	"github.com/r314tive/postgres-experiment-workbench/internal/scenariopack"
+	"github.com/r314tive/postgres-experiment-workbench/internal/strictjson"
 )
 
 const (
-	SchemaVersion = "pgworkbench.release-manifest/v1"
-	digestPrefix  = "sha256:"
+	SchemaVersion           = "pgworkbench.release-manifest/v1"
+	digestPrefix            = "sha256:"
+	maxReleaseManifestBytes = 2 << 20
 )
 
 type ScenarioPack struct {
@@ -228,24 +230,28 @@ func Write(releaseDir string, outputPath string, manifest Manifest) error {
 }
 
 func Read(path string) (Manifest, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return Manifest{}, err
-	}
-	defer file.Close()
-	decoder := json.NewDecoder(file)
-	decoder.DisallowUnknownFields()
 	var manifest Manifest
-	if err := decoder.Decode(&manifest); err != nil {
-		return Manifest{}, fmt.Errorf("parse release manifest: %w", err)
-	}
-	if err := ensureJSONEOF(decoder); err != nil {
+	if err := strictjson.LoadFile(path, maxReleaseManifestBytes, &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("parse release manifest: %w", err)
 	}
 	if err := Validate(manifest); err != nil {
 		return Manifest{}, err
 	}
 	return manifest, nil
+}
+
+// VerifyPath verifies a release manifest and its sibling release artifacts.
+// Deriving the release directory from the manifest path prevents callers from
+// accidentally pairing a manifest with an unrelated artifact directory.
+func VerifyPath(path string) (Manifest, error) {
+	if strings.TrimSpace(path) == "" {
+		return Manifest{}, fmt.Errorf("release manifest path is required")
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("resolve release manifest path: %w", err)
+	}
+	return Verify(filepath.Dir(absolute), filepath.Base(absolute))
 }
 
 // Verify recomputes the checksum file digest, every archive digest and size,
@@ -1016,14 +1022,4 @@ func canonicalNumber(value string) bool {
 	}
 	_, err := strconv.ParseUint(value, 10, 64)
 	return err == nil
-}
-
-func ensureJSONEOF(decoder *json.Decoder) error {
-	var extra any
-	if err := decoder.Decode(&extra); err == io.EOF {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	return fmt.Errorf("multiple JSON values")
 }

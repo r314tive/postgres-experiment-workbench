@@ -14,6 +14,12 @@ three tracked templates are:
   validated by
   [`critical-finding-review.schema.json`](../schemas/critical-finding-review.schema.json).
 
+The release workflow additionally emits a typed
+[`release-asset-inventory`](../schemas/release-asset-inventory.schema.json)
+record alongside draft/public verification evidence. It is deliberately not a
+seventeenth release asset: including it in the release would make its own
+asset-set fingerprint recursive.
+
 Copy templates into a release-specific durable location; do not edit the
 templates as historical evidence. A practical layout is
 `releases/v<version>/evidence-index.json`, `pilots/<pilot-id>.json`, and
@@ -153,3 +159,39 @@ A consistent index with open or failed gates is valid evidence of `NO-GO`; it
 is not a command failure or a release claim. A stored decision or record status
 that contradicts the derived gates and preventive controls is semantically
 invalid and fails verification.
+
+## Candidate initialization
+
+Revision zero is derived from a locally complete downloaded release set and a
+typed provider asset inventory:
+
+```bash
+pgworkbench evidence candidate init \
+  --release-manifest downloaded/pgworkbench-0.2.0-release-manifest.json \
+  --asset-inventory draft-verification/asset-inventory.json \
+  --output evidence/index-r0.json
+```
+
+The command verifies the release manifest, archive/SBOM/checksum relationships,
+the closed top-level asset set, every local asset size and digest, metadata
+checksum coverage, and the workflow-compatible fingerprint over sorted
+`{id,name,size,digest}` records. It accepts no independent version, tag,
+commit, pack, fingerprint, timestamp, or gate-status flag. The resulting v2
+index is `active`, revision `0`, and a valid `NO-GO` with all readiness
+requirements open.
+
+All 16 source files are copied once into a private, digest-checked snapshot
+outside the downloaded release root. Manifest, archive, embedded pack/toolchain,
+SBOM, and metadata semantics are then evaluated only from those pinned bytes.
+The snapshot is removed before the immutable index is published; a snapshot
+cleanup failure fails initialization rather than silently leaking a second
+release tree or publishing an index over unclosed temporary state.
+
+The inventory is evidence supplied to an offline integrity verifier; its mere
+presence does not authenticate GitHub, Sigstore, or the inventory producer.
+Draft/public authenticity and repository state must close their own typed
+gates. Output is copy-on-write and exclusive: an existing file or symlink is
+never replaced. If the destination has already been linked but final inode or
+directory-durability confirmation fails, the command exits non-zero and reports
+`committed-unconfirmed`, `retry_safe=false`, plus the exact output and digest in
+`--json` mode. Operators must inspect that path; a blind retry is incorrect.

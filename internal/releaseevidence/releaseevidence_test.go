@@ -587,7 +587,7 @@ func completeIndex() Index {
 		Status:           ReviewStatusAdminReviewed,
 		Reviewer:         pointer("release-admin"),
 		ReviewedAt:       pointer(testTime),
-		RulesetID:        pointer(123),
+		RulesetID:        pointer(int64(123)),
 		RulesetUpdatedAt: pointer(testTime),
 		Evidence:         evidence("https://example.test/bypass-review.json"),
 	}
