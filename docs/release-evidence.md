@@ -134,3 +134,22 @@ integrity, the tag ruleset, immutable releases, and administrator sign-off. A
 `GO` record cannot contain an open or accepted critical finding. The top-level
 release evidence index can become `complete`/`go` only when every declared gate
 has durable passed evidence and both preventive controls are verified.
+
+## Semantic CLI verification
+
+JSON Schema remains the wire-format contract. The post-v0.2 CLI adds a second,
+independent semantic layer so a structurally valid document cannot be mistaken
+for release authorization merely because it contains `decision.status=go`.
+
+```bash
+pgworkbench evidence release verify evidence-index.json
+pgworkbench evidence release status --json evidence-index.json
+```
+
+Both commands work outside a scenario-pack checkout. They strictly decode one
+bounded regular non-symlink JSON file, reject duplicate or unknown properties
+and trailing JSON, and independently derive the aggregate status and decision.
+A consistent index with open or failed gates is valid evidence of `NO-GO`; it
+is not a command failure or a release claim. A stored decision or record status
+that contradicts the derived gates and preventive controls is semantically
+invalid and fails verification.

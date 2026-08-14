@@ -609,7 +609,8 @@ Runtime execution is separately gated only for Linux/amd64 and Darwin/arm64;
 see the compatibility ledger before making platform-support claims.
 
 Release notes live in [CHANGELOG.md](CHANGELOG.md). Release process details
-live in [docs/release.md](docs/release.md).
+live in [docs/release.md](docs/release.md). The evidence-gated post-v0.2 plan
+lives in [docs/post-v0.2-roadmap.md](docs/post-v0.2-roadmap.md).
 
 ## Go CLI
 
@@ -649,6 +650,10 @@ go run ./cmd/pgworkbench utility plan --expanded pg-dump/smoke
 go run ./cmd/pgworkbench utility run --json --runtime native --run-id native-pgdump pg-dump/smoke
 go run ./cmd/pgworkbench utility-suite plan --json native-dump
 go run ./cmd/pgworkbench utility-suite run --json native-dump
+go run ./cmd/pgworkbench evidence release verify \
+  evidence/templates/release-evidence-index.json
+go run ./cmd/pgworkbench evidence release status --json \
+  evidence/templates/release-evidence-index.json
 ```
 
 Run `go run ./cmd/pgworkbench` without arguments for the complete command tree.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -16,6 +17,46 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentrun"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 )
+
+func TestRunEvidenceReleaseTemplateStatus(t *testing.T) {
+	index := filepath.Join("..", "..", "evidence", "templates", "release-evidence-index.json")
+	var output bytes.Buffer
+	if err := runEvidenceTo(&output, []string{"release", "status", index}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"status=open", "decision=no-go", "valid=true", "open=16", "failed=0", "passed=0", "reason: open readiness requirement:"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("release evidence status missing %q:\n%s", want, output.String())
+		}
+	}
+}
+
+func TestRunEvidenceReleaseRejectsMalformedIndex(t *testing.T) {
+	index := filepath.Join(t.TempDir(), "index.json")
+	if err := os.WriteFile(index, []byte(`{"schema_version":"wrong"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	err := runEvidenceTo(&output, []string{"release", "verify", "--json", index})
+	if err == nil {
+		t.Fatal("malformed release evidence index was accepted")
+	}
+}
+
+func TestRunEvidenceReleaseRejectsAmbiguousArguments(t *testing.T) {
+	for _, args := range [][]string{
+		nil,
+		{"release"},
+		{"pilot", "verify", "index.json"},
+		{"release", "unknown", "index.json"},
+		{"release", "verify"},
+		{"release", "status", "one.json", "two.json"},
+	} {
+		if err := runEvidenceTo(io.Discard, args); err == nil || !strings.Contains(err.Error(), "usage:") {
+			t.Fatalf("runEvidenceTo(%q) error = %v, want usage", args, err)
+		}
+	}
+}
 
 func TestReportCommandsRejectExistingOutputWithoutMutation(t *testing.T) {
 	commands := []struct {

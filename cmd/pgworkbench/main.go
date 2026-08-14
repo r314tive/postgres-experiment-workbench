@@ -47,6 +47,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/profilecatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/profileplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/releasearchive"
+	"github.com/r314tive/postgres-experiment-workbench/internal/releaseevidence"
 	"github.com/r314tive/postgres-experiment-workbench/internal/releasemanifest"
 	"github.com/r314tive/postgres-experiment-workbench/internal/releasesbom"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runartifact"
@@ -97,6 +98,12 @@ func run(args []string) error {
 	if args[0] == "release" {
 		root, _ := findRepoRoot()
 		return runRelease(root, args[1:])
+	}
+	// Release evidence is deliberately verifiable outside a scenario-pack
+	// checkout. A durable index commonly lives in a separate protected evidence
+	// repository or object-store download directory.
+	if args[0] == "evidence" {
+		return runEvidence(args[1:])
 	}
 	if args[0] == "bridge" && len(args) > 2 && args[1] == "pgdrill" && args[2] == "verify" {
 		root, rootErr := findRepoRoot()
@@ -190,6 +197,8 @@ func usage() {
 	pgworkbench release manifest verify --release-dir dir --manifest name [--json]
 	pgworkbench release sbom create --root dir --output document.spdx.json --name name --version version --commit full-commit --epoch seconds [--json]
 	pgworkbench release sbom verify --package-root dir <document.spdx.json>
+	pgworkbench evidence release verify [--json] <release-evidence-index.json>
+	pgworkbench evidence release status [--json] <release-evidence-index.json>
 	pgworkbench bridge pgdrill export [--json] [--bundle] [--reviewed-predicate-file file] <run-or-bundle> <output.json>
 	pgworkbench bridge pgdrill verify [--json] [--source run-or-bundle] <baseline.json>
   pgworkbench dataset list [--raw]
@@ -522,6 +531,65 @@ func runRelease(root string, args []string) error {
 	default:
 		return fmt.Errorf("unsupported release artifact: %s", args[0])
 	}
+}
+
+func runEvidence(args []string) error {
+	return runEvidenceTo(os.Stdout, args)
+}
+
+func runEvidenceTo(writer io.Writer, args []string) error {
+	if len(args) < 2 || args[0] != "release" || (args[1] != "verify" && args[1] != "status") {
+		return fmt.Errorf("usage: pgworkbench evidence release <verify|status> [--json] <release-evidence-index.json>")
+	}
+	action := args[1]
+	jsonOutput, inputs, err := parseJSONOptionArgs(args[2:])
+	if err != nil {
+		return err
+	}
+	if len(inputs) != 1 {
+		return fmt.Errorf("usage: pgworkbench evidence release %s [--json] <release-evidence-index.json>", action)
+	}
+	verification, err := releaseevidence.VerifyFile(inputs[0])
+	if err != nil {
+		return err
+	}
+	if jsonOutput {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(verification); err != nil {
+			return err
+		}
+	} else if action == "verify" {
+		if verification.Valid {
+			fmt.Fprintf(writer, "VALID: release evidence index status=%s decision=%s open=%d failed=%d passed=%d\n", verification.Status, verification.Decision, len(verification.OpenGates), len(verification.FailedGates), len(verification.PassedGates))
+		} else {
+			fmt.Fprintf(writer, "INVALID: release evidence index issues=%d\n", len(verification.Issues))
+			for _, issue := range verification.Issues {
+				fmt.Fprintf(writer, "- %s\n", issue)
+			}
+		}
+	} else {
+		fmt.Fprintf(writer, "release evidence status=%s decision=%s valid=%t open=%d failed=%d passed=%d\n", verification.Status, verification.Decision, verification.Valid, len(verification.OpenGates), len(verification.FailedGates), len(verification.PassedGates))
+		for _, gate := range verification.FailedGates {
+			fmt.Fprintf(writer, "failed: %s\n", gate)
+		}
+		for _, gate := range verification.OpenGates {
+			fmt.Fprintf(writer, "open: %s\n", gate)
+		}
+		for _, gate := range verification.PassedGates {
+			fmt.Fprintf(writer, "passed: %s\n", gate)
+		}
+		for _, reason := range verification.Reasons {
+			fmt.Fprintf(writer, "reason: %s\n", reason)
+		}
+		for _, issue := range verification.Issues {
+			fmt.Fprintf(writer, "issue: %s\n", issue)
+		}
+	}
+	if !verification.Valid {
+		return fmt.Errorf("release evidence index verification failed: %s", strings.Join(verification.Issues, "; "))
+	}
+	return nil
 }
 
 func runPGDrillBridge(root string, args []string) error {
