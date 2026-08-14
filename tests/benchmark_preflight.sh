@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PGWORKBENCH_SUPERVISED=1
+INTERNAL_RUN_ACTION=__pgworkbench_internal_run_v1
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pgworkbench-benchmark-preflight.XXXXXX")"
 SPEC_DIR="$(mktemp -d "$REPO_DIR/experiments/.benchmark-preflight.XXXXXX")"
@@ -54,7 +57,7 @@ assert_terminal_preflight_failure() {
     PGWORKBENCH_BENCHMARK_TRIAL=1 \
     EXPERIMENT_RUN_ID="$run_id" \
     "$@" \
-    "$REPO_DIR/scripts/run_experiment.sh" run "$spec" \
+    "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" "$spec" \
     >"$TMP_DIR/$label.out" 2>&1; then
     fail "$label preflight unexpectedly passed"
   fi
@@ -130,7 +133,7 @@ if env \
   PGWORKBENCH_BENCHMARK_RUN_ID="$conflict_id" \
   PGWORKBENCH_BENCHMARK_TRIAL=1 \
   EXPERIMENT_RUN_ID="$conflict_id" \
-  "$REPO_DIR/scripts/run_experiment.sh" run smoke \
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" smoke \
   >"$TMP_DIR/existing.out" 2>&1; then
   fail "existing immutable run unexpectedly passed"
 fi

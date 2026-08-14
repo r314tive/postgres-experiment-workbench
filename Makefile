@@ -1364,6 +1364,8 @@ check: schema-check
 	./tests/patchsets.sh
 	./tests/diagnostics.sh
 	./tests/shell_portability.sh
+	./tests/sample_metrics_readiness.sh
+	./tests/process_lifecycle.sh
 	./tests/runtime.sh
 	./tests/runtime_workloads.sh
 	./tests/pgbench_phase_io.sh

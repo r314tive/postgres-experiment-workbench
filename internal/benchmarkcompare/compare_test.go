@@ -430,9 +430,12 @@ func writeCompareLinkedRun(t *testing.T, root string, options experimentrun.Opti
 		t.Fatal(err)
 	}
 
-	latencyMS, tps := 0.1, value
+	latencyMS, tps := 1000*float64(clients)/value, value
 	if direction == "lower" {
-		latencyMS, tps = value/1000, 1000
+		latencyMS = value / 1000
+		targetTPS := 1000 * float64(clients) / latencyMS
+		processed := int64(targetTPS*30 + 0.5)
+		tps = float64(processed) / 30
 	}
 	processed := int64(tps*30 + 0.5)
 	summary := fmt.Sprintf(strings.Join([]string{
@@ -447,7 +450,6 @@ func writeCompareLinkedRun(t *testing.T, root string, options experimentrun.Opti
 		"number of transactions actually processed: %d",
 		"number of failed transactions: 0 (0.000%%)",
 		"latency average = %.6f ms",
-		"latency stddev = 0.010 ms",
 		"initial connection time = 2.000 ms",
 		"tps = %.6f (without initial connection time)",
 	}, "\n")+"\n", protocol, clients, processed, latencyMS, tps)

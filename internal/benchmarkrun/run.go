@@ -1069,6 +1069,10 @@ func runTrial(root string, seriesDir string, catalog speccatalog.Catalog, plan b
 		trial.Reasons = append(trial.Reasons, err.Error())
 		return trial, err
 	}
+	if err := pgbenchresult.ValidateLatencyIntegrity(parsed); err != nil {
+		trial.Reasons = append(trial.Reasons, err.Error())
+		return trial, err
+	}
 	environment, err := environmentFromRun(root, trialRunID, plan, parsed, options, series.EngineBinaryDigest)
 	if err != nil {
 		trial.Reasons = append(trial.Reasons, "environment evidence invalid")
@@ -1305,8 +1309,10 @@ func ValidateTransactionLog(summary pgbenchresult.Result, transactionLog pgbench
 		if summary.TotalRetries != nil && transactionLog.TotalRetries != *summary.TotalRetries {
 			issues = append(issues, fmt.Sprintf("raw transaction log total retries mismatch: got %d want %d", transactionLog.TotalRetries, *summary.TotalRetries))
 		}
-		if transactionLog.LatencyUS != nil && !pgbenchLatencyMatchesSummary(transactionLog.LatencyUS.Mean/1000, summary) {
-			issues = append(issues, fmt.Sprintf("raw transaction log mean latency %.6f ms does not match summary %.6f ms", transactionLog.LatencyUS.Mean/1000, summary.LatencyMeanMS))
+		if transactionLog.LatencyUS != nil {
+			if err := pgbenchresult.ValidateRawLatencyMean(summary, transactionLog.LatencyUS.Mean/1000); err != nil {
+				issues = append(issues, fmt.Sprintf("raw transaction log mean latency validation failed: %v", err))
+			}
 		}
 		if transactionLog.ScheduleLagUS != nil && summary.ScheduleLagAverageMS != nil && !closeRoundedMilliseconds(transactionLog.ScheduleLagUS.Mean/1000, *summary.ScheduleLagAverageMS) {
 			issues = append(issues, fmt.Sprintf("raw transaction log mean schedule lag %.6f ms does not match summary %.6f ms", transactionLog.ScheduleLagUS.Mean/1000, *summary.ScheduleLagAverageMS))
@@ -1614,6 +1620,14 @@ func ValidatePgbenchResult(plan benchmarkplan.Plan, parsed pgbenchresult.Result)
 	} else if parsed.LatencyLimitMS == nil || *parsed.LatencyLimitMS != *plan.LatencyLimitMS {
 		issues = append(issues, "pgbench latency limit does not match the protocol")
 	}
+	expectsDetailedLatency := plan.Rate != nil || plan.LatencyLimitMS != nil
+	if (parsed.LatencyStddevMS != nil) != expectsDetailedLatency {
+		if expectsDetailedLatency {
+			issues = append(issues, "pgbench omitted detailed latency evidence required by rate or latency-limit protocol")
+		} else {
+			issues = append(issues, "pgbench reported unexpected detailed latency evidence for an ordinary closed-loop protocol")
+		}
+	}
 	if plan.MaxLatencyLimitExceededPct != nil {
 		if parsed.TransactionsAboveLimit == nil || parsed.LatencyLimitTotal == nil || *parsed.LatencyLimitTotal <= 0 {
 			issues = append(issues, "pgbench omitted latency-limit counts required by the SLO budget")
@@ -1659,25 +1673,6 @@ func ValidatePgbenchResult(plan benchmarkplan.Plan, parsed pgbenchresult.Result)
 
 func closeRoundedMilliseconds(left float64, right float64) bool {
 	return math.Abs(left-right) <= 0.001
-}
-
-// Without throttle, progress, or a latency limit, pgbench prints latency from
-// the global measured window (duration * clients / completed transactions),
-// while its plain log records the sum of per-client transaction intervals.
-// The former includes bounded client-loop/start-stop gaps and is therefore an
-// upper bound. Keep that unmeasured portion below two percent plus the printed
-// 0.001 ms rounding interval. Detailed pgbench summaries use the same latency
-// accumulator as the log and must match at printed precision.
-func pgbenchLatencyMatchesSummary(rawMean float64, summary pgbenchresult.Result) bool {
-	const printedHalfMillisecondUnit = 0.0005
-	if summary.ScheduleLagAverageMS != nil || summary.LatencyLimitMS != nil || summary.LatencyStddevMS != nil {
-		return math.Abs(rawMean-summary.LatencyMeanMS) <= printedHalfMillisecondUnit
-	}
-	if rawMean > summary.LatencyMeanMS+printedHalfMillisecondUnit {
-		return false
-	}
-	tolerance := printedHalfMillisecondUnit + math.Abs(summary.LatencyMeanMS)*0.02
-	return summary.LatencyMeanMS-rawMean <= tolerance
 }
 
 func primaryValue(metric string, parsed pgbenchresult.Result) (float64, error) {

@@ -6,6 +6,14 @@ runtime, using the recorded scenario-pack and spec digests. Verification means
 that the required artifact files and their recorded content remain internally
 consistent.
 
+The top-level experiment spec is a runner-owned byte snapshot: planning,
+validation, result identity, shell sourcing, and captured provenance all use
+that snapshot, with digest checks before and after shell evaluation. This does
+not snapshot every referenced workload, dataset, hook, executable, or runtime
+dependency, and trusted scenario shell still has the user's normal filesystem
+and network authority; the control is evidence binding, not a process or
+filesystem sandbox.
+
 The pgbench producer executes retained typed protocol inputs and also records
 the complete configured scenario-pack inventory. It validates that full pack
 before reservation, before and after every trial, and again before series
@@ -18,12 +26,14 @@ remains outside the claim. Neither contract describes its live input tree as an
 immutable execution sandbox.
 
 An operation run narrows ambient process influence by starting each linked
-experiment from a small runner-owned environment and explicitly selecting
-`.env.example`; the private `.env` and runtime/output roots cannot enter its
-bounded input closure. That closure is capped at 1,024 files and 64 MiB and is
-independently rebuilt from the retained capsule. These controls do not isolate
-filesystem, network, kernel, dynamic-library, or subprocess behavior and do not
-make trusted scenario shell code safe to execute.
+experiment from a small runner-owned protocol environment and passing
+`.env.example` to Compose without sourcing it in the host shell; the private
+`.env` and runtime/output roots cannot enter its bounded input closure. The
+conventional inherited `PATH` and other process-bootstrap values remain
+unattested. That closure is capped at 1,024 files and 64 MiB and is independently
+rebuilt from the retained capsule. These controls do not isolate filesystem,
+network, kernel, dynamic-library, or subprocess behavior and do not make
+trusted scenario shell code safe to execute.
 
 Operation evidence retains the exact `pgworkbench` executable bytes and, for a
 native run, identity snapshots of seven selected PostgreSQL executables. The

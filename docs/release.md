@@ -17,15 +17,40 @@ MATRIX_PROFILE_SIZES=medium MATRIX_REPEATS=3 \
   make matrix-run MATRIX_SPEC=massive-dml-strategy
 ```
 
-After committing those exact bytes, run the immutable-candidate gates from a
-clean checkout. `candidate-preflight` and therefore `release-check` deliberately
-reject a dirty worktree. They also require the exact stable Go patch release
-recorded in `.go-version`; the same pin is used by every GitHub build job:
+After committing those exact bytes, build one candidate binary and run the
+immutable-candidate gates from a clean checkout. `candidate-preflight` and
+therefore `release-check` deliberately reject a dirty worktree. They also
+require the exact stable Go patch release recorded in `.go-version`; the same
+pin is used by every GitHub build job. Supplying the candidate binary to both
+the manual matrix and `release-check` keeps generated manifests bound to the
+candidate SemVer and commit instead of `dev`/`unknown`:
 
 ```bash
-make candidate-preflight VERSION=0.2.0
-make release-check VERSION=0.2.0
+candidate_sha="$(git rev-parse HEAD)"
+candidate_bin="$PWD/.tmp/release-candidate/pgworkbench"
+go_bin="${PGWORKBENCH_GO:-go}"
+
+PGWORKBENCH_GO="$go_bin" \
+  ./scripts/build_candidate_binary.sh 0.2.0 "$candidate_sha" "$candidate_bin"
+
+make candidate-preflight \
+  VERSION=0.2.0 BUILD_COMMIT="$candidate_sha" GO="$go_bin"
+
+PGWORKBENCH_BIN="$candidate_bin" \
+MATRIX_PROFILE_SIZES=medium MATRIX_REPEATS=3 \
+  make matrix-run MATRIX_SPEC=massive-dml-strategy
+
+PGWORKBENCH_BIN="$candidate_bin" \
+  make release-check \
+    VERSION=0.2.0 BUILD_COMMIT="$candidate_sha" GO="$go_bin" \
+    PGWORKBENCH_CLI="$candidate_bin" \
+    PGWORKBENCH_NATIVE_BINDIR="${PGWORKBENCH_NATIVE_BINDIR:?set native PostgreSQL bindir}"
 ```
+
+If merging the pull request creates a different commit SHA, rebuild the binary
+and repeat this block from a clean checkout of that final `main` commit before
+tagging. Manual matrix evidence counts for the release only when its manifests
+name the same SemVer and commit that the tag will reference.
 
 Verify every matrix row and release archive:
 
@@ -54,17 +79,30 @@ runtime-supported until real execution cells are added and pass.
 
 ## Candidate to release
 
-1. Commit and push the candidate changes.
-2. Require the GitHub `check` and source-mode `compatibility` workflows to pass
-   on that exact commit.
-3. Add a dated `v0.2.0` changelog heading and tag the exact green commit.
-4. Push the tag and require the GitHub `release-snapshot` workflow to pass.
-5. Require both sequential clean-checkout aggregate attempts to pass before
+1. Finalize the dated `v0.2.0` changelog heading, then commit and push the
+   complete candidate bytes and open or update its pull request. A release-branch
+   push alone does not trigger the required workflows.
+2. Require the pull-request `check` and source-mode `compatibility` workflows to
+   pass, review the exact diff, and merge it into `main`. Pull-request jobs test
+   GitHub's synthetic merge commit; their green result alone is not authority to
+   tag the release-branch HEAD.
+3. Require both workflows to pass again from the `push` event on the resulting
+   exact `main` commit. Verify their `headSha` equals the intended candidate SHA.
+   Any later edit, including release-note text, creates a new candidate and
+   requires every exact-commit gate again.
+4. Before consuming the version tag, optionally dispatch `release-snapshot.yml`
+   on that exact `main` commit with `version=0.2.0`. The untagged path runs source
+   compatibility, both aggregate attempts, snapshot construction, and read-only
+   candidate verification without entering publication jobs; verify its
+   `headSha` before continuing.
+5. Tag that unchanged exact green `main` commit.
+6. Push the tag and require the GitHub `release-snapshot` workflow to pass.
+7. Require both sequential clean-checkout aggregate attempts to pass before
    `build-snapshot` creates its exact ten-file unsigned artifact. Require the
    separate read-only verifier to bind its ID, digest, producer run/commit, and
    fingerprint and to validate manifest/SBOM semantics from the downloaded
    Linux binary.
-6. Approve the tag-only `attest-and-create-draft` deployment in the protected
+8. Approve the tag-only `attest-and-create-draft` deployment in the protected
    `release-publication` environment. It must statically reverify the exact
    artifact without checking out or executing candidate code, verify tag
    creation/update/deletion and immutable-release controls, sign the bytes, and
@@ -72,21 +110,21 @@ runtime-supported until real execution cells are added and pass.
    contains every archive, the release
    manifest, both checksum files, four SPDX SBOMs, one provenance bundle, and
    four SBOM-attestation bundles.
-7. Require the clean draft-download verification and all declared
+9. Require the clean draft-download verification and all declared
    `runtime-gated` release-artifact compatibility cells to pass. The
    `compile-package-only` Darwin/amd64 and Linux/arm64 archives remain outside
    runtime-support claims.
-8. Require `draft-external-drivers` to execute the pinned BenchBase, HammerDB,
+10. Require `draft-external-drivers` to execute the pinned BenchBase, HammerDB,
    and sysbench adapters from the downloaded draft binary on the protected
    GitHub-hosted `ubuntu-24.04` release-smoke job. It locally verifies all three
    contract-v2 closed runtime-closure artifacts, uploads only sanitized bound
    metadata, and deletes all third-party/runtime/database bytes.
    Only the final `publish-release` job may change the verified draft to a
    public release.
-9. Require the clean `public-verify` job to observe an immutable public release,
+11. Require the clean `public-verify` job to observe an immutable public release,
    verify its release attestation, download/authenticate all 16 assets, and
    match their fingerprint to the verified draft.
-10. Require all seven compatibility cells to pass again from those published
+12. Require all seven compatibility cells to pass again from those published
     archives. A public release with a failed post-publication gate exists but is
     `NO-GO` for v1/adoption claims.
     For a transient post-publication failure, use
@@ -97,10 +135,10 @@ runtime-supported until real execution cells are added and pass.
     publication ancestors. Never target `publish-release`, any draft/source
     gate, or rerun the complete workflow after publication: those paths reach
     intentional existing-release/draft-state guards.
-11. Copy all outputs into the durable release-specific index described in
+13. Copy all outputs into the durable release-specific index described in
     [release-evidence.md](release-evidence.md); Actions retention is not the
     evidence archive.
-12. Run the remaining adoption gates from
+14. Run the remaining adoption gates from
    [v1-completion-contract.md](v1-completion-contract.md) before a v1 claim.
 
 Do not tag from an uncommitted worktree, and do not archive the standalone lab

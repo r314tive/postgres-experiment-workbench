@@ -562,6 +562,7 @@ func syntheticABExperiment(root string, _ speccatalog.Catalog, input string, opt
 		tps = 101.0
 	}
 	processed := int64(tps*30 + 0.5)
+	latency := 1000 * 2 / tps
 	summary := strings.Join([]string{
 		"pgbench (17.9, server 17.9)",
 		"transaction type: <builtin: TPC-B (sort of)>",
@@ -573,8 +574,7 @@ func syntheticABExperiment(root string, _ speccatalog.Catalog, input string, opt
 		"duration: 30 s",
 		fmt.Sprintf("number of transactions actually processed: %d", processed),
 		"number of failed transactions: 0 (0.000%)",
-		"latency average = 0.150 ms",
-		"latency stddev = 0.100 ms",
+		fmt.Sprintf("latency average = %.6f ms", latency),
 		"initial connection time = 2.000 ms",
 		fmt.Sprintf("tps = %.6f (without initial connection time)", tps),
 	}, "\n") + "\n"

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PGWORKBENCH_SUPERVISED=1
+INTERNAL_RUN_ACTION=__pgworkbench_internal_run_v1
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GO_CACHE="${GO_CACHE:-$REPO_DIR/.tmp/go-cache}"
 GO_MOD_CACHE="${GO_MOD_CACHE:-$REPO_DIR/.tmp/go-mod-cache}"
@@ -16,7 +19,7 @@ run_massive_dml_experiment() {
     EXPERIMENT_PROFILE_SIZE=small \
     EXPERIMENT_SNAPSHOT=0 \
     EXPERIMENT_METRICS_SAMPLES=1 \
-      "$REPO_DIR/scripts/run_experiment.sh" run "$spec" >/dev/null; then
+      "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" "$spec" >/dev/null; then
     echo "FAIL: massive-DML experiment failed: $spec ($run_dir)" >&2
     return 1
   fi

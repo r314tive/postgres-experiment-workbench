@@ -460,7 +460,7 @@ func writeCampaignLinkedRun(t *testing.T, root string, options experimentrun.Opt
 	}
 	tps := seriesBoost + trialBoost
 	processed := int64(tps*30 + 0.5)
-	latency := 1000 / tps
+	latency := 1000 * float64(clients) / tps
 	runDir := filepath.Join(root, "runs", options.RunID)
 	experimentPath := filepath.Join(root, "experiments", "benchmarks", "pgbench.env")
 	experimentDigest, err := evidence.DigestFile(experimentPath)
@@ -517,7 +517,6 @@ func writeCampaignLinkedRun(t *testing.T, root string, options experimentrun.Opt
 		"number of transactions actually processed: %d",
 		"number of failed transactions: 0 (0.000%%)",
 		"latency average = %.6f ms",
-		"latency stddev = 0.010 ms",
 		"initial connection time = 2.000 ms",
 		"tps = %.6f (without initial connection time)",
 	}, "\n")+"\n", transactionType, clients, processed, latency, tps)

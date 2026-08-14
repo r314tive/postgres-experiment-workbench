@@ -7,9 +7,7 @@ import (
 	"time"
 )
 
-func configureProcessGroup(*exec.Cmd) error { return nil }
-
-func terminateProcessGroup(cmd *exec.Cmd, wait <-chan error, _ time.Duration) error {
+func terminateProcess(cmd *exec.Cmd, wait <-chan error, _ time.Duration) error {
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}

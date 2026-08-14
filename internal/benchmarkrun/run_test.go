@@ -534,15 +534,12 @@ func TestNativeTrialUsesExactEnvironmentAndExplicitBoundEndpoint(t *testing.T) {
 }
 
 func TestValidateTransactionLogUsesBoundedPgbenchLatencyWindow(t *testing.T) {
-	summary := pgbenchresult.Result{
-		TransactionsProcessed: 11337,
-		LatencyMeanMS:         0.353,
-	}
+	summary := parseLatencySummary(t, 0.353, false)
 	transactionLog := pgbenchlog.Result{
 		SampleRate: 1,
-		Completed:  11337,
+		Completed:  summary.TransactionsProcessed,
 		LatencyUS: &pgbenchlog.Distribution{
-			N:    11337,
+			N:    summary.TransactionsProcessed,
 			Mean: 350.196,
 		},
 	}
@@ -550,21 +547,26 @@ func TestValidateTransactionLogUsesBoundedPgbenchLatencyWindow(t *testing.T) {
 		t.Fatalf("real short-run pgbench boundary skew must remain valid: %v", err)
 	}
 	transactionLog.LatencyUS.Mean = 515.052
-	summary.LatencyMeanMS = 0.523
+	summary = parseLatencySummary(t, 0.523, false)
 	if err := ValidateTransactionLog(summary, transactionLog); err != nil {
 		t.Fatalf("observed global-window/client-interval skew must remain valid: %v", err)
 	}
+	transactionLog.LatencyUS.Mean = 390.826
+	summary = parseLatencySummary(t, 0.404, false)
+	if err := ValidateTransactionLog(summary, transactionLog); err != nil {
+		t.Fatalf("second observed global-window/client-interval skew must remain valid: %v", err)
+	}
 	transactionLog.LatencyUS.Mean = 525
+	summary = parseLatencySummary(t, 0.523, false)
 	if err := ValidateTransactionLog(summary, transactionLog); err == nil {
 		t.Fatal("raw mean above the global-window summary must be rejected")
 	}
 	transactionLog.LatencyUS.Mean = 330
-	summary.LatencyMeanMS = 0.353
-	if err := ValidateTransactionLog(summary, transactionLog); err == nil {
-		t.Fatal("material raw-log/summary latency mismatch must be rejected")
+	summary = parseLatencySummary(t, 0.353, false)
+	if err := ValidateTransactionLog(summary, transactionLog); err != nil {
+		t.Fatalf("a lower raw mean has no universal closed-loop gap bound: %v", err)
 	}
-	stddev := 0.1
-	summary.LatencyStddevMS = &stddev
+	summary = parseLatencySummary(t, 0.353, true)
 	transactionLog.LatencyUS.Mean = 352.6
 	if err := ValidateTransactionLog(summary, transactionLog); err != nil {
 		t.Fatalf("detailed summary must accept printed-precision rounding: %v", err)
@@ -573,6 +575,32 @@ func TestValidateTransactionLogUsesBoundedPgbenchLatencyWindow(t *testing.T) {
 	if err := ValidateTransactionLog(summary, transactionLog); err == nil {
 		t.Fatal("detailed summary mismatch outside printed precision must be rejected")
 	}
+}
+
+func parseLatencySummary(t *testing.T, latencyMS float64, detailed bool) pgbenchresult.Result {
+	t.Helper()
+	lines := []string{
+		"pgbench (16.14, server 16.14)",
+		"transaction type: <builtin: select only>",
+		"scaling factor: 1",
+		"query mode: simple",
+		"number of clients: 1",
+		"number of threads: 1",
+		"maximum number of tries: 1",
+		"duration: 1 s",
+		"number of transactions actually processed: 10000",
+		"number of failed transactions: 0 (0.000%)",
+		fmt.Sprintf("latency average = %.3f ms", latencyMS),
+	}
+	if detailed {
+		lines = append(lines, "latency stddev = 0.100 ms")
+	}
+	lines = append(lines, fmt.Sprintf("tps = %.6f (without initial connection time)", 1000/latencyMS))
+	parsed, err := pgbenchresult.Parse(strings.NewReader(strings.Join(lines, "\n") + "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }
 
 func TestRunTwoTrialSmokeParsesVerifiesEnvironmentAndStats(t *testing.T) {
@@ -965,6 +993,12 @@ func TestValidatePgbenchResultBindsConnectionChurnEvidence(t *testing.T) {
 	if parsed.TPSIncludingConnections == nil || parsed.AverageConnectionTimeMS == nil {
 		t.Fatalf("reconnect metrics were not retained: %#v", parsed)
 	}
+	stddev := 0.1
+	parsed.LatencyStddevMS = &stddev
+	if err := ValidatePgbenchResult(plan, parsed); err == nil || !strings.Contains(err.Error(), "unexpected detailed latency evidence") {
+		t.Fatalf("ordinary protocol accepted an injected detailed-summary marker: %v", err)
+	}
+	parsed.LatencyStddevMS = nil
 	plan.ConnectPerTransaction = false
 	if err := ValidatePgbenchResult(plan, parsed); err == nil || !strings.Contains(err.Error(), "reported reconnect evidence") {
 		t.Fatalf("reconnect evidence was accepted without a declared churn protocol: %v", err)
@@ -980,6 +1014,7 @@ func TestValidatePgbenchResultEnforcesLatencyLimitExceededBudget(t *testing.T) {
 	tps := 1000.0
 	scheduleAverage := 1.0
 	scheduleMax := 2.0
+	latencyStddev := 0.1
 	budget := 1.0
 	parsed := pgbenchresult.Result{
 		TransactionType:         "<builtin: TPC-B (sort of)>",
@@ -994,6 +1029,7 @@ func TestValidatePgbenchResultEnforcesLatencyLimitExceededBudget(t *testing.T) {
 		LatencyLimitMS:          &limit,
 		TransactionsAboveLimit:  &above,
 		LatencyLimitTotal:       &total,
+		LatencyStddevMS:         &latencyStddev,
 		InitialConnectionTimeMS: &initial,
 		TPSExcludingConnections: &tps,
 		ScheduleLagAverageMS:    &scheduleAverage,
@@ -1017,6 +1053,10 @@ func TestValidatePgbenchResultEnforcesLatencyLimitExceededBudget(t *testing.T) {
 	above = 1
 	if err := ValidatePgbenchResult(plan, parsed); err != nil {
 		t.Fatalf("latency SLO boundary should pass: %v", err)
+	}
+	parsed.LatencyStddevMS = nil
+	if err := ValidatePgbenchResult(plan, parsed); err == nil || !strings.Contains(err.Error(), "omitted detailed latency evidence") {
+		t.Fatalf("rate/latency-limit protocol accepted an ordinary summary: %v", err)
 	}
 }
 
@@ -1164,7 +1204,12 @@ func writeFakeExperimentRun(t *testing.T, root, runID, runtimeName string, env [
 	if err := runstate.WriteManifest(runDir, manifest); err != nil {
 		t.Fatal(err)
 	}
-	summary := fmt.Sprintf(strings.Join([]string{
+	latencyMS := 1000 * float64(clients) / tps
+	detailed := values["PGBENCH_RATE"] != "" || values["PGBENCH_LATENCY_LIMIT"] != ""
+	if detailed {
+		latencyMS = 0.150
+	}
+	summaryLines := []string{
 		"pgbench (17.9, server 17.9)",
 		"transaction type: <builtin: TPC-B (sort of)>",
 		"scaling factor: 1",
@@ -1175,11 +1220,16 @@ func writeFakeExperimentRun(t *testing.T, root, runID, runtimeName string, env [
 		"duration: 30 s",
 		"number of transactions actually processed: %d",
 		"number of failed transactions: 0 (0.000%%)",
-		"latency average = 0.150 ms",
-		"latency stddev = 0.100 ms",
+		"latency average = %.3f ms",
+	}
+	if detailed {
+		summaryLines = append(summaryLines, "latency stddev = 0.100 ms")
+	}
+	summaryLines = append(summaryLines,
 		"initial connection time = 2.000 ms",
 		"tps = %.6f (without initial connection time)",
-	}, "\n")+"\n", clients, processed, tps)
+	)
+	summary := fmt.Sprintf(strings.Join(summaryLines, "\n")+"\n", clients, processed, latencyMS, tps)
 	if err := os.MkdirAll(filepath.Join(runDir, "driver"), 0o755); err != nil {
 		t.Fatal(err)
 	}

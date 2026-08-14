@@ -238,6 +238,13 @@ func (c Catalog) Validate(kind string, ids []string) []error {
 	return errs
 }
 
+// ValidateSpec validates an already-resolved spec without reopening its path.
+// This is used by execution paths that must keep parsing, validation, hashing,
+// and shell execution bound to one immutable byte snapshot.
+func (c Catalog) ValidateSpec(spec Spec) []error {
+	return c.validateSpec(spec)
+}
+
 func (c Catalog) validateSpec(spec Spec) []error {
 	switch spec.Kind {
 	case "workload":

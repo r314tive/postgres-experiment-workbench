@@ -10,9 +10,84 @@ import (
 	"time"
 
 	"github.com/r314tive/postgres-experiment-workbench/internal/evidence"
+	"github.com/r314tive/postgres-experiment-workbench/internal/experimentrun"
 	"github.com/r314tive/postgres-experiment-workbench/internal/pathguard"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 )
+
+func TestCLIEnvironmentProjectsOnlyUtilityRuntimeInputs(t *testing.T) {
+	values := map[string]string{
+		"ENV_FILE":                            ".env.native",
+		"COMPOSE":                             "docker compose --ansi never",
+		"PGWORKBENCH_RUNTIME":                 "native",
+		"PGWORKBENCH_NATIVE_BINDIR":           "/opt/postgres/bin",
+		"PGWORKBENCH_NATIVE_WAIT_SECONDS":     "90",
+		"PG_INSTALL_DIR":                      "/opt/postgres",
+		"POSTGRES_HOST":                       "127.0.0.1",
+		"POSTGRES_PORT":                       "59433",
+		"POSTGRES_DB":                         "pg_experiment_workbench",
+		"POSTGRES_USER":                       "postgres",
+		"POSTGRES_PASSWORD":                   "secret",
+		"PROFILE_SIZE":                        "medium",
+		"PROFILE_SECONDS":                     "45",
+		"METRICS_INTERVAL":                    "2",
+		"METRICS_DURATION":                    "10",
+		"METRICS_SAMPLES":                     "3",
+		"UTILITY_TEST_SNAPSHOT":               "0",
+		"PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST": "sha256:" + strings.Repeat("a", 64),
+		"PGWORKBENCH_BENCHMARK_CAPSULE_ROOT":  "/tmp/hostile-capsule",
+		"EXPERIMENT_BEFORE_SHELL":             "hostile-command",
+		"WORKLOAD_CMD":                        "hostile-command",
+	}
+	projected := CLILookupEnvironment(func(key string) (string, bool) {
+		value, present := values[key]
+		return value, present
+	})
+	got := envMap(t, projected)
+
+	for key, value := range values {
+		switch key {
+		case "ENV_FILE", "PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST", "PGWORKBENCH_BENCHMARK_CAPSULE_ROOT", "EXPERIMENT_BEFORE_SHELL", "WORKLOAD_CMD":
+			if _, exists := got[key]; exists {
+				t.Fatalf("unowned capability %s leaked into utility CLI environment: %#v", key, projected)
+			}
+		default:
+			if got[key] != value {
+				t.Fatalf("utility runtime input %s=%q, want %q (all=%#v)", key, got[key], value, projected)
+			}
+		}
+	}
+	if len(got) != len(values)-5 {
+		t.Fatalf("utility CLI environment has unexpected entries: %#v", projected)
+	}
+}
+
+func TestCLILookupEnvironmentPreservesExplicitEmptyOverrides(t *testing.T) {
+	present := map[string]string{
+		"ENV_FILE":                  "",
+		"PGWORKBENCH_NATIVE_BINDIR": "",
+		"POSTGRES_PORT":             "",
+	}
+	projected := CLILookupEnvironment(func(key string) (string, bool) {
+		value, ok := present[key]
+		return value, ok
+	})
+	got := envMap(t, projected)
+	for key := range present {
+		if key == "ENV_FILE" {
+			if _, exists := got[key]; exists {
+				t.Fatalf("host-selected ENV_FILE was projected: %#v", projected)
+			}
+			continue
+		}
+		if value, exists := got[key]; !exists || value != "" {
+			t.Fatalf("explicit empty %s was not preserved: %#v", key, projected)
+		}
+	}
+	if len(got) != len(present)-1 {
+		t.Fatalf("unset variables were projected: %#v", projected)
+	}
+}
 
 func TestRunUtilityTestGeneratesExperimentSpec(t *testing.T) {
 	root := t.TempDir()
@@ -77,6 +152,7 @@ func TestRunUtilityTestGeneratesExperimentSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantEnv := map[string]string{
+		"ENV_FILE":                 ".env.example",
 		"KEEP_ME":                  "present",
 		"PGWORKBENCH_RUNTIME":      "docker",
 		"UTILITY_TEST_RUN_ID":      "utility-pg-dump_smoke-20260605_101112",
@@ -125,6 +201,173 @@ func TestRunUtilityTestGeneratesExperimentSpec(t *testing.T) {
 	}
 }
 
+func TestRunUtilityTestUsesPreparedExperimentRunnerByDefault(t *testing.T) {
+	root := t.TempDir()
+	writeSpec(t, root, "workloads/utility/smoke.env", "WORKLOAD_NAME=utility smoke\nWORKLOAD_KIND=shell\nWORKLOAD_CMD='echo utility'\n")
+	writeSpec(t, root, "utility-tests/smoke.env", strings.Join([]string{
+		"UTILITY_TEST_NAME=smoke",
+		"UTILITY_TEST_WORKLOAD_SPEC=utility/smoke",
+		`UTILITY_TEST_PROFILE_SIZE="${PROFILE_SIZE:-small}"`,
+		`UTILITY_TEST_METRICS_SAMPLES="${METRICS_SAMPLES:-1}"`,
+		"",
+	}, "\n"))
+	runtimeValues := map[string]string{
+		"PGWORKBENCH_NATIVE_BINDIR": "/opt/postgres/bin",
+		"POSTGRES_HOST":             "127.0.0.1",
+		"POSTGRES_PORT":             "59433",
+		"PROFILE_SIZE":              "medium",
+		"METRICS_SAMPLES":           "3",
+		"UTILITY_TEST_SNAPSHOT":     "0",
+	}
+
+	called := false
+	result, err := Run(root, speccatalog.New(root), "smoke", Options{
+		Runtime:       "native",
+		RunID:         "prepared-run",
+		EngineVersion: "0.2.0",
+		EngineCommit:  "0123456789abcdef0123456789abcdef01234567",
+		BinaryPath:    "/opt/pgworkbench",
+		Env: CLILookupEnvironment(func(key string) (string, bool) {
+			value, present := runtimeValues[key]
+			return value, present
+		}),
+		Getenv: func(string) string { return "" },
+		RunExperiment: func(gotRoot string, spec speccatalog.Spec, options experimentrun.Options) (experimentrun.Result, error) {
+			called = true
+			if gotRoot != root || spec.Kind != "experiment" || spec.ID != "utility/smoke" {
+				t.Fatalf("unexpected prepared spec: root=%q spec=%#v", gotRoot, spec)
+			}
+			canonicalRoot, canonicalErr := filepath.EvalSymlinks(root)
+			if canonicalErr != nil {
+				t.Fatal(canonicalErr)
+			}
+			if filepath.Dir(spec.Path) != filepath.Join(canonicalRoot, ".tmp", "utility-tests") {
+				t.Fatalf("prepared spec escaped generated directory: %s", spec.Path)
+			}
+			if got := spec.Values["EXPERIMENT_PROFILE_SIZE"]; got != "${PROFILE_SIZE:-small}" {
+				t.Fatalf("prepared profile override expression changed: %q", got)
+			}
+			if got := spec.Values["EXPERIMENT_METRICS_SAMPLES"]; got != "${METRICS_SAMPLES:-1}" {
+				t.Fatalf("prepared metrics override expression changed: %q", got)
+			}
+			if options.Runtime != "native" || options.RunID != "prepared-run" || !options.ExactEnvironment || options.EngineVersion != "0.2.0" || options.EngineCommit == "" || options.BinaryPath != "/opt/pgworkbench" {
+				t.Fatalf("prepared runner options lost identity: %#v", options)
+			}
+			values := envMap(t, options.Env)
+			for key, want := range runtimeValues {
+				if values[key] != want {
+					t.Fatalf("prepared runtime environment %s=%q, want %q", key, values[key], want)
+				}
+			}
+			for key, want := range map[string]string{
+				"ENV_FILE":                 ".env.example",
+				ExperimentSpecScopeEnv:     UtilityDerivedSpecScope,
+				DerivedExperimentIDEnv:     "utility/smoke",
+				SourceSpecKindEnv:          UtilityTestSourceKind,
+				SourceSpecIDEnv:            "smoke",
+				SourceSpecRefEnv:           "utility-tests/smoke.env",
+				"PGWORKBENCH_PACK_ID":      "",
+				"PGWORKBENCH_PACK_VERSION": "",
+				"PGWORKBENCH_PACK_DIGEST":  "",
+			} {
+				if values[key] != want {
+					t.Fatalf("prepared environment %s=%q, want %q", key, values[key], want)
+				}
+			}
+			if _, exists := values["PGWORKBENCH_SUPERVISED"]; exists {
+				t.Fatal("utility translator, rather than experiment runner, claimed supervision")
+			}
+			return experimentrun.Result{
+				SchemaVersion: experimentrun.SchemaVersion,
+				Command:       []string{"/opt/pgworkbench-internal", "__prepared", spec.Path},
+				ExitCode:      0,
+				Status:        "passed",
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called || !result.Passed() {
+		t.Fatalf("prepared runner was not used successfully: called=%t result=%#v", called, result)
+	}
+	if got := strings.Join(result.Command, "\x00"); got != strings.Join([]string{"/opt/pgworkbench-internal", "__prepared", result.ExperimentSpec}, "\x00") {
+		t.Fatalf("utility result did not report the actually executed prepared command: %#v", result.Command)
+	}
+}
+
+func TestRunUtilityTestBindsGeneratedAdapterAndSourceDigestToSelectedBytes(t *testing.T) {
+	root := t.TempDir()
+	writeSpec(t, root, "workloads/utility/smoke.env", "WORKLOAD_NAME=utility smoke\nWORKLOAD_KIND=shell\nWORKLOAD_CMD='echo utility'\n")
+	const selected = "UTILITY_TEST_NAME=selected-A\nUTILITY_TEST_WORKLOAD_SPEC=utility/smoke\n"
+	const replacement = "UTILITY_TEST_NAME=replacement-B\nUTILITY_TEST_WORKLOAD_SPEC=utility/smoke\n"
+	sourcePath := filepath.Join(root, "utility-tests", "smoke.env")
+	writeSpec(t, root, "utility-tests/smoke.env", selected)
+
+	result, err := Run(root, speccatalog.New(root), "smoke", Options{
+		RunID:  "source-snapshot-binding",
+		Getenv: func(string) string { return "" },
+		RunCommand: func(_ string, command []string, env []string, _, _ io.Writer) CommandResult {
+			if err := os.WriteFile(sourcePath, []byte(replacement), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			values := envMap(t, env)
+			if values[SourceSpecDigestEnv] != evidence.DigestBytes([]byte(selected)) {
+				t.Fatalf("source digest drifted from selected bytes: %#v", values)
+			}
+			generated, err := os.ReadFile(command[2])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(generated), "EXPERIMENT_NAME='utility: selected-A'") || strings.Contains(string(generated), "replacement-B") {
+				t.Fatalf("generated adapter drifted to replacement bytes:\n%s", generated)
+			}
+			return CommandResult{ExitCode: 0}
+		},
+	})
+	if err != nil || !result.Passed() || result.UtilityTestName != "selected-A" {
+		t.Fatalf("utility source snapshot was not retained: result=%#v err=%v", result, err)
+	}
+}
+
+func TestRunUtilityTestRequiresExplicitNativeToolDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeSpec(t, root, "workloads/utility/smoke.env", "WORKLOAD_NAME=utility smoke\nWORKLOAD_KIND=shell\nWORKLOAD_CMD='echo utility'\n")
+	writeSpec(t, root, "utility-tests/smoke.env", "UTILITY_TEST_NAME=smoke\nUTILITY_TEST_WORKLOAD_SPEC=utility/smoke\n")
+
+	_, err := Run(root, speccatalog.New(root), "smoke", Options{
+		Runtime: "native",
+		Getenv:  func(string) string { return "" },
+		RunCommand: func(string, []string, []string, io.Writer, io.Writer) CommandResult {
+			t.Fatal("native utility started without an explicit tool directory")
+			return CommandResult{}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires PGWORKBENCH_NATIVE_BINDIR or PG_INSTALL_DIR") {
+		t.Fatalf("native PATH fallback was accepted: %v", err)
+	}
+}
+
+func TestRunUtilityTestKeepsUnknownExitCodeOnPreparedPreflightFailure(t *testing.T) {
+	root := t.TempDir()
+	writeSpec(t, root, "workloads/utility/smoke.env", "WORKLOAD_NAME=utility smoke\nWORKLOAD_KIND=shell\nWORKLOAD_CMD='echo utility'\n")
+	writeSpec(t, root, "utility-tests/smoke.env", "UTILITY_TEST_NAME=smoke\nUTILITY_TEST_WORKLOAD_SPEC=utility/smoke\n")
+
+	result, err := Run(root, speccatalog.New(root), "smoke", Options{
+		RunID:  "prepared-preflight-failure",
+		Getenv: func(string) string { return "" },
+		RunExperiment: func(string, speccatalog.Spec, experimentrun.Options) (experimentrun.Result, error) {
+			return experimentrun.Result{}, errors.New("prepared runner rejected input before execution")
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "rejected input before execution") {
+		t.Fatalf("prepared preflight failure was lost: result=%#v err=%v", result, err)
+	}
+	if result.Status != "failed" || result.ExitCode != -1 {
+		t.Fatalf("preflight failure claimed a successful process exit: %#v", result)
+	}
+}
+
 func TestRunUtilityTestCLIOptionsOverrideEnvironment(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, "workloads/utility/smoke.env", "WORKLOAD_NAME=utility smoke\nWORKLOAD_KIND=shell\nWORKLOAD_CMD='echo utility'\n")
@@ -136,6 +379,7 @@ func TestRunUtilityTestCLIOptionsOverrideEnvironment(t *testing.T) {
 		RunID:   "cli-run",
 		Env: []string{
 			"PGWORKBENCH_RUNTIME=docker",
+			"PGWORKBENCH_NATIVE_BINDIR=/opt/postgres/bin",
 			"UTILITY_TEST_RUN_ID=env-run",
 		},
 		Getenv: func(key string) string {
@@ -178,7 +422,7 @@ func TestRunUtilityTestUsesOptionsEnvironmentBeforeAmbient(t *testing.T) {
 	writeSpec(t, root, "utility-tests/smoke.env", "UTILITY_TEST_NAME=smoke\nUTILITY_TEST_WORKLOAD_SPEC=utility/smoke\n")
 
 	result, err := Run(root, speccatalog.New(root), "smoke", Options{
-		Env: []string{"PGWORKBENCH_RUNTIME=native", "UTILITY_TEST_RUN_ID=env-run"},
+		Env: []string{"PGWORKBENCH_RUNTIME=native", "PGWORKBENCH_NATIVE_BINDIR=/opt/postgres/bin", "UTILITY_TEST_RUN_ID=env-run"},
 		Getenv: func(key string) string {
 			if key == "PGWORKBENCH_RUNTIME" {
 				return "docker"
@@ -207,7 +451,7 @@ func TestRunUtilityTestRejectsRuntimeAndRunIDBeforeGeneratingSpec(t *testing.T) 
 
 	for _, options := range []Options{
 		{Runtime: "remote"},
-		{Runtime: "native", RunID: "../escape"},
+		{Runtime: "native", RunID: "../escape", Env: []string{"PGWORKBENCH_NATIVE_BINDIR=/opt/postgres/bin"}},
 		{Runtime: "docker", RunID: strings.Repeat("a", 201)},
 	} {
 		options.Getenv = func(string) string { return "" }

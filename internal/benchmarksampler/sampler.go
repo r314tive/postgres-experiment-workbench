@@ -8,9 +8,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,11 +20,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
 	MetricsRelativePath = "metrics.csv"
 	TimingRelativePath  = "artifacts/benchmark/controls/collector-overhead.tsv"
+	ReadyRelativePath   = ".metrics-ready"
 
 	maxDuration       = 24 * time.Hour
 	maxInterval       = time.Hour
@@ -38,7 +42,13 @@ const metricsHeader = "sampled_at,database_name,active_sessions,waiting_sessions
 // monotonic duration used for duty-cycle derivation.
 const timingHeader = "sequence\tscheduled_at\tstarted_at\tfinished_at\tduration_ns\tstatus"
 
-var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$`)
+var (
+	runIDPattern         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$`)
+	decimalInteger       = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+	canonicalPostgresLSN = regexp.MustCompile(`^[0-9A-F]+/[0-9A-F]+$`)
+)
+
+var metricsFields = strings.Split(metricsHeader, ",")
 
 type Options struct {
 	Root          string
@@ -56,6 +66,7 @@ type Options struct {
 type Result struct {
 	MetricsPath string
 	TimingPath  string
+	ReadyPath   string
 	Samples     int
 }
 
@@ -67,9 +78,12 @@ func Run(options Options) (result Result, err error) {
 	if err != nil {
 		return Result{}, err
 	}
-	metricsPath, timingPath, err := validateOwnedPaths(options.Root, options.RunDir, options.ExpectedRunID)
+	metricsPath, timingPath, readyPath, err := validateOwnedPaths(options.Root, options.RunDir, options.ExpectedRunID)
 	if err != nil {
 		return Result{}, err
+	}
+	if err := requireEvidencePathAbsent(readyPath); err != nil {
+		return Result{}, fmt.Errorf("prepare sampler readiness token: %w", err)
 	}
 	metrics, err := createEvidenceFile(metricsPath)
 	if err != nil {
@@ -93,7 +107,7 @@ func Run(options Options) (result Result, err error) {
 		}
 	}
 
-	result = Result{MetricsPath: metricsPath}
+	result = Result{MetricsPath: metricsPath, ReadyPath: readyPath}
 	if timing != nil {
 		result.TimingPath = timingPath
 	}
@@ -112,7 +126,7 @@ func Run(options Options) (result Result, err error) {
 					<-timer.C
 				}
 				scheduled = nextWallTimestamp(options.Now().UTC(), lastScheduled)
-				if err := recordSample(context.Background(), options, metrics, nil, sequence, scheduled); err != nil {
+				if err := recordSample(context.Background(), options, metrics, nil, "", sequence, scheduled); err != nil {
 					return result, fmt.Errorf("record final sampler boundary: %w", err)
 				}
 				lastScheduled = scheduled
@@ -124,7 +138,11 @@ func Run(options Options) (result Result, err error) {
 		// A termination request must not interrupt the SQL process halfway and
 		// leave an orphan. Let the currently bounded sample finish, then observe
 		// cancellation below and record the final boundary sample.
-		if err := recordSample(context.WithoutCancel(options.Context), options, metrics, timing, sequence, scheduled); err != nil {
+		markerPath := ""
+		if sequence == 1 {
+			markerPath = readyPath
+		}
+		if err := recordSample(context.WithoutCancel(options.Context), options, metrics, timing, markerPath, sequence, scheduled); err != nil {
 			return result, err
 		}
 		lastScheduled = scheduled
@@ -138,7 +156,7 @@ func Run(options Options) (result Result, err error) {
 		select {
 		case <-options.Context.Done():
 			scheduled = nextWallTimestamp(options.Now().UTC(), lastScheduled)
-			if err := recordSample(context.Background(), options, metrics, nil, sequence+1, scheduled); err != nil {
+			if err := recordSample(context.Background(), options, metrics, nil, "", sequence+1, scheduled); err != nil {
 				return result, fmt.Errorf("record final sampler boundary: %w", err)
 			}
 			result.Samples++
@@ -148,7 +166,7 @@ func Run(options Options) (result Result, err error) {
 	}
 }
 
-func recordSample(parent context.Context, options Options, metrics, timing *os.File, sequence int, scheduled time.Time) error {
+func recordSample(parent context.Context, options Options, metrics, timing *os.File, readyPath string, sequence int, scheduled time.Time) error {
 	ctx, cancel := context.WithTimeout(parent, defaultSampleWait)
 	defer cancel()
 	startedWall := options.Now().UTC()
@@ -178,6 +196,11 @@ func recordSample(parent context.Context, options Options, metrics, timing *os.F
 	}
 	if _, err := metrics.Write([]byte{'\n'}); err != nil {
 		return fmt.Errorf("write sampler metrics newline: %w", err)
+	}
+	if readyPath != "" {
+		if err := createReadyMarker(readyPath); err != nil {
+			return fmt.Errorf("publish sampler readiness token: %w", err)
+		}
 	}
 	return nil
 }
@@ -217,27 +240,27 @@ func withDefaults(options Options) (Options, error) {
 	return options, nil
 }
 
-func validateOwnedPaths(root, runDir, expectedRunID string) (string, string, error) {
+func validateOwnedPaths(root, runDir, expectedRunID string) (string, string, string, error) {
 	if root == "" || runDir == "" || !filepath.IsAbs(root) || !filepath.IsAbs(runDir) {
-		return "", "", fmt.Errorf("sampler root and linked run directory must be absolute")
+		return "", "", "", fmt.Errorf("sampler root and linked run directory must be absolute")
 	}
 	if !runIDPattern.MatchString(expectedRunID) {
-		return "", "", fmt.Errorf("sampler expected linked run id is missing or invalid")
+		return "", "", "", fmt.Errorf("sampler expected linked run id is missing or invalid")
 	}
 	canonicalRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
 	if err != nil {
-		return "", "", fmt.Errorf("resolve scenario-pack root: %w", err)
+		return "", "", "", fmt.Errorf("resolve scenario-pack root: %w", err)
 	}
 	if canonicalRoot != filepath.Clean(root) {
-		return "", "", fmt.Errorf("sampler scenario-pack root must be canonical")
+		return "", "", "", fmt.Errorf("sampler scenario-pack root must be canonical")
 	}
 	runsRoot := filepath.Join(canonicalRoot, "runs")
 	relative, err := filepath.Rel(runsRoot, filepath.Clean(runDir))
 	if err != nil || relative == "." || filepath.Dir(relative) != "." || !runIDPattern.MatchString(relative) {
-		return "", "", fmt.Errorf("sampler linked run must be one canonical child of %s", runsRoot)
+		return "", "", "", fmt.Errorf("sampler linked run must be one canonical child of %s", runsRoot)
 	}
 	if relative != expectedRunID {
-		return "", "", fmt.Errorf("sampler linked run %q does not match bound run id %q", relative, expectedRunID)
+		return "", "", "", fmt.Errorf("sampler linked run %q does not match bound run id %q", relative, expectedRunID)
 	}
 	wantRunDir := filepath.Join(runsRoot, relative)
 	for _, directory := range []string{
@@ -250,34 +273,125 @@ func validateOwnedPaths(root, runDir, expectedRunID string) (string, string, err
 	} {
 		info, statErr := os.Lstat(directory)
 		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return "", "", fmt.Errorf("sampler requires a pre-created non-symlink directory %s", directory)
+			return "", "", "", fmt.Errorf("sampler requires a pre-created non-symlink directory %s", directory)
 		}
 	}
 	for _, source := range []string{filepath.Join(canonicalRoot, "scripts", "psql.sh"), filepath.Join(canonicalRoot, "sql", "metrics_sample.sql")} {
 		info, statErr := os.Lstat(source)
 		if statErr != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-			return "", "", fmt.Errorf("sampler owned source must be a regular non-symlink file: %s", source)
+			return "", "", "", fmt.Errorf("sampler owned source must be a regular non-symlink file: %s", source)
 		}
 	}
-	return filepath.Join(wantRunDir, MetricsRelativePath), filepath.Join(wantRunDir, filepath.FromSlash(TimingRelativePath)), nil
+	return filepath.Join(wantRunDir, MetricsRelativePath), filepath.Join(wantRunDir, filepath.FromSlash(TimingRelativePath)), filepath.Join(wantRunDir, ReadyRelativePath), nil
 }
 
 func createEvidenceFile(path string) (*os.File, error) {
-	if info, err := os.Lstat(path); err == nil {
-		return nil, fmt.Errorf("refusing to overwrite sampler evidence %s (%s)", path, info.Mode())
-	} else if !os.IsNotExist(err) {
+	if err := requireEvidencePathAbsent(path); err != nil {
 		return nil, err
 	}
 	return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+}
+
+func requireEvidencePathAbsent(path string) error {
+	if info, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("refusing to overwrite sampler evidence %s (%s)", path, info.Mode())
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func createReadyMarker(path string) error {
+	if err := os.Mkdir(path, 0o700); err != nil {
+		return err
+	}
+	created, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("inspect newly created readiness token: %w", err)
+	}
+	removeCreated := true
+	defer func() {
+		if !removeCreated {
+			return
+		}
+		// Remove only the exact directory created above. A raced replacement is
+		// not ours and must never be followed or deleted during failure cleanup.
+		current, statErr := os.Lstat(path)
+		if statErr == nil && current.IsDir() && current.Mode()&os.ModeSymlink == 0 && os.SameFile(created, current) {
+			_ = os.Remove(path)
+		}
+	}()
+	if !created.IsDir() || created.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("new readiness token is not an owned directory: %s", path)
+	}
+
+	// Mkdir's requested permissions are filtered through the process umask. Open
+	// the new directory and prove the handle still names the exact non-symlink
+	// inode at path before mutating through that handle. A replacement symlink can
+	// therefore never redirect chmod to an unrelated target.
+	marker, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open readiness token without changing mode: %w", err)
+	}
+	markerClosed := false
+	defer func() {
+		if !markerClosed {
+			_ = marker.Close()
+		}
+	}()
+	if err := establishReadyMarkerMode(path, created, marker); err != nil {
+		return err
+	}
+	closeErr := marker.Close()
+	markerClosed = true
+	if closeErr != nil {
+		return fmt.Errorf("close readiness token handle: %w", closeErr)
+	}
+	removeCreated = false
+	return nil
+}
+
+func establishReadyMarkerMode(path string, created os.FileInfo, marker *os.File) error {
+	opened, err := marker.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect opened readiness token: %w", err)
+	}
+	current, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("verify opened readiness token path: %w", err)
+	}
+	if !opened.IsDir() || !current.IsDir() || current.Mode()&os.ModeSymlink != 0 ||
+		!os.SameFile(created, opened) || !os.SameFile(opened, current) {
+		return fmt.Errorf("readiness token changed before mode publication: %s", path)
+	}
+	if err := marker.Chmod(0o700); err != nil {
+		return fmt.Errorf("set readiness token mode: %w", err)
+	}
+	verified, err := marker.Stat()
+	if err != nil {
+		return fmt.Errorf("verify readiness token handle mode: %w", err)
+	}
+	if !verified.IsDir() || !os.SameFile(opened, verified) || verified.Mode().Perm() != 0o700 {
+		return fmt.Errorf("readiness token handle mode is %04o, want directory 0700", verified.Mode().Perm())
+	}
+	final, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("verify published readiness token path: %w", err)
+	}
+	if !final.IsDir() || final.Mode()&os.ModeSymlink != 0 ||
+		!os.SameFile(created, final) || !os.SameFile(verified, final) {
+		return fmt.Errorf("readiness token changed while publishing: %s", path)
+	}
+	if final.Mode().Perm() != 0o700 {
+		return fmt.Errorf("readiness token path mode is %04o, want 0700", final.Mode().Perm())
+	}
+	return nil
 }
 
 func runOwnedSample(ctx context.Context, root string) ([]byte, error) {
 	command := filepath.Join(root, "scripts", "psql.sh")
 	query := filepath.Join(root, "sql", "metrics_sample.sql")
 	cmd := exec.Command(command, "-q", "-f", query)
-	if err := configureProcessGroup(cmd); err != nil {
-		return nil, err
-	}
 	cmd.Dir = root
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -294,7 +408,7 @@ func runOwnedSample(ctx context.Context, root string) ([]byte, error) {
 		}
 		return stdout.Bytes(), nil
 	case <-ctx.Done():
-		if err := terminateProcessGroup(cmd, wait, 2*time.Second); err != nil {
+		if err := terminateProcess(cmd, wait, 2*time.Second); err != nil {
 			return nil, errors.Join(ctx.Err(), err)
 		}
 		return nil, ctx.Err()
@@ -310,10 +424,61 @@ func validateSampleRow(content []byte) ([]byte, error) {
 	if len(trimmed) == 0 || bytes.ContainsAny(trimmed, "\r\n") {
 		return nil, fmt.Errorf("sample command must return exactly one CSV row")
 	}
-	if bytes.Count(trimmed, []byte{','}) != strings.Count(metricsHeader, ",") {
-		return nil, fmt.Errorf("sample CSV row has an unexpected field count")
+	reader := csv.NewReader(bytes.NewReader(trimmed))
+	reader.FieldsPerRecord = len(metricsFields)
+	record, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("parse sample CSV row: %w", err)
+	}
+	if _, err := reader.Read(); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("sample command must return exactly one CSV row")
+		}
+		return nil, fmt.Errorf("parse sample CSV row: %w", err)
+	}
+	if len(record) != len(metricsFields) {
+		return nil, fmt.Errorf("sample CSV row has %d fields, want %d", len(record), len(metricsFields))
+	}
+	if _, err := parseSampleUTC(record[0]); err != nil {
+		return nil, fmt.Errorf("sampled_at: %w", err)
+	}
+	if !validSampleDatabaseName(record[1]) {
+		return nil, fmt.Errorf("database_name is empty, oversized, invalid UTF-8, or contains control characters")
+	}
+	for index := 2; index < 8; index++ {
+		if !decimalInteger.MatchString(record[index]) {
+			return nil, fmt.Errorf("%s must be a canonical non-negative integer", metricsFields[index])
+		}
+		if _, err := strconv.ParseUint(record[index], 10, 64); err != nil {
+			return nil, fmt.Errorf("%s is outside uint64 range", metricsFields[index])
+		}
+	}
+	for index := 8; index < 24; index++ {
+		if !decimalInteger.MatchString(record[index]) {
+			return nil, fmt.Errorf("%s must be a canonical non-negative integer", metricsFields[index])
+		}
+		if _, ok := new(big.Int).SetString(record[index], 10); !ok {
+			return nil, fmt.Errorf("%s cannot be parsed as an integer", metricsFields[index])
+		}
+	}
+	if !canonicalPostgresLSN.MatchString(record[24]) {
+		return nil, fmt.Errorf("current_wal_lsn is not canonical PostgreSQL LSN text")
 	}
 	return append([]byte(nil), trimmed...), nil
+}
+
+func parseSampleUTC(value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil || !strings.HasSuffix(value, "Z") {
+		return time.Time{}, fmt.Errorf("must be UTC RFC3339Nano text")
+	}
+	return parsed.UTC(), nil
+}
+
+func validSampleDatabaseName(value string) bool {
+	return value != "" && len(value) <= 63 && utf8.ValidString(value) && strings.IndexFunc(value, func(character rune) bool {
+		return character < 0x20 || character == 0x7f
+	}) < 0
 }
 
 func canonicalTime(value time.Time) string { return value.UTC().Format(time.RFC3339Nano) }

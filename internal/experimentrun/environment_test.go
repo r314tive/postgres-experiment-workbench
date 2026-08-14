@@ -11,7 +11,7 @@ import (
 
 func TestMergeEnvironmentMakesRunnerOwnedNativeBindirUnambiguous(t *testing.T) {
 	merged := mergeEnvironment(
-		[]string{"PGWORKBENCH_NATIVE_BINDIR=/hostile/a", "KEEP=value", "PGWORKBENCH_NATIVE_BINDIR=/hostile/b"},
+		[]string{"PGWORKBENCH_NATIVE_BINDIR=/hostile/a", "KEEP=value", "BASH_FUNC_builtin%%=() { echo hijacked", "PGWORKBENCH_NATIVE_BINDIR=/hostile/b"},
 		[]string{"PGWORKBENCH_NATIVE_BINDIR=/bound/toolchain", "PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST=sha256:" + strings.Repeat("a", 64)},
 	)
 	seen := 0
@@ -25,6 +25,11 @@ func TestMergeEnvironmentMakesRunnerOwnedNativeBindirUnambiguous(t *testing.T) {
 	}
 	if seen != 1 {
 		t.Fatalf("native bindir appears %d times, want exactly one: %#v", seen, merged)
+	}
+	for _, entry := range merged {
+		if strings.HasPrefix(entry, "BASH_FUNC_") {
+			t.Fatalf("ambient exported shell function survived canonical merge: %q", entry)
+		}
 	}
 }
 
@@ -67,7 +72,7 @@ func TestRunExactEnvironmentPassesOnlyBaseAndRunnerOwnedValues(t *testing.T) {
 		Runtime:          "docker",
 		RunID:            "exact-run",
 		ExactEnvironment: true,
-		Env:              []string{"ENV_FILE=.env.example"},
+		Env:              []string{"ENV_FILE=.env.example", "PGWORKBENCH_EXACT_ENVIRONMENT=0"},
 		RunCommand: func(_ string, _ []string, env []string, _, _ io.Writer) CommandResult {
 			seen = append([]string(nil), env...)
 			return CommandResult{ExitCode: 0}
@@ -76,7 +81,42 @@ func TestRunExactEnvironmentPassesOnlyBaseAndRunnerOwnedValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if contains(seen, "POSTGRES_PORT=59999") || !contains(seen, "ENV_FILE=.env.example") || !contains(seen, "BASH_ENV=/dev/null") {
+	if contains(seen, "POSTGRES_PORT=59999") || !contains(seen, "ENV_FILE=.env.example") || !contains(seen, "BASH_ENV=/dev/null") || !contains(seen, "PGWORKBENCH_EXACT_ENVIRONMENT=1") {
 		t.Fatalf("unexpected exact child environment: %#v", seen)
 	}
+	if countEnvironmentName(seen, "PGWORKBENCH_EXACT_ENVIRONMENT") != 1 {
+		t.Fatalf("exact-environment marker is ambiguous: %#v", seen)
+	}
+}
+
+func TestRunOwnsDisabledExactEnvironmentMarker(t *testing.T) {
+	root := t.TempDir()
+	writeExperiment(t, root, "experiments/smoke.env", "EXPERIMENT_NAME=smoke\n")
+	var seen []string
+	_, err := Run(root, speccatalog.New(root), "smoke", Options{
+		Runtime: "docker",
+		RunID:   "ordinary-run",
+		Env:     []string{"PGWORKBENCH_EXACT_ENVIRONMENT=1"},
+		RunCommand: func(_ string, _ []string, env []string, _, _ io.Writer) CommandResult {
+			seen = append([]string(nil), env...)
+			return CommandResult{ExitCode: 0}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(seen, "PGWORKBENCH_EXACT_ENVIRONMENT=0") || countEnvironmentName(seen, "PGWORKBENCH_EXACT_ENVIRONMENT") != 1 {
+		t.Fatalf("ordinary runner did not own the disabled exact-environment marker: %#v", seen)
+	}
+}
+
+func countEnvironmentName(environment []string, name string) int {
+	count := 0
+	for _, entry := range environment {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && key == name {
+			count++
+		}
+	}
+	return count
 }

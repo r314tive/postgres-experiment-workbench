@@ -452,6 +452,35 @@ func TestVerifyRejectsRedigestedTPSInconsistentWithMeasureTimeline(t *testing.T)
 	}
 }
 
+func TestVerifyRejectsInjectedDetailedLatencyMarkerForOrdinaryProtocol(t *testing.T) {
+	root, seriesDir, summaryPath, _, linkedRunDir := writeArtifactFixture(t)
+	content, err := os.ReadFile(summaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := strings.Replace(string(content), "latency average = 20.000 ms", "latency average = 0.150 ms\nlatency stddev = 0.100 ms", 1)
+	writeArtifactFile(t, summaryPath, tampered)
+	parsed, err := pgbenchresult.Parse(strings.NewReader(tampered))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var series benchmarkrun.Series
+	readArtifactJSON(t, filepath.Join(seriesDir, "result.json"), &series)
+	series.Trials[0].Pgbench = &parsed
+	series.Trials[0].Summary = artifactFixtureRef(t, linkedRunDir, summaryPath)
+	writeArtifactJSON(t, filepath.Join(seriesDir, "trials", "001.json"), series.Trials[0])
+	writeArtifactJSON(t, filepath.Join(seriesDir, "result.json"), series)
+
+	verification, err := Verify(root, seriesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.IsValid() || !containsArtifactIssue(verification.Issues, "unexpected detailed latency evidence") {
+		t.Fatalf("redigested detailed-summary marker bypassed ordinary latency integrity: %v", verification.Issues)
+	}
+}
+
 func TestVerifyRejectsTamperedSummaryRawLogAndLinkedRun(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -1156,8 +1185,7 @@ func writeArtifactFixture(t *testing.T) (root, seriesDir, summaryPath, rawPath, 
 		"duration: 30 s",
 		"number of transactions actually processed: 3000",
 		"number of failed transactions: 0 (0.000%)",
-		"latency average = 0.150 ms",
-		"latency stddev = 0.100 ms",
+		"latency average = 20.000 ms",
 		"initial connection time = 2.000 ms",
 		"tps = 100.000000 (without initial connection time)",
 	}, "\n")+"\n")
@@ -1293,7 +1321,6 @@ func writeArtifactFixture(t *testing.T) (root, seriesDir, summaryPath, rawPath, 
 
 	value := 100.0
 	duration := 30.0
-	latencyStddev := 0.1
 	initialConnection := 2.0
 	trial := benchmarkrun.Trial{
 		SchemaVersion:      benchmarkrun.TrialSchemaVersion,
@@ -1324,8 +1351,7 @@ func writeArtifactFixture(t *testing.T) (root, seriesDir, summaryPath, rawPath, 
 			MaximumTries:            1,
 			DurationSeconds:         &duration,
 			TransactionsProcessed:   3000,
-			LatencyMeanMS:           0.15,
-			LatencyStddevMS:         &latencyStddev,
+			LatencyMeanMS:           20,
 			InitialConnectionTimeMS: &initialConnection,
 			TPSExcludingConnections: &value,
 		},

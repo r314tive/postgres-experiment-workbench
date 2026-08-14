@@ -103,11 +103,14 @@ workbench, experiment, workload, Compose, PostgreSQL, and shell-control
 variables do not pass through. The only inherited process-bootstrap names are
 `HOME`, `LOGNAME`, `PATH`, `TEMP`, `TMP`, `TMPDIR`, and `USER`; the runner fixes
 `BASH_ENV=/dev/null`, `LANG=C`, `LC_ALL=C`, and `TZ=UTC`, then adds its own
-run/pack/runtime identities. It also supplies `ENV_FILE=.env.example`, so an
-operation trial cannot silently select a checkout-local `.env`. Native runs
-add only the runner-inspected `PGWORKBENCH_NATIVE_BINDIR` and corresponding
-toolchain digest. This is an environment-capability boundary, not an OS sandbox
-or a claim that the invoked scenario code is harmless.
+run/pack/runtime identities. It also supplies `ENV_FILE=.env.example`; exact
+mode passes that file to Compose but never sources it in the host shell, so an
+operation trial cannot silently select or execute a checkout-local `.env`.
+Native runs add only the runner-inspected `PGWORKBENCH_NATIVE_BINDIR` and
+corresponding toolchain digest. The inherited bootstrap values are not runtime
+attestation, and `PATH` can still select the shell and ordinary host helpers.
+This is an environment-capability boundary, not an OS sandbox or a claim that
+the invoked scenario code is harmless.
 
 The producer resolves the running `pgworkbench` executable to an executable
 regular file, records its SHA-256, and copies those exact bytes to

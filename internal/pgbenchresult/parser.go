@@ -28,41 +28,46 @@ const (
 // numeric fields are pointers so deterministic JSON uses null instead of a
 // non-portable NaN sentinel when pgbench did not report a value.
 type Result struct {
-	SchemaVersion           string          `json:"schema_version"`
-	ParserVersion           string          `json:"parser_version"`
-	PgbenchVersion          string          `json:"pgbench_version"`
-	ServerVersion           string          `json:"server_version"`
-	TransactionType         string          `json:"transaction_type"`
-	ScaleFactor             int64           `json:"scale_factor"`
-	QueryMode               string          `json:"query_mode"`
-	Mode                    string          `json:"mode"`
-	Clients                 int64           `json:"clients"`
-	Threads                 int64           `json:"threads"`
-	MaximumTries            int64           `json:"maximum_tries"`
-	DurationSeconds         *float64        `json:"duration_seconds"`
-	TransactionsPerClient   *int64          `json:"transactions_per_client"`
-	TransactionsExpected    *int64          `json:"transactions_expected"`
-	TransactionsProcessed   int64           `json:"transactions_processed"`
-	TransactionsFailed      int64           `json:"transactions_failed"`
-	SerializationFailures   *int64          `json:"serialization_failures"`
-	DeadlockFailures        *int64          `json:"deadlock_failures"`
-	OtherFailures           *int64          `json:"other_failures"`
-	TransactionsSkipped     *int64          `json:"transactions_skipped"`
-	TransactionsRetried     *int64          `json:"transactions_retried"`
-	TotalRetries            *int64          `json:"total_retries"`
-	LatencyLimitMS          *float64        `json:"latency_limit_ms"`
-	TransactionsAboveLimit  *int64          `json:"transactions_above_latency_limit"`
-	LatencyLimitTotal       *int64          `json:"latency_limit_total"`
-	LatencyMeanMS           float64         `json:"latency_mean_ms"`
-	LatencyStddevMS         *float64        `json:"latency_stddev_ms"`
-	ScheduleLagAverageMS    *float64        `json:"schedule_lag_average_ms"`
-	ScheduleLagMaxMS        *float64        `json:"schedule_lag_max_ms"`
-	InitialConnectionTimeMS *float64        `json:"initial_connection_time_ms"`
-	AverageConnectionTimeMS *float64        `json:"average_connection_time_ms"`
-	TPSIncludingConnections *float64        `json:"tps_including_connections"`
-	TPSExcludingConnections *float64        `json:"tps_excluding_connections"`
-	tpsIncludingObservation *tpsObservation `json:"-"`
-	tpsExcludingObservation *tpsObservation `json:"-"`
+	SchemaVersion           string              `json:"schema_version"`
+	ParserVersion           string              `json:"parser_version"`
+	PgbenchVersion          string              `json:"pgbench_version"`
+	ServerVersion           string              `json:"server_version"`
+	TransactionType         string              `json:"transaction_type"`
+	ScaleFactor             int64               `json:"scale_factor"`
+	QueryMode               string              `json:"query_mode"`
+	Mode                    string              `json:"mode"`
+	Clients                 int64               `json:"clients"`
+	Threads                 int64               `json:"threads"`
+	MaximumTries            int64               `json:"maximum_tries"`
+	DurationSeconds         *float64            `json:"duration_seconds"`
+	TransactionsPerClient   *int64              `json:"transactions_per_client"`
+	TransactionsExpected    *int64              `json:"transactions_expected"`
+	TransactionsProcessed   int64               `json:"transactions_processed"`
+	TransactionsFailed      int64               `json:"transactions_failed"`
+	SerializationFailures   *int64              `json:"serialization_failures"`
+	DeadlockFailures        *int64              `json:"deadlock_failures"`
+	OtherFailures           *int64              `json:"other_failures"`
+	TransactionsSkipped     *int64              `json:"transactions_skipped"`
+	TransactionsRetried     *int64              `json:"transactions_retried"`
+	TotalRetries            *int64              `json:"total_retries"`
+	LatencyLimitMS          *float64            `json:"latency_limit_ms"`
+	TransactionsAboveLimit  *int64              `json:"transactions_above_latency_limit"`
+	LatencyLimitTotal       *int64              `json:"latency_limit_total"`
+	LatencyMeanMS           float64             `json:"latency_mean_ms"`
+	LatencyStddevMS         *float64            `json:"latency_stddev_ms"`
+	ScheduleLagAverageMS    *float64            `json:"schedule_lag_average_ms"`
+	ScheduleLagMaxMS        *float64            `json:"schedule_lag_max_ms"`
+	InitialConnectionTimeMS *float64            `json:"initial_connection_time_ms"`
+	AverageConnectionTimeMS *float64            `json:"average_connection_time_ms"`
+	TPSIncludingConnections *float64            `json:"tps_including_connections"`
+	TPSExcludingConnections *float64            `json:"tps_excluding_connections"`
+	latencyObservation      *latencyObservation `json:"-"`
+	tpsIncludingObservation *tpsObservation     `json:"-"`
+	tpsExcludingObservation *tpsObservation     `json:"-"`
+}
+
+type latencyObservation struct {
+	decimalPlaces int
 }
 
 // tpsObservation retains syntax needed for an independent integrity check
@@ -348,6 +353,7 @@ func (p *parsedSummary) parseLine(lineNumber int, line string) (bool, error) {
 		}
 		if candidate.field == "latency_mean_ms" {
 			p.result.LatencyMeanMS = parsed
+			p.result.latencyObservation = &latencyObservation{decimalPlaces: decimalPlaces(value)}
 		} else {
 			*candidate.target = float64Pointer(parsed)
 		}

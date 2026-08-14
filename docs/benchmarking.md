@@ -414,9 +414,15 @@ cross-checked exactly against the final summary. The transaction-log mean
 latency is also cross-checked against pgbench's independently computed summary.
 Without throttle, progress, or a latency limit, pgbench derives that summary
 from its global client-time window while the log contains per-client transaction
-intervals. The raw mean must not exceed the global mean, and their bounded
-client-loop/start-stop gap may be at most two percent plus the printed 0.001 ms
-rounding interval. Detailed summaries must match the log at printed precision.
+intervals. Verification independently derives the permitted global-latency
+interval from clients, completed/failed/skipped counts, TPS, and both printed
+rounding precisions. The raw mean may not exceed that global upper bound.
+PostgreSQL defines no universal lower bound for scheduler, client-loop, and
+start/stop gaps, so the verifier does not invent a percentage tolerance for a
+lower raw mean. Detailed summaries must match the log at printed precision.
+Because typed benchmark execution disables pgbench progress output, the
+`latency stddev` detailed-summary marker is required exactly when the protocol
+declares a rate or latency limit and is rejected otherwise.
 Neither path rewrites either measurement. The driver-observed PostgreSQL server major must match the linked
 experiment fingerprint. Nonzero failed, skipped, or retried transactions
 currently fail the trial validity gate even though their counts remain

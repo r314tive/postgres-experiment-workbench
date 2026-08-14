@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PGWORKBENCH_SUPERVISED=1
+INTERNAL_RUN_ACTION=__pgworkbench_internal_run_v1
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pgworkbench-terminal.XXXXXX")"
 RUN_ID="terminal-contract-$(date -u +%Y%m%d_%H%M%S)-$$"
@@ -27,7 +30,7 @@ if PGWORKBENCH_BIN="$TMP_DIR/pgworkbench" \
   EXPERIMENT_RUN_ID="$RUN_ID" \
   EXPERIMENT_METRICS=0 \
   EXPERIMENT_SNAPSHOT=0 \
-  "$REPO_DIR/scripts/run_experiment.sh" run replica-readonly >/dev/null 2>&1; then
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" replica-readonly >/dev/null 2>&1; then
   echo "FAIL: unsupported native topology unexpectedly passed" >&2
   exit 1
 fi
@@ -50,7 +53,7 @@ if PGWORKBENCH_BIN='' \
   EXPERIMENT_RUN_ID="$SOURCE_RUN_ID" \
   EXPERIMENT_METRICS=0 \
   EXPERIMENT_SNAPSHOT=0 \
-  "$REPO_DIR/scripts/run_experiment.sh" run replica-readonly >/dev/null 2>&1; then
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" replica-readonly >/dev/null 2>&1; then
   echo "FAIL: unsupported native topology unexpectedly passed for source runner" >&2
   exit 1
 fi
@@ -62,7 +65,7 @@ before_digest="$(shasum -a 256 "$RUN_DIR/verdict.json" | awk '{print $1}')"
 if PGWORKBENCH_BIN="$TMP_DIR/pgworkbench" \
   PGWORKBENCH_RUNTIME=native \
   EXPERIMENT_RUN_ID="$RUN_ID" \
-  "$REPO_DIR/scripts/run_experiment.sh" run replica-readonly >/dev/null 2>&1; then
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" replica-readonly >/dev/null 2>&1; then
   echo "FAIL: immutable run directory was overwritten" >&2
   exit 1
 fi
@@ -71,7 +74,7 @@ test "$before_digest" = "$after_digest"
 
 if PGWORKBENCH_BIN="$TMP_DIR/pgworkbench" \
   EXPERIMENT_RUN_ID='../escape' \
-  "$REPO_DIR/scripts/run_experiment.sh" run smoke >/dev/null 2>&1; then
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" smoke >/dev/null 2>&1; then
   echo "FAIL: unsafe run id was accepted" >&2
   exit 1
 fi
@@ -80,7 +83,7 @@ STATE_WRITER_RUN_ID="$RUN_ID-state-writer"
 if PGWORKBENCH_BIN="$TMP_DIR/pgworkbench" \
   EXPERIMENT_STATE_WRITER=shell \
   EXPERIMENT_RUN_ID="$STATE_WRITER_RUN_ID" \
-  "$REPO_DIR/scripts/run_experiment.sh" run smoke >"$TMP_DIR/state-writer.log" 2>&1; then
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" smoke >"$TMP_DIR/state-writer.log" 2>&1; then
   echo "FAIL: legacy shell state writer was accepted" >&2
   exit 1
 fi
@@ -99,7 +102,7 @@ FAILED_WRITER_RUN_ID="$RUN_ID-failed-writer"
 if PGWORKBENCH_BIN="$TMP_DIR/failing-writer" \
   PGWORKBENCH_RUNTIME=native \
   EXPERIMENT_RUN_ID="$FAILED_WRITER_RUN_ID" \
-  "$REPO_DIR/scripts/run_experiment.sh" run smoke >/dev/null 2>&1; then
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" smoke >/dev/null 2>&1; then
   echo "FAIL: failing manifest writer unexpectedly passed" >&2
   exit 1
 fi

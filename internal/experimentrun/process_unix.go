@@ -4,6 +4,8 @@ package experimentrun
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -43,4 +45,34 @@ func processGroupStatus(cmd *exec.Cmd) (bool, error) {
 		return false, nil
 	}
 	return false, err
+}
+
+func processInterruptSignals() []os.Signal {
+	return []os.Signal{syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM}
+}
+
+func processInterruptSignalName(received os.Signal) string {
+	switch received {
+	case syscall.SIGHUP:
+		return "SIGHUP"
+	case syscall.SIGINT:
+		return "SIGINT"
+	case syscall.SIGTERM:
+		return "SIGTERM"
+	default:
+		return fmt.Sprintf("signal(%v)", received)
+	}
+}
+
+func processInterruptExitCode(received os.Signal) int {
+	switch received {
+	case syscall.SIGHUP:
+		return 129
+	case syscall.SIGINT:
+		return 130
+	case syscall.SIGTERM:
+		return 143
+	default:
+		return 128
+	}
 }

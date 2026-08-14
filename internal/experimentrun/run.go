@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -24,6 +25,13 @@ import (
 const SchemaVersion = "pgworkbench.experiment-run-result/v1"
 
 const (
+	ContainmentStatusConfirmed   = "confirmed"
+	ContainmentStatusUnconfirmed = "unconfirmed"
+)
+
+const internalRunAction = "__pgworkbench_internal_run_v1"
+
+const (
 	// DefaultExecutionTimeout is deliberately large enough for setup-heavy
 	// experiments while still making every runner invocation finite. Callers
 	// should set a tighter budget for benchmarks and CI jobs.
@@ -32,6 +40,9 @@ const (
 	MinimumExecutionTimeout = time.Second
 	MinimumCleanupGrace     = 100 * time.Millisecond
 	TimeoutExitCode         = 124
+
+	processGroupPollInterval        = 25 * time.Millisecond
+	maximumPostKillConfirmationTime = time.Second
 )
 
 type CommandResult struct {
@@ -39,6 +50,34 @@ type CommandResult struct {
 	Err               error
 	TimedOut          bool
 	TerminationSignal string
+	// ContainmentConfirmed is meaningful when TerminationSignal is non-empty.
+	// It is true only after error-free cleanup and a successful status probe
+	// observed that the complete process group had disappeared.
+	ContainmentConfirmed bool
+	terminationReason    commandTerminationReason
+	interruptSignal      string
+}
+
+type commandTerminationReason string
+
+const (
+	commandTerminationNone      commandTerminationReason = ""
+	commandTerminationTimeout   commandTerminationReason = "timeout"
+	commandTerminationInterrupt commandTerminationReason = "interrupt"
+	commandTerminationResidual  commandTerminationReason = "residual"
+)
+
+type terminationSignalSubscription func() (<-chan os.Signal, func())
+
+type processGroupOperations struct {
+	sendSignal func(*exec.Cmd, processSignal) error
+	status     func(*exec.Cmd) (bool, error)
+}
+
+type processGroupTermination struct {
+	cleanupSignal        string
+	containmentConfirmed bool
+	err                  error
 }
 
 type CommandRunner func(root string, command []string, env []string, stdout io.Writer, stderr io.Writer) CommandResult
@@ -64,6 +103,9 @@ type Options struct {
 	Now              func() time.Time
 	Getenv           func(string) string
 	RunCommand       CommandRunner
+	// signalSubscription is an internal test seam. Production runs always use
+	// subscribeProcessTerminationSignals immediately before the child starts.
+	signalSubscription terminationSignalSubscription
 }
 
 type Result struct {
@@ -90,6 +132,7 @@ type Result struct {
 	CleanupGraceMS     int64    `json:"cleanup_grace_ms"`
 	TimedOut           bool     `json:"timed_out"`
 	TerminationSignal  string   `json:"termination_signal,omitempty"`
+	ContainmentStatus  string   `json:"containment_status,omitempty"`
 	Status             string   `json:"status"`
 }
 
@@ -98,14 +141,44 @@ func (r Result) Passed() bool {
 }
 
 func Run(root string, catalog speccatalog.Catalog, input string, options Options) (Result, error) {
+	path, id, err := catalog.Resolve("experiment", input)
+	if err != nil {
+		return Result{}, err
+	}
+	spec, content, err := readSpecSnapshot("experiment", id, path)
+	if err != nil {
+		return Result{}, err
+	}
+	if errs := catalog.ValidateSpec(spec); len(errs) > 0 {
+		return Result{}, errors.Join(errs...)
+	}
+	plan, err := experimentplan.BuildPrepared(spec)
+	if err != nil {
+		return Result{}, err
+	}
+	return runPreparedPlan(root, plan, content, options)
+}
+
+// RunPrepared executes an internally produced experiment spec without making
+// its path resolvable through the public scenario-pack catalog. The producer is
+// responsible for validating the source capability and exact prepared path.
+func RunPrepared(root string, spec speccatalog.Spec, options Options) (Result, error) {
+	selected, content, err := readSpecSnapshot(spec.Kind, spec.ID, spec.Path)
+	if err != nil {
+		return Result{}, err
+	}
+	plan, err := experimentplan.BuildPrepared(selected)
+	if err != nil {
+		return Result{}, err
+	}
+	return runPreparedPlan(root, plan, content, options)
+}
+
+func runPreparedPlan(root string, plan experimentplan.Plan, specContent []byte, options Options) (Result, error) {
 	options = withDefaults(options)
 	lookup := options.Getenv
 	if options.ExactEnvironment {
 		lookup = environmentLookup(options.Env)
-	}
-	plan, err := experimentplan.Build(catalog, input)
-	if err != nil {
-		return Result{}, err
 	}
 	executionTimeout, err := resolvePositiveDuration(options.ExecutionTimeout, firstNonEmptyDuration(
 		lookup("PGWORKBENCH_EXECUTION_TIMEOUT"),
@@ -147,11 +220,13 @@ func Run(root string, catalog speccatalog.Catalog, input string, options Options
 		return Result{}, fmt.Errorf("invalid run id %q", runID)
 	}
 
-	specDigest, err := fileSHA256(plan.Spec.Path)
+	specDigest := bytesSHA256(specContent)
+	executionSpecPath, cleanupExecutionSpec, err := createExecutionSpecSnapshot(specContent)
 	if err != nil {
-		return Result{}, fmt.Errorf("hash experiment spec: %w", err)
+		return Result{}, fmt.Errorf("create immutable experiment spec snapshot: %w", err)
 	}
-	command := []string{filepath.Join(root, "scripts", "run_experiment.sh"), "run", plan.Spec.Path}
+	defer func() { _ = cleanupExecutionSpec() }()
+	command := []string{filepath.Join(root, "scripts", "run_experiment.sh"), internalRunAction, plan.Spec.Path}
 	engineVersion := options.EngineVersion
 	if strings.TrimSpace(engineVersion) == "" {
 		engineVersion = lookup("PGWORKBENCH_ENGINE_VERSION")
@@ -163,9 +238,19 @@ func Run(root string, catalog speccatalog.Catalog, input string, options Options
 	}
 	engineCommit = runstate.NormalizeEngineCommit(engineCommit)
 	env := append([]string(nil), options.Env...)
+	exactEnvironmentMarker := "0"
+	if options.ExactEnvironment {
+		exactEnvironmentMarker = "1"
+	}
 	env = append(env,
+		"BASHOPTS=",
+		"BASH_ENV=/dev/null",
 		"EXPERIMENT_RUN_ID="+runID,
 		"EXPERIMENT_SPEC_SHA256="+specDigest,
+		"PGWORKBENCH_EXACT_ENVIRONMENT="+exactEnvironmentMarker,
+		"PGWORKBENCH_EXECUTION_SPEC_FILE="+executionSpecPath,
+		"PGWORKBENCH_SUPERVISED=1",
+		"SHELLOPTS=",
 		"PGWORKBENCH_RUNTIME="+runtime,
 		"PGWORKBENCH_ROOT="+root,
 		"PGWORKBENCH_ENGINE_VERSION="+engineVersion,
@@ -211,15 +296,20 @@ func Run(root string, catalog speccatalog.Catalog, input string, options Options
 
 	var commandResult CommandResult
 	if options.RunCommand != nil {
-		commandEnv := env
+		// Keep the test seam faithful to production: runner-owned overrides are
+		// canonical and unambiguous even when no ambient base is projected.
+		commandEnv := mergeEnvironment(nil, env)
 		if options.ExactEnvironment {
 			commandEnv = mergeEnvironment(exactEnvironmentBase(os.Environ()), env)
 		}
 		commandResult = options.RunCommand(root, command, commandEnv, options.Stdout, options.Stderr)
 	} else if options.ExactEnvironment {
-		commandResult = defaultRunCommandWithBase(root, command, exactEnvironmentBase(os.Environ()), env, options.Stdout, options.Stderr, executionTimeout, cleanupGrace)
+		commandResult = defaultRunCommandWithBaseAndSignals(root, command, exactEnvironmentBase(os.Environ()), env, options.Stdout, options.Stderr, executionTimeout, cleanupGrace, options.signalSubscription)
 	} else {
-		commandResult = defaultRunCommand(root, command, env, options.Stdout, options.Stderr, executionTimeout, cleanupGrace)
+		commandResult = defaultRunCommandWithBaseAndSignals(root, command, os.Environ(), env, options.Stdout, options.Stderr, executionTimeout, cleanupGrace, options.signalSubscription)
+	}
+	if cleanupErr := cleanupExecutionSpec(); cleanupErr != nil {
+		commandResult.Err = errors.Join(commandResult.Err, fmt.Errorf("remove immutable experiment spec snapshot: %w", cleanupErr))
 	}
 	finished := options.Now().UTC()
 	result.FinishedAt = finished.Format(time.RFC3339)
@@ -227,12 +317,14 @@ func Run(root string, catalog speccatalog.Catalog, input string, options Options
 	result.ExitCode = commandResult.ExitCode
 	result.TimedOut = commandResult.TimedOut
 	result.TerminationSignal = commandResult.TerminationSignal
-	if commandResult.TimedOut && commandResult.TerminationSignal != "" {
-		// The shell normally writes its own failed terminal verdict from its EXIT
-		// trap. Re-publish it from the runner after the process group is fully
-		// reaped so a forced SIGKILL still has a deterministic terminal artifact.
-		if verdictErr := writeTimeoutVerdict(result); verdictErr != nil {
-			commandResult.Err = errors.Join(commandResult.Err, fmt.Errorf("write timeout verdict: %w", verdictErr))
+	result.ContainmentStatus = commandContainmentStatus(commandResult)
+	if commandResult.TerminationSignal != "" || (commandResult.Err != nil && commandResult.ExitCode == 0) {
+		// The shell normally writes its own terminal verdict from its EXIT trap.
+		// Re-publish a failed verdict after any runner-owned post-shell gate fails.
+		// This closes both the brief residual-descendant case and failures while
+		// removing the private execution-spec snapshot after a zero shell exit.
+		if verdictErr := writeRunnerFailureVerdict(result, commandResult); verdictErr != nil {
+			commandResult.Err = errors.Join(commandResult.Err, fmt.Errorf("write runner failure verdict: %w", verdictErr))
 		}
 	}
 	if commandResult.Err == nil && commandResult.ExitCode == 0 && !commandResult.TimedOut {
@@ -251,7 +343,11 @@ func Render(w io.Writer, result Result) error {
 	if result.Passed() {
 		status = "PASS"
 	}
-	_, err := fmt.Fprintf(w, "%s: experiment %s runtime=%s run_id=%s exit=%d duration_ms=%d timed_out=%t signal=%s\nrun_dir=%s\n", status, result.ExperimentSpec, result.Runtime, result.RunID, result.ExitCode, result.DurationMS, result.TimedOut, result.TerminationSignal, result.RunDir)
+	containmentEvidence := ""
+	if result.ContainmentStatus != "" {
+		containmentEvidence = " containment_status=" + result.ContainmentStatus
+	}
+	_, err := fmt.Fprintf(w, "%s: experiment %s runtime=%s run_id=%s exit=%d duration_ms=%d timed_out=%t signal=%s%s\nrun_dir=%s\n", status, result.ExperimentSpec, result.Runtime, result.RunID, result.ExitCode, result.DurationMS, result.TimedOut, result.TerminationSignal, containmentEvidence, result.RunDir)
 	return err
 }
 
@@ -274,6 +370,9 @@ func withDefaults(options Options) Options {
 	if options.Getenv == nil {
 		options.Getenv = os.Getenv
 	}
+	if options.signalSubscription == nil {
+		options.signalSubscription = subscribeProcessTerminationSignals
+	}
 	return options
 }
 
@@ -282,6 +381,10 @@ func defaultRunCommand(root string, command []string, env []string, stdout io.Wr
 }
 
 func defaultRunCommandWithBase(root string, command, baseEnv, env []string, stdout io.Writer, stderr io.Writer, executionTimeout time.Duration, cleanupGrace time.Duration) CommandResult {
+	return defaultRunCommandWithBaseAndSignals(root, command, baseEnv, env, stdout, stderr, executionTimeout, cleanupGrace, subscribeProcessTerminationSignals)
+}
+
+func defaultRunCommandWithBaseAndSignals(root string, command, baseEnv, env []string, stdout io.Writer, stderr io.Writer, executionTimeout time.Duration, cleanupGrace time.Duration, subscribe terminationSignalSubscription) CommandResult {
 	if len(command) == 0 {
 		return CommandResult{ExitCode: -1, Err: fmt.Errorf("empty experiment command")}
 	}
@@ -293,6 +396,14 @@ func defaultRunCommandWithBase(root string, command, baseEnv, env []string, stdo
 	cmd.Env = mergeEnvironment(baseEnv, env)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	terminationSignals, stopSignals := subscribe()
+	if stopSignals == nil {
+		stopSignals = func() {}
+	}
+	// Subscribe before Start so no process group can exist in a window where
+	// normal SIGINT/SIGTERM handling terminates the runner without cleanup.
+	// signal.Stop restores normal handling as soon as this invocation ends.
+	defer stopSignals()
 	if err := cmd.Start(); err != nil {
 		return CommandResult{ExitCode: -1, Err: err}
 	}
@@ -303,64 +414,19 @@ func defaultRunCommandWithBase(root string, command, baseEnv, env []string, stdo
 	var err error
 	select {
 	case err = <-wait:
-		result := commandResultFromWait(err)
-		if alive, aliveErr := processGroupStatus(cmd); aliveErr != nil {
-			result.Err = errors.Join(result.Err, fmt.Errorf("verify experiment process group after command exit: %w", aliveErr))
-			if result.ExitCode == 0 {
-				result.ExitCode = -1
-			}
-		} else if alive {
-			result.TerminationSignal = terminateResidualProcessGroup(cmd, cleanupGrace)
-			result.Err = errors.Join(result.Err, fmt.Errorf("experiment command exited with live descendants; residual process group terminated with %s", result.TerminationSignal))
-			if result.ExitCode == 0 {
-				result.ExitCode = -1
-			}
-		}
-		return result
+		return commandResultAfterWait(cmd, err, cleanupGrace, systemProcessGroupOperations())
 	case <-timer.C:
+		return terminateActiveCommand(cmd, wait, cleanupGrace, commandTerminationTimeout, nil, executionTimeout)
+	case received := <-terminationSignals:
+		return terminateActiveCommand(cmd, wait, cleanupGrace, commandTerminationInterrupt, received, executionTimeout)
 	}
+}
 
-	terminationSignal := "SIGTERM"
-	if signalErr := signalProcessGroup(cmd, processSignalTerminate); signalErr != nil {
-		return timeoutCommandResult(executionTimeout, terminationSignal, signalErr)
-	}
-	graceTimer := time.NewTimer(cleanupGrace)
-	poll := time.NewTicker(25 * time.Millisecond)
-	defer poll.Stop()
-	leaderWaited := false
-	for {
-		select {
-		case err = <-wait:
-			leaderWaited = true
-			alive, statusErr := processGroupStatus(cmd)
-			if statusErr != nil {
-				return timeoutCommandResult(executionTimeout, terminationSignal, statusErr)
-			}
-			if !alive {
-				graceTimer.Stop()
-				return timeoutCommandResult(executionTimeout, terminationSignal, nil)
-			}
-		case <-poll.C:
-			alive, statusErr := processGroupStatus(cmd)
-			if statusErr != nil {
-				return timeoutCommandResult(executionTimeout, terminationSignal, statusErr)
-			}
-			if !alive {
-				graceTimer.Stop()
-				if !leaderWaited {
-					err = <-wait
-				}
-				return timeoutCommandResult(executionTimeout, terminationSignal, nil)
-			}
-		case <-graceTimer.C:
-			terminationSignal = "SIGKILL"
-			killErr := signalProcessGroup(cmd, processSignalKill)
-			// cmd.Wait continues in its buffered goroutine and will reap the
-			// leader. Do not add an unbounded wait after SIGKILL: an
-			// uninterruptible process must not defeat the runner deadline.
-			return timeoutCommandResult(executionTimeout, terminationSignal, killErr)
-		}
-	}
+func subscribeProcessTerminationSignals() (<-chan os.Signal, func()) {
+	signals := processInterruptSignals()
+	ch := make(chan os.Signal, len(signals))
+	signal.Notify(ch, signals...)
+	return ch, func() { signal.Stop(ch) }
 }
 
 func exactEnvironmentBase(base []string) []string {
@@ -398,7 +464,8 @@ func mergeEnvironment(base, overrides []string) []string {
 	for _, group := range [][]string{base, overrides} {
 		for _, entry := range group {
 			key, value, ok := strings.Cut(entry, "=")
-			if !ok || key == "" || strings.ContainsRune(key, '\x00') || strings.ContainsRune(value, '\x00') {
+			if !ok || key == "" || strings.HasPrefix(key, "BASH_FUNC_") ||
+				strings.ContainsRune(key, '\x00') || strings.ContainsRune(value, '\x00') {
 				continue
 			}
 			values[key] = value
@@ -416,24 +483,174 @@ func mergeEnvironment(base, overrides []string) []string {
 	return result
 }
 
-func terminateResidualProcessGroup(cmd *exec.Cmd, cleanupGrace time.Duration) string {
-	_ = signalProcessGroup(cmd, processSignalTerminate)
-	deadline := time.NewTimer(cleanupGrace)
-	poll := time.NewTicker(25 * time.Millisecond)
+func systemProcessGroupOperations() processGroupOperations {
+	return processGroupOperations{
+		sendSignal: signalProcessGroup,
+		status:     processGroupStatus,
+	}
+}
+
+func commandContainmentStatus(result CommandResult) string {
+	if result.TerminationSignal == "" {
+		return ""
+	}
+	if result.ContainmentConfirmed {
+		return ContainmentStatusConfirmed
+	}
+	return ContainmentStatusUnconfirmed
+}
+
+func commandResultAfterWait(cmd *exec.Cmd, waitErr error, cleanupGrace time.Duration, operations processGroupOperations) CommandResult {
+	result := commandResultFromWait(waitErr)
+	alive, initialStatusErr := operations.status(cmd)
+	if initialStatusErr == nil && !alive {
+		return result
+	}
+
+	termination := terminateProcessGroup(cmd, nil, cleanupGrace, operations)
+	result.TerminationSignal = termination.cleanupSignal
+	result.ContainmentConfirmed = termination.containmentConfirmed
+	result.terminationReason = commandTerminationResidual
+	if initialStatusErr != nil {
+		result.ContainmentConfirmed = false
+		termination.err = errors.Join(
+			fmt.Errorf("verify experiment process group after command exit: %w", initialStatusErr),
+			termination.err,
+			fmt.Errorf("process-group containment not confirmed because the initial post-exit status probe failed"),
+		)
+		result.Err = errors.Join(result.Err, fmt.Errorf("experiment command exited before descendant containment could be verified; cleanup signal %s attempted", result.TerminationSignal))
+	} else if termination.containmentConfirmed {
+		result.Err = errors.Join(result.Err, fmt.Errorf("experiment command exited with live descendants; residual process-group disappearance confirmed after %s", result.TerminationSignal))
+	} else {
+		result.Err = errors.Join(result.Err, fmt.Errorf("experiment command exited with live descendants; residual process-group containment not confirmed after %s", result.TerminationSignal))
+	}
+	result.Err = errors.Join(result.Err, termination.err)
+	if result.ExitCode == 0 {
+		result.ExitCode = -1
+	}
+	return result
+}
+
+func terminateActiveCommand(cmd *exec.Cmd, wait <-chan error, cleanupGrace time.Duration, reason commandTerminationReason, received os.Signal, executionTimeout time.Duration) CommandResult {
+	return terminateActiveCommandWithProcessGroupOperations(cmd, wait, cleanupGrace, reason, received, executionTimeout, systemProcessGroupOperations())
+}
+
+func terminateActiveCommandWithProcessGroupOperations(cmd *exec.Cmd, wait <-chan error, cleanupGrace time.Duration, reason commandTerminationReason, received os.Signal, executionTimeout time.Duration, operations processGroupOperations) CommandResult {
+	termination := terminateProcessGroup(cmd, wait, cleanupGrace, operations)
+	return activeTerminationResult(reason, received, executionTimeout, termination)
+}
+
+func terminateProcessGroup(cmd *exec.Cmd, wait <-chan error, cleanupGrace time.Duration, operations processGroupOperations) processGroupTermination {
+	result := processGroupTermination{cleanupSignal: "SIGTERM"}
+	if err := operations.sendSignal(cmd, processSignalTerminate); err != nil {
+		result.err = errors.Join(result.err, fmt.Errorf("send SIGTERM to process group: %w", err))
+	}
+
+	confirmed, leaderWait, confirmationErr := confirmProcessGroupDisappearance(
+		cmd,
+		wait,
+		cleanupGrace,
+		"verify process-group disappearance during SIGTERM grace",
+		operations,
+	)
+	result.err = errors.Join(result.err, confirmationErr)
+	if confirmed {
+		result.containmentConfirmed = result.err == nil
+		if !result.containmentConfirmed {
+			result.err = errors.Join(result.err, fmt.Errorf("process-group containment not confirmed after SIGTERM because cleanup or confirmation encountered errors"))
+		}
+		return result
+	}
+
+	result.cleanupSignal = "SIGKILL"
+	if err := operations.sendSignal(cmd, processSignalKill); err != nil {
+		result.err = errors.Join(result.err, fmt.Errorf("send SIGKILL to process group: %w", err))
+	}
+
+	confirmationTime := postKillConfirmationTime(cleanupGrace)
+	confirmed, leaderWait, confirmationErr = confirmProcessGroupDisappearance(
+		cmd,
+		leaderWait,
+		confirmationTime,
+		"verify process-group disappearance after SIGKILL",
+		operations,
+	)
+	result.err = errors.Join(result.err, confirmationErr)
+	result.containmentConfirmed = confirmed && result.err == nil
+	reapLeaderWithoutBlocking(leaderWait)
+	if !confirmed {
+		result.err = errors.Join(result.err, fmt.Errorf("process-group containment not confirmed after SIGKILL within %s", confirmationTime))
+	} else if !result.containmentConfirmed {
+		result.err = errors.Join(result.err, fmt.Errorf("process-group containment not confirmed after SIGKILL because cleanup or confirmation encountered errors"))
+	}
+	return result
+}
+
+func confirmProcessGroupDisappearance(cmd *exec.Cmd, wait <-chan error, timeout time.Duration, errorContext string, operations processGroupOperations) (bool, <-chan error, error) {
+	var firstStatusErr error
+	groupGone := func() bool {
+		alive, err := operations.status(cmd)
+		if err != nil {
+			if firstStatusErr == nil {
+				firstStatusErr = fmt.Errorf("%s: %w", errorContext, err)
+			}
+			return false
+		}
+		return !alive
+	}
+	if groupGone() {
+		reapLeaderWithoutBlocking(wait)
+		return true, wait, firstStatusErr
+	}
+
+	deadline := time.NewTimer(timeout)
+	poll := time.NewTicker(processGroupPollInterval)
 	defer deadline.Stop()
 	defer poll.Stop()
+	leaderWait := wait
 	for {
 		select {
+		case <-leaderWait:
+			leaderWait = nil
+			if groupGone() {
+				return true, leaderWait, firstStatusErr
+			}
 		case <-poll.C:
-			alive, err := processGroupStatus(cmd)
-			if err != nil || !alive {
-				return "SIGTERM"
+			if groupGone() {
+				reapLeaderWithoutBlocking(leaderWait)
+				return true, leaderWait, firstStatusErr
 			}
 		case <-deadline.C:
-			_ = signalProcessGroup(cmd, processSignalKill)
-			return "SIGKILL"
+			return false, leaderWait, firstStatusErr
 		}
 	}
+}
+
+func postKillConfirmationTime(cleanupGrace time.Duration) time.Duration {
+	if cleanupGrace < MinimumCleanupGrace {
+		return MinimumCleanupGrace
+	}
+	if cleanupGrace > maximumPostKillConfirmationTime {
+		return maximumPostKillConfirmationTime
+	}
+	return cleanupGrace
+}
+
+func reapLeaderWithoutBlocking(wait <-chan error) {
+	if wait == nil {
+		return
+	}
+	select {
+	case <-wait:
+	default:
+	}
+}
+
+func activeTerminationResult(reason commandTerminationReason, received os.Signal, executionTimeout time.Duration, termination processGroupTermination) CommandResult {
+	if reason == commandTerminationInterrupt {
+		return interruptCommandResult(received, termination)
+	}
+	return timeoutCommandResult(executionTimeout, termination)
 }
 
 func commandResultFromWait(err error) CommandResult {
@@ -447,16 +664,40 @@ func commandResultFromWait(err error) CommandResult {
 	return CommandResult{ExitCode: -1, Err: err}
 }
 
-func timeoutCommandResult(timeout time.Duration, signal string, terminationErr error) CommandResult {
-	err := fmt.Errorf("experiment execution timed out after %s; process group terminated with %s", timeout, signal)
-	if terminationErr != nil {
-		err = errors.Join(err, fmt.Errorf("process-group termination failed: %w", terminationErr))
+func timeoutCommandResult(timeout time.Duration, termination processGroupTermination) CommandResult {
+	err := fmt.Errorf("experiment execution timed out after %s; process-group disappearance confirmed after %s", timeout, termination.cleanupSignal)
+	if !termination.containmentConfirmed {
+		err = fmt.Errorf("experiment execution timed out after %s; process-group containment not confirmed after %s", timeout, termination.cleanupSignal)
+	}
+	if termination.err != nil {
+		err = errors.Join(err, fmt.Errorf("process-group cleanup encountered errors: %w", termination.err))
 	}
 	return CommandResult{
-		ExitCode:          TimeoutExitCode,
-		Err:               err,
-		TimedOut:          true,
-		TerminationSignal: signal,
+		ExitCode:             TimeoutExitCode,
+		Err:                  err,
+		TimedOut:             true,
+		TerminationSignal:    termination.cleanupSignal,
+		ContainmentConfirmed: termination.containmentConfirmed,
+		terminationReason:    commandTerminationTimeout,
+	}
+}
+
+func interruptCommandResult(received os.Signal, termination processGroupTermination) CommandResult {
+	interruptSignal := processInterruptSignalName(received)
+	err := fmt.Errorf("experiment execution interrupted by %s; process-group disappearance confirmed after %s", interruptSignal, termination.cleanupSignal)
+	if !termination.containmentConfirmed {
+		err = fmt.Errorf("experiment execution interrupted by %s; process-group containment not confirmed after %s", interruptSignal, termination.cleanupSignal)
+	}
+	if termination.err != nil {
+		err = errors.Join(err, fmt.Errorf("process-group cleanup encountered errors: %w", termination.err))
+	}
+	return CommandResult{
+		ExitCode:             processInterruptExitCode(received),
+		Err:                  err,
+		TerminationSignal:    termination.cleanupSignal,
+		ContainmentConfirmed: termination.containmentConfirmed,
+		terminationReason:    commandTerminationInterrupt,
+		interruptSignal:      interruptSignal,
 	}
 }
 
@@ -508,13 +749,13 @@ func ceilMilliseconds(duration time.Duration) int64 {
 	return int64((duration-1)/time.Millisecond) + 1
 }
 
-func writeTimeoutVerdict(result Result) error {
+func writeRunnerFailureVerdict(result Result, commandResult CommandResult) error {
 	runInfo, err := os.Lstat(result.RunDir)
 	if err != nil {
 		return err
 	}
 	if !runInfo.IsDir() || runInfo.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("timeout run directory is not a regular directory: %s", result.RunDir)
+		return fmt.Errorf("runner-failed run directory is not a regular directory: %s", result.RunDir)
 	}
 	manifestPath := filepath.Join(result.RunDir, "manifest.env")
 	manifestInfo, err := os.Lstat(manifestPath)
@@ -522,38 +763,208 @@ func writeTimeoutVerdict(result Result) error {
 		return err
 	}
 	if !manifestInfo.Mode().IsRegular() || manifestInfo.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("timeout manifest is not a regular file: %s", manifestPath)
+		return fmt.Errorf("runner-failed manifest is not a regular file: %s", manifestPath)
 	}
 	manifest, err := envfile.Parse(manifestPath)
 	if err != nil {
 		return err
 	}
 	if manifest["run_id"] != result.RunID {
-		return fmt.Errorf("timeout manifest run_id %q does not match %q", manifest["run_id"], result.RunID)
+		return fmt.Errorf("runner-failed manifest run_id %q does not match %q", manifest["run_id"], result.RunID)
 	}
 	if manifest["experiment_spec_id"] != result.ExperimentSpec {
-		return fmt.Errorf("timeout manifest experiment_spec_id %q does not match %q", manifest["experiment_spec_id"], result.ExperimentSpec)
+		return fmt.Errorf("runner-failed manifest experiment_spec_id %q does not match %q", manifest["experiment_spec_id"], result.ExperimentSpec)
 	}
 	if manifest["experiment_spec_digest"] != "sha256:"+result.SpecSHA256 {
-		return fmt.Errorf("timeout manifest experiment_spec_digest does not match the executed spec")
+		return fmt.Errorf("runner-failed manifest experiment_spec_digest does not match the executed spec")
 	}
 	for _, key := range []string{"started_at", "experiment_identity_digest"} {
 		if strings.TrimSpace(manifest[key]) == "" {
-			return fmt.Errorf("timeout manifest %s is empty", key)
+			return fmt.Errorf("runner-failed manifest %s is empty", key)
 		}
 	}
+	message, workloadExit := runnerFailureVerdictMessage(result, commandResult)
 	verdict := runstate.Verdict{
 		RunID:                result.RunID,
 		Status:               runstate.VerdictStatusFailed,
-		Message:              fmt.Sprintf("experiment execution timed out after %d ms; runner sent %s", result.ExecutionTimeoutMS, result.TerminationSignal),
+		Message:              message,
 		StartedAt:            manifest["started_at"],
 		FinishedAt:           result.FinishedAt,
 		ExperimentSpecID:     manifest["experiment_spec_id"],
 		ExperimentSpecDigest: manifest["experiment_spec_digest"],
 		RunDir:               result.RunDir,
-		WorkloadExit:         TimeoutExitCode,
+		WorkloadExit:         workloadExit,
 	}
 	return runstate.WriteVerdict(result.RunDir, verdict)
+}
+
+func runnerFailureVerdictMessage(result Result, commandResult CommandResult) (string, int) {
+	containmentMessage := "process-group containment not confirmed"
+	if commandResult.ContainmentConfirmed {
+		containmentMessage = "process-group disappearance confirmed"
+	}
+	message := fmt.Sprintf("experiment execution timed out after %d ms; cleanup signal %s attempted; %s", result.ExecutionTimeoutMS, result.TerminationSignal, containmentMessage)
+	workloadExit := TimeoutExitCode
+	switch commandResult.terminationReason {
+	case commandTerminationInterrupt:
+		message = fmt.Sprintf("experiment execution interrupted by %s; cleanup signal %s attempted; %s", commandResult.interruptSignal, result.TerminationSignal, containmentMessage)
+		workloadExit = commandResult.ExitCode
+	case commandTerminationResidual:
+		message = fmt.Sprintf("experiment shell exited with live descendants; cleanup signal %s attempted; %s", result.TerminationSignal, containmentMessage)
+		workloadExit = -1
+	case commandTerminationNone:
+		if commandResult.Err != nil {
+			message = "experiment runner post-shell finalization failed"
+			workloadExit = -1
+		}
+	default:
+		if !result.TimedOut {
+			message = fmt.Sprintf("experiment shell exited with live descendants; cleanup signal %s attempted; %s", result.TerminationSignal, containmentMessage)
+			workloadExit = -1
+		}
+	}
+	return message, workloadExit
+}
+
+func readSpecSnapshot(kind, id, path string) (speccatalog.Spec, []byte, error) {
+	before, err := os.Lstat(path)
+	if err != nil {
+		return speccatalog.Spec{}, nil, fmt.Errorf("inspect experiment spec: %w", err)
+	}
+	if !before.Mode().IsRegular() || before.Mode()&os.ModeSymlink != 0 {
+		return speccatalog.Spec{}, nil, fmt.Errorf("experiment spec is not a regular non-symlink file: %s", path)
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return speccatalog.Spec{}, nil, fmt.Errorf("open experiment spec: %w", err)
+	}
+	openedBefore, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return speccatalog.Spec{}, nil, fmt.Errorf("inspect opened experiment spec: %w", err)
+	}
+	if !openedBefore.Mode().IsRegular() || !os.SameFile(before, openedBefore) {
+		_ = file.Close()
+		return speccatalog.Spec{}, nil, fmt.Errorf("experiment spec changed while it was opened: %s", path)
+	}
+	content, readErr := io.ReadAll(file)
+	openedAfter, statErr := file.Stat()
+	closeErr := file.Close()
+	if err := errors.Join(readErr, statErr, closeErr); err != nil {
+		return speccatalog.Spec{}, nil, fmt.Errorf("read experiment spec snapshot: %w", err)
+	}
+	if openedBefore.Size() != openedAfter.Size() || !openedBefore.ModTime().Equal(openedAfter.ModTime()) {
+		return speccatalog.Spec{}, nil, fmt.Errorf("experiment spec changed while it was read: %s", path)
+	}
+	after, err := os.Lstat(path)
+	if err != nil || !after.Mode().IsRegular() || after.Mode()&os.ModeSymlink != 0 || !os.SameFile(openedAfter, after) {
+		if err != nil {
+			return speccatalog.Spec{}, nil, fmt.Errorf("reinspect experiment spec: %w", err)
+		}
+		return speccatalog.Spec{}, nil, fmt.Errorf("experiment spec path changed while it was read: %s", path)
+	}
+	values, err := envfile.ParseBytes(path, content)
+	if err != nil {
+		return speccatalog.Spec{}, nil, err
+	}
+	return speccatalog.Spec{Kind: kind, ID: id, Path: path, Values: values}, content, nil
+}
+
+func createExecutionSpecSnapshot(content []byte) (string, func() error, error) {
+	dir, err := os.MkdirTemp("", "pgworkbench-experiment-spec-")
+	if err != nil {
+		return "", nil, err
+	}
+	createdDirInfo, err := os.Lstat(dir)
+	if err != nil {
+		return "", nil, err
+	}
+	if !createdDirInfo.IsDir() || createdDirInfo.Mode()&os.ModeSymlink != 0 {
+		return "", nil, fmt.Errorf("immutable experiment spec path is not the created directory: %s", dir)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return "", nil, errors.Join(err, cleanupExecutionSpecSnapshot(dir, filepath.Join(dir, "experiment.env"), createdDirInfo, nil))
+	}
+	dirInfo, err := os.Lstat(dir)
+	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(createdDirInfo, dirInfo) || dirInfo.Mode().Perm() != 0o700 {
+		if err != nil {
+			return "", nil, err
+		}
+		return "", nil, errors.Join(
+			fmt.Errorf("immutable experiment spec directory changed or has unsafe mode %s", dirInfo.Mode()),
+			cleanupExecutionSpecSnapshot(dir, filepath.Join(dir, "experiment.env"), createdDirInfo, nil),
+		)
+	}
+	path := filepath.Join(dir, "experiment.env")
+	var fileInfo os.FileInfo
+	cleanup := func() error { return cleanupExecutionSpecSnapshot(dir, path, dirInfo, fileInfo) }
+	fail := func(cause error) (string, func() error, error) {
+		return "", nil, errors.Join(cause, cleanup())
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fail(err)
+	}
+	fileInfo, err = file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return fail(err)
+	}
+	writeErr := error(nil)
+	if _, err := file.Write(content); err != nil {
+		writeErr = err
+	} else if err := file.Sync(); err != nil {
+		writeErr = err
+	}
+	closeErr := file.Close()
+	if err := errors.Join(writeErr, closeErr); err != nil {
+		return fail(err)
+	}
+	if err := os.Chmod(path, 0o400); err != nil {
+		return fail(err)
+	}
+	currentFileInfo, err := os.Lstat(path)
+	if err != nil {
+		return fail(err)
+	}
+	if !currentFileInfo.Mode().IsRegular() || currentFileInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(fileInfo, currentFileInfo) || currentFileInfo.Mode().Perm() != 0o400 {
+		return fail(fmt.Errorf("immutable experiment spec snapshot has unsafe mode %s", currentFileInfo.Mode()))
+	}
+	return path, cleanup, nil
+}
+
+func cleanupExecutionSpecSnapshot(dir, path string, dirInfo, fileInfo os.FileInfo) error {
+	if fileInfo != nil {
+		current, err := os.Lstat(path)
+		switch {
+		case os.IsNotExist(err):
+		case err != nil:
+			return err
+		case !current.Mode().IsRegular() || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(fileInfo, current):
+			return fmt.Errorf("refusing to remove replaced experiment spec snapshot: %s", path)
+		default:
+			if err := os.Remove(path); err != nil {
+				return err
+			}
+		}
+	}
+	current, err := os.Lstat(dir)
+	switch {
+	case os.IsNotExist(err):
+		return nil
+	case err != nil:
+		return err
+	case !current.IsDir() || current.Mode()&os.ModeSymlink != 0 || !os.SameFile(dirInfo, current):
+		return fmt.Errorf("refusing to remove replaced experiment spec directory: %s", dir)
+	default:
+		return os.Remove(dir)
+	}
+}
+
+func bytesSHA256(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
 }
 
 func fileSHA256(path string) (string, error) {
@@ -561,8 +972,7 @@ func fileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:]), nil
+	return bytesSHA256(content), nil
 }
 
 func sanitizeID(value string) string {

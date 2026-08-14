@@ -100,6 +100,6 @@ PGWORKBENCH_BENCHMARK_RUN_ID=phase-test-t001
 parent_size="$(wc -c < "$PGWORKBENCH_BENCHMARK_PHASE_FILE")"
 PGWORKBENCH_BENCHMARK_PHASE_FILE='' benchmark_phase_append 5 warmup passed 2026-08-12T00:00:00Z 2026-08-12T00:00:01Z ""
 test "$(wc -c < "$PGWORKBENCH_BENCHMARK_PHASE_FILE")" = "$parent_size"
-grep -A12 '^start_background_specs()' "$REPO_DIR/scripts/run_experiment.sh" | grep -q 'PGWORKBENCH_BENCHMARK_PHASE_FILE='
+grep -A20 '^start_background_specs()' "$REPO_DIR/scripts/run_experiment.sh" | grep -q 'PGWORKBENCH_BENCHMARK_PHASE_FILE='
 
 echo "PASS: benchmark phase clock, validation, abort completion, and background journal isolation"

@@ -6,11 +6,9 @@ TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pgworkbench-utility-provenance.XXXXXX")"
 BIN="$TEST_DIR/pgworkbench"
 CLI_INVALID_RUN_ID="provenance/invalid-$$"
 CLI_INVALID_GENERATED="$REPO_DIR/.tmp/utility-tests/${CLI_INVALID_RUN_ID//\//_}.env"
-CLI_RUN_ID="utility-provenance-guard-$$"
-CLI_GENERATED="$REPO_DIR/.tmp/utility-tests/$CLI_RUN_ID.env"
 
 cleanup() {
-  rm -f -- "$CLI_INVALID_GENERATED" "$CLI_GENERATED"
+  rm -f -- "$CLI_INVALID_GENERATED"
   rm -rf -- "$TEST_DIR"
 }
 trap cleanup EXIT
@@ -51,33 +49,24 @@ if [[ -e "$REPO_DIR/runs/$CLI_INVALID_RUN_ID" || -L "$REPO_DIR/runs/$CLI_INVALID
   exit 1
 fi
 
-# Exercise the real Go translator and shell capability boundary with explicit
-# runtime/run-id flags. The experiment-only target guard stops execution before
-# a runtime or run directory is created, after the derived spec was admitted.
-if PGWORKBENCH_BIN="$BIN" \
-  POSTGRES_HOST=example.invalid \
-  ALLOW_NONLOCAL_PG=1 \
-  "$BIN" utility run --runtime native --run-id "$CLI_RUN_ID" pg-dump/smoke >"$TEST_DIR/cli-guard.out" 2>&1; then
-  echo "FAIL: utility run bypassed the experiment target guard" >&2
-  exit 1
-fi
-grep -q 'Experiment runs do not support ALLOW_NONLOCAL_PG' "$TEST_DIR/cli-guard.out"
-test -f "$CLI_GENERATED"
-grep -q "EXPERIMENT_RUN_ID='$CLI_RUN_ID'" "$CLI_GENERATED"
-if [[ -e "$REPO_DIR/runs/$CLI_RUN_ID" || -L "$REPO_DIR/runs/$CLI_RUN_ID" ]]; then
-  echo "FAIL: target-guarded utility run created a run directory" >&2
-  exit 1
-fi
+# The remaining fixtures deliberately exercise the shell capability boundary
+# in isolated incomplete packs. Utility runner tests prove that production uses
+# the prepared Go route and an exact child environment; process-lifecycle tests
+# independently prove that every public shell route delegates through Go.
+export PGWORKBENCH_SUPERVISED=1
+INTERNAL_RUN_ACTION=__pgworkbench_internal_run_v1
 
 PACK="$TEST_DIR/pack"
 mkdir -p "$PACK/scripts" "$PACK/experiments" "$PACK/utility-tests/example" "$PACK/.tmp/utility-tests"
 cp "$REPO_DIR/scripts/run_experiment.sh" "$PACK/scripts/run_experiment.sh"
+cp "$REPO_DIR/scripts/exact_environment.sh" "$PACK/scripts/exact_environment.sh"
 cp "$REPO_DIR/scripts/guard_local_pg.sh" "$PACK/scripts/guard_local_pg.sh"
 cp "$REPO_DIR/scripts/target_arg_guard.sh" "$PACK/scripts/target_arg_guard.sh"
 cp "$REPO_DIR/scripts/benchmark_phase.sh" "$PACK/scripts/benchmark_phase.sh"
 cp "$REPO_DIR/scripts/benchmark_control.sh" "$PACK/scripts/benchmark_control.sh"
 cp "$REPO_DIR/scripts/benchmark_capsule.sh" "$PACK/scripts/benchmark_capsule.sh"
 cp "$REPO_DIR/scripts/capture_effective_pg_settings.sh" "$PACK/scripts/capture_effective_pg_settings.sh"
+cp "$REPO_DIR/scripts/process_lifecycle.sh" "$PACK/scripts/process_lifecycle.sh"
 chmod +x "$PACK/scripts/"*.sh
 
 SOURCE="$PACK/utility-tests/example/smoke.env"
@@ -105,7 +94,7 @@ DERIVED_ENV=(
   "PGWORKBENCH_PACK_DIGEST="
 )
 
-if env "${DERIVED_ENV[@]}" "$PACK/scripts/run_experiment.sh" run "$GENERATED" >"$TEST_DIR/accepted.out" 2>&1; then
+if env "${DERIVED_ENV[@]}" "$PACK/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" "$GENERATED" >"$TEST_DIR/accepted.out" 2>&1; then
   echo "FAIL: derived fixture accepted an invalid run id" >&2
   exit 1
 fi
@@ -119,9 +108,32 @@ if [[ -e "$PACK/runs/invalid/run-id" || -L "$PACK/runs/invalid/run-id" ]]; then
   exit 1
 fi
 
+# A prepared utility run keeps the generated logical path for source-capability
+# checks and portable identity, but sources the exact bytes snapshotted by Go.
+GENERATED_ORIGINAL="$TEST_DIR/generated-original.env"
+EXECUTION_SNAPSHOT="$TEST_DIR/generated-execution-snapshot.env"
+cp "$GENERATED" "$GENERATED_ORIGINAL"
+cp "$GENERATED" "$EXECUTION_SNAPSHOT"
+printf '%s\n' 'EXPERIMENT_STATE_WRITER=snapshot-selected-A' >> "$EXECUTION_SNAPSHOT"
+printf '%s\n' 'EXPERIMENT_STATE_WRITER=logical-replacement-B' >> "$GENERATED"
+EXECUTION_DIGEST="$(sha256_digest_file "$EXECUTION_SNAPSHOT")"
+snapshot_status=0
+env "${DERIVED_ENV[@]}" \
+  PGWORKBENCH_EXECUTION_SPEC_FILE="$EXECUTION_SNAPSHOT" \
+  EXPERIMENT_SPEC_SHA256="$EXECUTION_DIGEST" \
+  "$PACK/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" "$GENERATED" \
+  >"$TEST_DIR/utility-snapshot.out" 2>&1 || snapshot_status="$?"
+if [[ "$snapshot_status" != "2" ]] ||
+   ! grep -q 'Unsupported EXPERIMENT_STATE_WRITER: snapshot-selected-A' "$TEST_DIR/utility-snapshot.out"; then
+  echo "FAIL: utility-derived route did not source the runner-selected bytes" >&2
+  cat "$TEST_DIR/utility-snapshot.out" >&2
+  exit 1
+fi
+cp "$GENERATED_ORIGINAL" "$GENERATED"
+
 # The capability is fail-closed when the reviewed source bytes drift.
 printf '# tampered\n' >> "$SOURCE"
-if env "${DERIVED_ENV[@]}" "$PACK/scripts/run_experiment.sh" run "$GENERATED" >"$TEST_DIR/tamper.out" 2>&1; then
+if env "${DERIVED_ENV[@]}" "$PACK/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" "$GENERATED" >"$TEST_DIR/tamper.out" 2>&1; then
   echo "FAIL: stale source digest was accepted" >&2
   exit 1
 fi
@@ -133,7 +145,7 @@ OUTSIDE_SOURCE="$TEST_DIR/outside-source.env"
 cp "$SOURCE" "$OUTSIDE_SOURCE"
 rm "$SOURCE"
 ln -s "$OUTSIDE_SOURCE" "$SOURCE"
-if env "${DERIVED_ENV[@]}" "$PACK/scripts/run_experiment.sh" run "$GENERATED" >"$TEST_DIR/source-symlink.out" 2>&1; then
+if env "${DERIVED_ENV[@]}" "$PACK/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" "$GENERATED" >"$TEST_DIR/source-symlink.out" 2>&1; then
   echo "FAIL: symlinked utility source was accepted" >&2
   exit 1
 fi
@@ -145,7 +157,7 @@ OUTSIDE_GENERATED="$TEST_DIR/outside-generated.env"
 cp "$GENERATED" "$OUTSIDE_GENERATED"
 rm "$GENERATED"
 ln -s "$OUTSIDE_GENERATED" "$GENERATED"
-if env "${DERIVED_ENV[@]}" "$PACK/scripts/run_experiment.sh" run "$GENERATED" >"$TEST_DIR/generated-symlink.out" 2>&1; then
+if env "${DERIVED_ENV[@]}" "$PACK/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" "$GENERATED" >"$TEST_DIR/generated-symlink.out" 2>&1; then
   echo "FAIL: symlinked generated utility spec was accepted" >&2
   exit 1
 fi
@@ -157,7 +169,7 @@ cp "$OUTSIDE_GENERATED" "$GENERATED"
 # the generated adapter is sourced or any run directory is prepared.
 if env "${DERIVED_ENV[@]}" \
   PGWORKBENCH_SOURCE_SPEC_DIGEST= \
-  "$PACK/scripts/run_experiment.sh" run "$GENERATED" >"$TEST_DIR/incomplete.out" 2>&1; then
+  "$PACK/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" "$GENERATED" >"$TEST_DIR/incomplete.out" 2>&1; then
   echo "FAIL: incomplete utility source tuple was accepted" >&2
   exit 1
 fi
@@ -165,7 +177,7 @@ grep -q 'Utility-derived source spec digest must be canonical sha256' "$TEST_DIR
 
 if env "${DERIVED_ENV[@]}" \
   PGWORKBENCH_PACK_ID=forged-pack \
-  "$PACK/scripts/run_experiment.sh" run "$GENERATED" >"$TEST_DIR/pack-claim.out" 2>&1; then
+  "$PACK/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" "$GENERATED" >"$TEST_DIR/pack-claim.out" 2>&1; then
   echo "FAIL: derived utility spec claimed scenario-pack identity" >&2
   exit 1
 fi
@@ -184,7 +196,7 @@ if env \
   PGWORKBENCH_SOURCE_SPEC_ID=example/smoke \
   PGWORKBENCH_SOURCE_SPEC_REF=utility-tests/example/smoke.env \
   PGWORKBENCH_SOURCE_SPEC_DIGEST="$SOURCE_DIGEST" \
-  "$PACK/scripts/run_experiment.sh" run smoke >"$TEST_DIR/ordinary-spoof.out" 2>&1; then
+  "$PACK/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" smoke >"$TEST_DIR/ordinary-spoof.out" 2>&1; then
   echo "FAIL: ordinary experiment accepted utility source provenance" >&2
   exit 1
 fi

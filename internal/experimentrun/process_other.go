@@ -4,6 +4,7 @@ package experimentrun
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 )
@@ -29,4 +30,22 @@ func signalProcessGroup(cmd *exec.Cmd, signal processSignal) error {
 
 func processGroupStatus(_ *exec.Cmd) (bool, error) {
 	return false, fmt.Errorf("process-group status is unsupported on %s", runtime.GOOS)
+}
+
+func processInterruptSignals() []os.Signal {
+	return []os.Signal{os.Interrupt}
+}
+
+func processInterruptSignalName(received os.Signal) string {
+	if received == os.Interrupt {
+		return "SIGINT"
+	}
+	return fmt.Sprintf("signal(%v)", received)
+}
+
+func processInterruptExitCode(received os.Signal) int {
+	if received == os.Interrupt {
+		return 130
+	}
+	return 128
 }

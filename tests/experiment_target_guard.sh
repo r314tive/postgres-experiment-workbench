@@ -1,18 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PGWORKBENCH_SUPERVISED=1
+INTERNAL_RUN_ACTION=__pgworkbench_internal_run_v1
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pgworkbench-target-guard.XXXXXX")"
 trap 'rm -rf -- "$TMP_DIR"' EXIT
 
 RUNNER="$REPO_DIR/scripts/run_experiment.sh"
 
+sha256_hex() {
+  local file="${1:?file is required}"
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -- "$file" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -- "$file" | awk '{print $1}'
+  else
+    echo "SHA-256 implementation is required" >&2
+    return 2
+  fi
+}
+
 assert_rejected_without_run() {
   local run_id="$1"
   local expected="$2"
   shift 2
 
-  if env EXPERIMENT_RUN_ID="$run_id" "$@" "$RUNNER" run smoke \
+  if env EXPERIMENT_RUN_ID="$run_id" "$@" "$RUNNER" "$INTERNAL_RUN_ACTION" smoke \
     >"$TMP_DIR/$run_id.out" 2>"$TMP_DIR/$run_id.err"; then
     echo "FAIL: unsafe experiment target was accepted: $run_id" >&2
     exit 1
@@ -39,6 +54,57 @@ assert_rejected_without_run "target-system-db-$$" \
 assert_rejected_without_run "target-system-db-direct-$$" \
   'Experiment runs refuse PostgreSQL system database: postgres' \
   POSTGRES_DB=postgres
+
+if PGWORKBENCH_EXACT_ENVIRONMENT=invalid "$RUNNER" list \
+  >"$TMP_DIR/invalid-exact-marker.out" 2>&1; then
+  echo "FAIL: malformed exact-environment marker was accepted" >&2
+  exit 1
+fi
+grep -q 'PGWORKBENCH_EXACT_ENVIRONMENT must be 0 or 1: invalid' \
+  "$TMP_DIR/invalid-exact-marker.out"
+
+# Exact runner mode resolves ENV_FILE for Docker Compose but never executes it
+# in the host shell. The invalid run id makes this probe stop before any runtime
+# mutation after both the repo-env and top-level-spec loading boundaries.
+EXACT_ENV_SENTINEL="$TMP_DIR/exact-env-sourced"
+cat > "$TMP_DIR/hostile-repo.env" <<'ENV'
+: > "${EXACT_ENV_SENTINEL:?}"
+EXPERIMENT_RUN_ID=hostile-env-owned-run
+PGWORKBENCH_EXACT_ENVIRONMENT=0
+ENV
+if env \
+  PGWORKBENCH_EXACT_ENVIRONMENT=1 \
+  ENV_FILE="$TMP_DIR/hostile-repo.env" \
+  EXACT_ENV_SENTINEL="$EXACT_ENV_SENTINEL" \
+  EXPERIMENT_RUN_ID='../invalid' \
+  "$RUNNER" "$INTERNAL_RUN_ACTION" smoke \
+  >"$TMP_DIR/exact-top-level.out" 2>&1; then
+  echo "FAIL: exact top-level probe unexpectedly passed" >&2
+  exit 1
+fi
+grep -q 'Invalid EXPERIMENT_RUN_ID' "$TMP_DIR/exact-top-level.out"
+if [[ -e "$EXACT_ENV_SENTINEL" ]]; then
+  echo "FAIL: exact top-level runner sourced hostile ENV_FILE" >&2
+  exit 1
+fi
+
+# Trusted specs cannot downgrade the runner-owned exact-environment boundary.
+cat > "$TMP_DIR/hostile-experiment.env" <<'ENV'
+EXPERIMENT_NAME="hostile exact marker override"
+PGWORKBENCH_EXACT_ENVIRONMENT=0
+ENV
+HOSTILE_EXPERIMENT_DIGEST="$(sha256_hex "$TMP_DIR/hostile-experiment.env")"
+if env \
+  PGWORKBENCH_EXACT_ENVIRONMENT=1 \
+  PGWORKBENCH_EXECUTION_SPEC_FILE="$TMP_DIR/hostile-experiment.env" \
+  EXPERIMENT_SPEC_SHA256="$HOSTILE_EXPERIMENT_DIGEST" \
+  EXPERIMENT_RUN_ID='../invalid' \
+  "$RUNNER" "$INTERNAL_RUN_ACTION" smoke \
+  >"$TMP_DIR/exact-spec-marker.out" 2>&1; then
+  echo "FAIL: top-level spec changed the exact-environment marker" >&2
+  exit 1
+fi
+grep -q 'PGWORKBENCH_EXACT_ENVIRONMENT: readonly variable' "$TMP_DIR/exact-spec-marker.out"
 
 mkdir -p "$TMP_DIR/fake-bin"
 cat > "$TMP_DIR/fake-bin/psql" <<'SCRIPT'
@@ -81,6 +147,7 @@ ENV
 BOUNDARY_ENV=(
   env
   PATH="$TMP_DIR/fake-bin:$PATH"
+  PGWORKBENCH_EXACT_ENVIRONMENT=1
   PGWORKBENCH_RUNTIME=native
   PGWORKBENCH_NATIVE_BINDIR="$TMP_DIR/fake-bin"
   PGWORKBENCH_EXPERIMENT_MODE=1
@@ -96,6 +163,8 @@ BOUNDARY_ENV=(
   ALLOW_SYSTEM_DB=0
   WORKLOAD_RUN_LOG=0
   TARGET_COMMAND_LOG="$TMP_DIR/commands.log"
+  ENV_FILE="$TMP_DIR/hostile-repo.env"
+  EXACT_ENV_SENTINEL="$EXACT_ENV_SENTINEL"
 )
 
 /bin/bash -uc 'source "$1"; pgworkbench_reject_experiment_target_args' bash \
@@ -103,6 +172,38 @@ BOUNDARY_ENV=(
 
 "${BOUNDARY_ENV[@]}" "$REPO_DIR/scripts/run_workload.sh" run "$TMP_DIR/nested-workload.env" >/dev/null
 "${BOUNDARY_ENV[@]}" "$REPO_DIR/scripts/load_dataset.sh" load "$TMP_DIR/nested-dataset.env" >/dev/null
+
+if [[ -e "$EXACT_ENV_SENTINEL" ]]; then
+  echo "FAIL: exact workload or dataset loader sourced hostile ENV_FILE" >&2
+  exit 1
+fi
+
+cat > "$TMP_DIR/exact-marker-workload.env" <<'ENV'
+WORKLOAD_NAME="hostile exact marker override"
+WORKLOAD_KIND=shell
+WORKLOAD_REQUIRES_POSTGRES=0
+WORKLOAD_CMD=true
+PGWORKBENCH_EXACT_ENVIRONMENT=0
+ENV
+if "${BOUNDARY_ENV[@]}" "$REPO_DIR/scripts/run_workload.sh" run \
+  "$TMP_DIR/exact-marker-workload.env" >"$TMP_DIR/exact-marker-workload.out" 2>&1; then
+  echo "FAIL: workload spec changed the exact-environment marker" >&2
+  exit 1
+fi
+grep -q 'PGWORKBENCH_EXACT_ENVIRONMENT: readonly variable' "$TMP_DIR/exact-marker-workload.out"
+
+cat > "$TMP_DIR/exact-marker-dataset.env" <<'ENV'
+DATASET_NAME="hostile exact marker override"
+DATASET_KIND=sql
+DATASET_SQL=/dev/null
+PGWORKBENCH_EXACT_ENVIRONMENT=0
+ENV
+if "${BOUNDARY_ENV[@]}" "$REPO_DIR/scripts/load_dataset.sh" load \
+  "$TMP_DIR/exact-marker-dataset.env" >"$TMP_DIR/exact-marker-dataset.out" 2>&1; then
+  echo "FAIL: dataset spec changed the exact-environment marker" >&2
+  exit 1
+fi
+grep -q 'PGWORKBENCH_EXACT_ENVIRONMENT: readonly variable' "$TMP_DIR/exact-marker-dataset.out"
 
 if grep -Eq -- '-h 203\.0\.113\.[0-9]+ |-p 654[34] |-d (postgres|template1)( |$)' "$TMP_DIR/commands.log"; then
   echo "FAIL: nested spec changed an experiment-owned PostgreSQL target" >&2
@@ -264,8 +365,11 @@ BOUNDARY_REPO="$TMP_DIR/boundary-repo"
 mkdir -p "$BOUNDARY_REPO/scripts"
 cp "$REPO_DIR/scripts/psql.sh" "$BOUNDARY_REPO/scripts/psql.sh"
 cp "$REPO_DIR/scripts/guard_local_pg.sh" "$BOUNDARY_REPO/scripts/guard_local_pg.sh"
+cp "$REPO_DIR/scripts/exact_environment.sh" "$BOUNDARY_REPO/scripts/exact_environment.sh"
 chmod +x "$BOUNDARY_REPO/scripts/"*.sh
 cat > "$BOUNDARY_REPO/.env" <<'ENV'
+: > "${EXACT_PSQL_ENV_SENTINEL:?}"
+PGWORKBENCH_EXACT_ENVIRONMENT=0
 PGWORKBENCH_EXPERIMENT_MODE=0
 POSTGRES_HOST=203.0.113.20
 POSTGRES_DB=postgres
@@ -273,7 +377,9 @@ ALLOW_NONLOCAL_PG=1
 ALLOW_SYSTEM_DB=1
 ENV
 TARGET_COMMAND_LOG="$TMP_DIR/preserved.log" \
+EXACT_PSQL_ENV_SENTINEL="$TMP_DIR/exact-psql-env-sourced" \
 PATH="$TMP_DIR/fake-bin:$PATH" \
+PGWORKBENCH_EXACT_ENVIRONMENT=1 \
 PGWORKBENCH_RUNTIME=native \
 PGWORKBENCH_NATIVE_BINDIR="$TMP_DIR/fake-bin" \
 PGWORKBENCH_EXPERIMENT_MODE=1 \
@@ -283,6 +389,10 @@ ALLOW_NONLOCAL_PG=0 \
 ALLOW_SYSTEM_DB=0 \
   "$BOUNDARY_REPO/scripts/psql.sh" -c 'SELECT 1'
 grep -q -- '-h 127.0.0.1 .* -d pg_experiment_workbench ' "$TMP_DIR/preserved.log"
+if [[ -e "$TMP_DIR/exact-psql-env-sourced" ]]; then
+  echo "FAIL: exact psql helper sourced checkout-local .env" >&2
+  exit 1
+fi
 
 # libpq can prefer PGHOSTADDR or service-file routing even when -h is present.
 cat > "$TMP_DIR/fake-bin/psql" <<'SCRIPT'

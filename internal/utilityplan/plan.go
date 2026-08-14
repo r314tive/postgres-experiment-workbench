@@ -38,7 +38,20 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	if errs := catalog.Validate("utility-test", []string{spec.ID}); len(errs) > 0 {
+	return BuildPrepared(catalog, spec)
+}
+
+// BuildPrepared builds a utility plan from one already-selected spec snapshot.
+// Validation consumes the supplied values instead of reopening the mutable
+// catalog path, so the plan and caller-owned source digest cannot diverge.
+func BuildPrepared(catalog speccatalog.Catalog, spec speccatalog.Spec) (Plan, error) {
+	if spec.Kind != "utility-test" {
+		return Plan{}, fmt.Errorf("prepared spec kind must be utility-test: %s", spec.Kind)
+	}
+	if strings.TrimSpace(spec.ID) == "" || strings.TrimSpace(spec.Path) == "" || spec.Values == nil {
+		return Plan{}, fmt.Errorf("prepared utility-test spec is incomplete")
+	}
+	if errs := catalog.ValidateSpec(spec); len(errs) > 0 {
 		return Plan{}, errors.Join(errs...)
 	}
 

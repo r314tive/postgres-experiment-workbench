@@ -2,6 +2,9 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=exact_environment.sh
+source "$REPO_DIR/scripts/exact_environment.sh"
+pgworkbench_initialize_exact_environment
 
 usage() {
   cat <<'USAGE'
@@ -57,7 +60,7 @@ do
   fi
 done
 
-if [[ -f "$ENV_PATH" ]]; then
+if [[ -f "$ENV_PATH" ]] && ! pgworkbench_exact_environment_active; then
   set -a
   # shellcheck disable=SC1090
   source "$ENV_PATH"

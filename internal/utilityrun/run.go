@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/r314tive/postgres-experiment-workbench/internal/envfile"
 	"github.com/r314tive/postgres-experiment-workbench/internal/evidence"
+	"github.com/r314tive/postgres-experiment-workbench/internal/experimentrun"
 	"github.com/r314tive/postgres-experiment-workbench/internal/pathguard"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/utilityplan"
@@ -30,6 +31,49 @@ const (
 	UtilityTestSourceKind   = "utility-test"
 )
 
+type LookupEnv func(string) (string, bool)
+
+// CLILookupEnvironment projects the small, documented set of ambient values
+// that a utility-derived experiment is allowed to consume. The prepared
+// experiment runner uses ExactEnvironment, so workbench/protocol values outside
+// this list are removed before the shell control plane starts. The conventional
+// process-bootstrap allow-list (including PATH) is retained separately and is
+// not utility evidence identity.
+//
+// Native toolchain digests are deliberately absent. A utility run does not
+// independently inspect and bind a native toolchain, so inheriting such a
+// digest would turn an ambient claim into evidence identity.
+func CLILookupEnvironment(lookup LookupEnv) []string {
+	if lookup == nil {
+		return nil
+	}
+	keys := []string{
+		"COMPOSE",
+		"PGWORKBENCH_RUNTIME",
+		"PGWORKBENCH_NATIVE_BINDIR",
+		"PGWORKBENCH_NATIVE_WAIT_SECONDS",
+		"PG_INSTALL_DIR",
+		"POSTGRES_HOST",
+		"POSTGRES_PORT",
+		"POSTGRES_DB",
+		"POSTGRES_USER",
+		"POSTGRES_PASSWORD",
+		"PROFILE_SIZE",
+		"PROFILE_SECONDS",
+		"METRICS_INTERVAL",
+		"METRICS_DURATION",
+		"METRICS_SAMPLES",
+		"UTILITY_TEST_SNAPSHOT",
+	}
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if value, present := lookup(key); present {
+			result = append(result, key+"="+value)
+		}
+	}
+	return result
+}
+
 type CommandResult struct {
 	ExitCode int
 	Err      error
@@ -37,16 +81,26 @@ type CommandResult struct {
 
 type CommandRunner func(root string, command []string, env []string, stdout io.Writer, stderr io.Writer) CommandResult
 
+type ExperimentRunner func(root string, spec speccatalog.Spec, options experimentrun.Options) (experimentrun.Result, error)
+
 type Env func(string) string
 
 type Options struct {
-	Runtime    string
-	RunID      string
-	Stdout     io.Writer
-	Stderr     io.Writer
-	Env        []string
-	Now        func() time.Time
-	Getenv     Env
+	Runtime          string
+	RunID            string
+	Stdout           io.Writer
+	Stderr           io.Writer
+	Env              []string
+	Now              func() time.Time
+	Getenv           Env
+	EngineVersion    string
+	EngineCommit     string
+	BinaryPath       string
+	ExecutionTimeout time.Duration
+	CleanupGrace     time.Duration
+	RunExperiment    ExperimentRunner
+	// RunCommand is retained as a narrow test seam. Production execution uses
+	// RunExperiment so the Go runner owns the complete process group.
 	RunCommand CommandRunner
 }
 
@@ -71,15 +125,11 @@ func (r Result) Passed() bool {
 
 func Run(root string, catalog speccatalog.Catalog, input string, options Options) (Result, error) {
 	options = withDefaults(options)
-	sourceSpec, err := catalog.Show("utility-test", input)
+	sourceSpec, source, err := selectSourceSpec(root, catalog, input)
 	if err != nil {
 		return Result{}, err
 	}
-	sourceBeforePlan, err := resolveSourceSpec(root, sourceSpec)
-	if err != nil {
-		return Result{}, err
-	}
-	plan, err := utilityplan.Build(catalog, input)
+	plan, err := utilityplan.BuildPrepared(catalog, sourceSpec)
 	if err != nil {
 		return Result{}, err
 	}
@@ -97,7 +147,6 @@ func Run(root string, catalog speccatalog.Catalog, input string, options Options
 	if runtime != "docker" && runtime != "native" {
 		return Result{}, fmt.Errorf("unsupported runtime %q: expected docker or native", runtime)
 	}
-
 	started := options.Now().UTC()
 	runID := strings.TrimSpace(options.RunID)
 	if runID == "" {
@@ -112,14 +161,10 @@ func Run(root string, catalog speccatalog.Catalog, input string, options Options
 	if !validRunID(runID) {
 		return Result{}, fmt.Errorf("invalid run id %q", runID)
 	}
+	if runtime == "native" && strings.TrimSpace(envValue(options.Env, "PGWORKBENCH_NATIVE_BINDIR")) == "" && strings.TrimSpace(envValue(options.Env, "PG_INSTALL_DIR")) == "" {
+		return Result{}, fmt.Errorf("native utility execution requires PGWORKBENCH_NATIVE_BINDIR or PG_INSTALL_DIR")
+	}
 
-	source, err := resolveSourceSpec(root, plan.Spec)
-	if err != nil {
-		return Result{}, err
-	}
-	if source != sourceBeforePlan {
-		return Result{}, fmt.Errorf("utility-test source changed while building plan: %s", source.Ref)
-	}
 	experimentSpec, err := writeExperimentSpec(root, plan, runID)
 	if err != nil {
 		return Result{}, err
@@ -138,6 +183,7 @@ func Run(root string, catalog speccatalog.Catalog, input string, options Options
 	}
 
 	commandEnv := mergeEnv(options.Env, []string{
+		"ENV_FILE=.env.example",
 		"PGWORKBENCH_RUNTIME=" + runtime,
 		"UTILITY_TEST_RUN_ID=" + runID,
 		ExperimentSpecScopeEnv + "=" + UtilityDerivedSpecScope,
@@ -150,7 +196,50 @@ func Run(root string, catalog speccatalog.Catalog, input string, options Options
 		"PGWORKBENCH_PACK_VERSION=",
 		"PGWORKBENCH_PACK_DIGEST=",
 	})
-	commandResult := options.RunCommand(root, command, commandEnv, options.Stdout, options.Stderr)
+	commandResult := CommandResult{ExitCode: -1}
+	if options.RunCommand != nil {
+		commandResult = options.RunCommand(root, command, commandEnv, options.Stdout, options.Stderr)
+	} else {
+		values, parseErr := envfile.Parse(experimentSpec)
+		if parseErr != nil {
+			return result, fmt.Errorf("parse generated utility experiment spec: %w", parseErr)
+		}
+		prepared := speccatalog.Spec{
+			Kind:   "experiment",
+			ID:     path.Join("utility", source.ID),
+			Path:   experimentSpec,
+			Values: values,
+		}
+		experimentResult, runErr := options.RunExperiment(root, prepared, experimentrun.Options{
+			Runtime:          runtime,
+			RunID:            runID,
+			Env:              commandEnv,
+			ExactEnvironment: true,
+			EngineVersion:    options.EngineVersion,
+			EngineCommit:     options.EngineCommit,
+			BinaryPath:       options.BinaryPath,
+			Stdout:           options.Stdout,
+			Stderr:           options.Stderr,
+			ExecutionTimeout: options.ExecutionTimeout,
+			CleanupGrace:     options.CleanupGrace,
+			Now:              options.Now,
+			Getenv:           options.Getenv,
+		})
+		// Report the command that the prepared runner actually executed. The
+		// public shell form above is retained only for the legacy test seam; in
+		// production it would re-enter catalog resolution and is deliberately not
+		// the prepared-spec execution path.
+		if len(experimentResult.Command) > 0 {
+			result.Command = append([]string(nil), experimentResult.Command...)
+		}
+		if experimentResult.SchemaVersion != "" {
+			commandResult.ExitCode = experimentResult.ExitCode
+		}
+		commandResult.Err = runErr
+		if runErr == nil && !experimentResult.Passed() {
+			commandResult.Err = fmt.Errorf("prepared utility experiment did not pass")
+		}
+	}
 	finished := options.Now().UTC()
 	result.FinishedAt = finished.Format(time.RFC3339)
 	result.DurationMS = maxDurationMS(finished.Sub(started))
@@ -211,32 +300,10 @@ func withDefaults(options Options) Options {
 	if options.Getenv == nil {
 		options.Getenv = os.Getenv
 	}
-	if options.RunCommand == nil {
-		options.RunCommand = defaultRunCommand
+	if options.RunExperiment == nil {
+		options.RunExperiment = experimentrun.RunPrepared
 	}
 	return options
-}
-
-func defaultRunCommand(root string, command []string, env []string, stdout io.Writer, stderr io.Writer) CommandResult {
-	if len(command) == 0 {
-		return CommandResult{ExitCode: -1, Err: fmt.Errorf("empty utility test command")}
-	}
-
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Dir = root
-	cmd.Env = mergeEnv(os.Environ(), env)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-
-	err := cmd.Run()
-	if err == nil {
-		return CommandResult{ExitCode: 0}
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return CommandResult{ExitCode: exitErr.ExitCode(), Err: err}
-	}
-	return CommandResult{ExitCode: -1, Err: err}
 }
 
 func mergeEnv(base []string, overrides []string) []string {
@@ -304,44 +371,90 @@ type sourceSpecIdentity struct {
 	Digest string
 }
 
-func resolveSourceSpec(root string, spec speccatalog.Spec) (sourceSpecIdentity, error) {
+func selectSourceSpec(root string, catalog speccatalog.Catalog, input string) (speccatalog.Spec, sourceSpecIdentity, error) {
+	specPath, resolvedID, err := catalog.Resolve("utility-test", input)
+	if err != nil {
+		return speccatalog.Spec{}, sourceSpecIdentity{}, err
+	}
 	canonicalRoot, err := canonicalDirectory(root, "repository root")
 	if err != nil {
-		return sourceSpecIdentity{}, err
+		return speccatalog.Spec{}, sourceSpecIdentity{}, err
 	}
-	id := filepath.ToSlash(strings.TrimSpace(spec.ID))
+	id := filepath.ToSlash(strings.TrimSpace(resolvedID))
 	if !validSourceSpecID(id) {
-		return sourceSpecIdentity{}, fmt.Errorf("utility-test source id is not a canonical portable id: %s", spec.ID)
+		return speccatalog.Spec{}, sourceSpecIdentity{}, fmt.Errorf("utility-test source id is not a canonical portable id: %s", resolvedID)
 	}
 	ref := path.Join("utility-tests", id+".env")
 	if !evidence.IsPortablePath(ref) {
-		return sourceSpecIdentity{}, fmt.Errorf("utility-test source ref is not portable: %s", ref)
+		return speccatalog.Spec{}, sourceSpecIdentity{}, fmt.Errorf("utility-test source ref is not portable: %s", ref)
 	}
 
 	expected, err := secureExistingFile(canonicalRoot, ref)
 	if err != nil {
-		return sourceSpecIdentity{}, fmt.Errorf("resolve utility-test source %s: %w", ref, err)
+		return speccatalog.Spec{}, sourceSpecIdentity{}, fmt.Errorf("resolve utility-test source %s: %w", ref, err)
 	}
-	candidate := spec.Path
+	candidate := specPath
 	if !filepath.IsAbs(candidate) {
 		candidate = filepath.Join(canonicalRoot, candidate)
 	}
 	candidate, err = filepath.EvalSymlinks(candidate)
 	if err != nil {
-		return sourceSpecIdentity{}, fmt.Errorf("resolve utility-test source path: %w", err)
+		return speccatalog.Spec{}, sourceSpecIdentity{}, fmt.Errorf("resolve utility-test source path: %w", err)
 	}
 	candidate, err = filepath.Abs(candidate)
 	if err != nil {
-		return sourceSpecIdentity{}, fmt.Errorf("resolve utility-test source path: %w", err)
+		return speccatalog.Spec{}, sourceSpecIdentity{}, fmt.Errorf("resolve utility-test source path: %w", err)
 	}
 	if filepath.Clean(candidate) != expected {
-		return sourceSpecIdentity{}, fmt.Errorf("utility-test source path does not match %s", ref)
+		return speccatalog.Spec{}, sourceSpecIdentity{}, fmt.Errorf("utility-test source path does not match %s", ref)
 	}
-	digest, err := evidence.DigestFile(expected)
+	content, err := readStableSourceSpec(expected)
 	if err != nil {
-		return sourceSpecIdentity{}, fmt.Errorf("digest utility-test source %s: %w", ref, err)
+		return speccatalog.Spec{}, sourceSpecIdentity{}, fmt.Errorf("read utility-test source %s: %w", ref, err)
 	}
-	return sourceSpecIdentity{ID: id, Ref: ref, Digest: digest}, nil
+	values, err := envfile.ParseBytes(expected, content)
+	if err != nil {
+		return speccatalog.Spec{}, sourceSpecIdentity{}, err
+	}
+	spec := speccatalog.Spec{Kind: "utility-test", ID: id, Path: expected, Values: values}
+	identity := sourceSpecIdentity{ID: id, Ref: ref, Digest: evidence.DigestBytes(content)}
+	return spec, identity, nil
+}
+
+func readStableSourceSpec(path string) ([]byte, error) {
+	before, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !before.Mode().IsRegular() || before.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("source is not a regular non-symlink file: %s", path)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	openedBefore, err := file.Stat()
+	if err != nil || !os.SameFile(before, openedBefore) {
+		_ = file.Close()
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("source changed while it was opened: %s", path)
+	}
+	content, readErr := io.ReadAll(file)
+	openedAfter, statErr := file.Stat()
+	closeErr := file.Close()
+	if err := errors.Join(readErr, statErr, closeErr); err != nil {
+		return nil, err
+	}
+	after, err := os.Lstat(path)
+	if err != nil || !after.Mode().IsRegular() || after.Mode()&os.ModeSymlink != 0 || !os.SameFile(openedAfter, after) || openedBefore.Size() != openedAfter.Size() || !openedBefore.ModTime().Equal(openedAfter.ModTime()) {
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("source changed while it was read: %s", path)
+	}
+	return content, nil
 }
 
 func secureGeneratedSpecDir(root string) (string, error) {

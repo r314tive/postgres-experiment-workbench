@@ -39,6 +39,16 @@ func TestRunUtilitySuiteWritesSummary(t *testing.T) {
 	var seen []string
 
 	result, err := Run(root, speccatalog.New(root), "native", RunOptions{
+		EngineVersion: "0.2.0",
+		EngineCommit:  "0123456789abcdef0123456789abcdef01234567",
+		BinaryPath:    "/opt/pgworkbench",
+		Env: []string{
+			"PGWORKBENCH_RUNTIME=native",
+			"PGWORKBENCH_NATIVE_BINDIR=/opt/postgres/bin",
+			"POSTGRES_HOST=127.0.0.1",
+			"POSTGRES_PORT=59433",
+			"PROFILE_SIZE=ambient-must-not-win",
+		},
 		Now: func() time.Time { return now },
 		Getenv: func(key string) string {
 			if key == "UTILITY_SUITE_RUN_ID" {
@@ -47,6 +57,19 @@ func TestRunUtilitySuiteWritesSummary(t *testing.T) {
 			return ""
 		},
 		RunUtility: func(_ string, _ speccatalog.Catalog, input string, options utilityrun.Options) (utilityrun.Result, error) {
+			if options.EngineVersion != "0.2.0" || options.EngineCommit != "0123456789abcdef0123456789abcdef01234567" || options.BinaryPath != "/opt/pgworkbench" {
+				t.Fatalf("suite lost engine identity: %#v", options)
+			}
+			for key, want := range map[string]string{
+				"PGWORKBENCH_RUNTIME":       "native",
+				"PGWORKBENCH_NATIVE_BINDIR": "/opt/postgres/bin",
+				"POSTGRES_HOST":             "127.0.0.1",
+				"POSTGRES_PORT":             "59433",
+			} {
+				if got := options.Getenv(key); got != want {
+					t.Fatalf("suite runtime environment %s=%q, want %q", key, got, want)
+				}
+			}
 			seen = append(seen, input+"|"+options.Getenv("UTILITY_TEST_RUN_ID")+"|"+options.Getenv("PROFILE_SIZE")+"|"+options.Getenv("UTILITY_TEST_SNAPSHOT"))
 			return utilityrun.Result{
 				UtilityTestSpec: input,

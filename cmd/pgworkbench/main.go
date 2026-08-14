@@ -1208,11 +1208,19 @@ func runUtility(root string, catalog speccatalog.Catalog, args []string) error {
 		if options["json"] == "1" {
 			commandStdout = os.Stderr
 		}
+		binaryPath, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("resolve pgworkbench executable: %w", err)
+		}
 		result, runErr := utilityrun.Run(root, catalog, inputs[0], utilityrun.Options{
-			Runtime: options["runtime"],
-			RunID:   options["run-id"],
-			Stdout:  commandStdout,
-			Stderr:  os.Stderr,
+			Runtime:       options["runtime"],
+			RunID:         options["run-id"],
+			EngineVersion: version,
+			EngineCommit:  commit,
+			BinaryPath:    binaryPath,
+			Env:           utilityrun.CLILookupEnvironment(os.LookupEnv),
+			Stdout:        commandStdout,
+			Stderr:        os.Stderr,
 		})
 		if result.UtilityTestSpec != "" {
 			if options["json"] == "1" {
@@ -1305,9 +1313,17 @@ func runUtilitySuite(root string, catalog speccatalog.Catalog, args []string) er
 		if len(inputs) != 1 {
 			return fmt.Errorf("usage: pgworkbench utility-suite run [--json] <utility-suite>")
 		}
+		binaryPath, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("resolve pgworkbench executable: %w", err)
+		}
 		result, runErr := utilitysuite.Run(root, catalog, inputs[0], utilitysuite.RunOptions{
-			Stdout: os.Stdout,
-			Stderr: os.Stderr,
+			EngineVersion: version,
+			EngineCommit:  commit,
+			BinaryPath:    binaryPath,
+			Env:           utilityrun.CLILookupEnvironment(os.LookupEnv),
+			Stdout:        os.Stdout,
+			Stderr:        os.Stderr,
 		})
 		if result.Suite != "" {
 			if jsonOutput {
@@ -1660,14 +1676,8 @@ func runExperiment(root string, catalog speccatalog.Catalog, args []string) erro
 			ExecutionTimeout: executionTimeout,
 			CleanupGrace:     cleanupGrace,
 		})
-		if options["json"] == "1" {
-			if renderErr := experimentrun.RenderJSON(os.Stdout, result); renderErr != nil {
-				return renderErr
-			}
-		} else if result.ExperimentSpec != "" {
-			if renderErr := experimentrun.Render(os.Stdout, result); renderErr != nil {
-				return renderErr
-			}
+		if renderErr := renderExperimentRunResult(os.Stdout, options["json"] == "1", result); renderErr != nil {
+			return renderErr
 		}
 		if runErr != nil {
 			return fmt.Errorf("experiment run failed: %w", runErr)
@@ -1710,6 +1720,20 @@ func runExperiment(root string, catalog speccatalog.Catalog, args []string) erro
 	default:
 		return runKindCatalog("experiment", catalog, args)
 	}
+}
+
+func renderExperimentRunResult(w io.Writer, jsonOutput bool, result experimentrun.Result) error {
+	// Planning and option validation can fail before experimentrun has created a
+	// v1 result. Emitting the Go zero value in that case would put invalid data on
+	// a machine-readable stream while claiming the v1 schema. The command error
+	// remains on stderr; a result is rendered only once its schema identity exists.
+	if result.SchemaVersion == "" {
+		return nil
+	}
+	if jsonOutput {
+		return experimentrun.RenderJSON(w, result)
+	}
+	return experimentrun.Render(w, result)
 }
 
 func parsePositiveDurationFlag(name string, value string) (time.Duration, error) {

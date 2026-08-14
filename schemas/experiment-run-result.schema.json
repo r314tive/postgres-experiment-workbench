@@ -44,6 +44,7 @@
     "cleanup_grace_ms": {"type": "integer", "minimum": 1},
     "timed_out": {"type": "boolean"},
     "termination_signal": {"enum": ["SIGTERM", "SIGKILL"]},
+    "containment_status": {"enum": ["confirmed", "unconfirmed"]},
     "status": {"enum": ["passed", "failed"]}
   },
   "allOf": [
@@ -57,6 +58,17 @@
     {
       "if": {"properties": {"status": {"const": "passed"}}, "required": ["status"]},
       "then": {"properties": {"exit_code": {"const": 0}, "timed_out": {"const": false}}}
+    },
+    {
+      "if": {"required": ["termination_signal"]},
+      "then": {
+        "required": ["containment_status"],
+        "properties": {"status": {"const": "failed"}}
+      }
+    },
+    {
+      "if": {"required": ["containment_status"]},
+      "then": {"required": ["termination_signal"]}
     }
   ]
 }

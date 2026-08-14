@@ -14,6 +14,7 @@ trap cleanup EXIT
 mkdir -p "$TEST_DIR/scripts" "$TEST_DIR/fake-bin"
 cp "$REPO_DIR/scripts/runtime.sh" "$TEST_DIR/scripts/runtime.sh"
 cp "$REPO_DIR/scripts/native_runtime.sh" "$TEST_DIR/scripts/native_runtime.sh"
+cp "$REPO_DIR/scripts/exact_environment.sh" "$TEST_DIR/scripts/exact_environment.sh"
 cp "$REPO_DIR/scripts/guard_local_pg.sh" "$TEST_DIR/scripts/guard_local_pg.sh"
 chmod +x "$TEST_DIR/scripts/"*.sh
 

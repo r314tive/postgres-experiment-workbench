@@ -566,10 +566,11 @@ func checkTrial(result *VerifyResult, artifactRoot string, seriesDir string, num
 		addIssue(result, "trial %d claims verification but linked run is invalid", number)
 	}
 	summaryPath := ""
+	var rawSummary *pgbenchresult.Result
 	if trial.Summary != nil {
 		if resolved, ok := checkArtifactRef(result, runDir, number, "summary", *trial.Summary); ok {
 			summaryPath = resolved
-			checkNormalizedSummary(result, seriesDir, summaryPath, number, trial, plan)
+			rawSummary = checkNormalizedSummary(result, seriesDir, summaryPath, number, trial, plan)
 		}
 	} else if trial.Status == "passed" {
 		addIssue(result, "trial %d passed without pgbench summary", number)
@@ -581,7 +582,7 @@ func checkTrial(result *VerifyResult, artifactRoot string, seriesDir string, num
 		}
 	}
 	if plan != nil {
-		checkTransactionLogs(result, number, trial, *plan, rawPaths)
+		checkTransactionLogs(result, number, trial, *plan, rawPaths, rawSummary)
 	}
 	checkPhaseTimeline(result, runDir, seriesDir, number, trial, plan)
 	checkBenchmarkControls(result, runDir, number, trial, plan)
@@ -883,7 +884,7 @@ func pathContained(root string, candidate string) bool {
 	return relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
-func checkTransactionLogs(result *VerifyResult, number int, trial benchmarkrun.Trial, plan benchmarkplan.Plan, rawPaths []string) {
+func checkTransactionLogs(result *VerifyResult, number int, trial benchmarkrun.Trial, plan benchmarkplan.Plan, rawPaths []string, rawSummary *pgbenchresult.Result) {
 	if plan.LogTransactions && trial.Status == "passed" && len(rawPaths) == 0 {
 		addIssue(result, "trial %d passed without protocol-required raw transaction logs", number)
 	}
@@ -915,8 +916,8 @@ func checkTransactionLogs(result *VerifyResult, number int, trial benchmarkrun.T
 	if trial.Status != "passed" {
 		return
 	}
-	if trial.Pgbench != nil {
-		if err := benchmarkrun.ValidateTransactionLog(*trial.Pgbench, parsed); err != nil {
+	if rawSummary != nil {
+		if err := benchmarkrun.ValidateTransactionLog(*rawSummary, parsed); err != nil {
 			addIssue(result, "trial %d raw transaction log semantic validation failed: %v", number, err)
 		}
 	}
@@ -936,23 +937,23 @@ func checkTransactionLogs(result *VerifyResult, number int, trial benchmarkrun.T
 	}
 }
 
-func checkNormalizedSummary(result *VerifyResult, seriesDir string, summaryPath string, number int, trial benchmarkrun.Trial, plan *benchmarkplan.Plan) {
+func checkNormalizedSummary(result *VerifyResult, seriesDir string, summaryPath string, number int, trial benchmarkrun.Trial, plan *benchmarkplan.Plan) *pgbenchresult.Result {
 	if trial.Summary == nil {
-		return
+		return nil
 	}
 	file, err := os.Open(summaryPath)
 	if err != nil {
-		return
+		return nil
 	}
 	parsed, parseErr := pgbenchresult.Parse(file)
 	closeErr := file.Close()
 	if parseErr != nil || closeErr != nil {
 		addIssue(result, "trial %d pgbench summary cannot be independently parsed", number)
-		return
+		return nil
 	}
 	if trial.Pgbench == nil {
 		addIssue(result, "trial %d has no normalized pgbench result", number)
-		return
+		return &parsed
 	}
 	left, _ := json.Marshal(parsed)
 	right, _ := json.Marshal(*trial.Pgbench)
@@ -973,6 +974,9 @@ func checkNormalizedSummary(result *VerifyResult, seriesDir string, summaryPath 
 			if err := pgbenchresult.ValidateTPSIntegrity(parsed, time.Duration(phaseTimeline.Events[benchmarkphase.MeasureIndex].DurationNS)); err != nil {
 				addIssue(result, "trial %d pgbench TPS integrity failed: %v", number, err)
 			}
+			if err := pgbenchresult.ValidateLatencyIntegrity(parsed); err != nil {
+				addIssue(result, "trial %d pgbench latency integrity failed: %v", number, err)
+			}
 		}
 	}
 	var value float64
@@ -980,18 +984,19 @@ func checkNormalizedSummary(result *VerifyResult, seriesDir string, summaryPath 
 	case "pgbench.tps":
 		if parsed.TPSExcludingConnections == nil {
 			addIssue(result, "trial %d primary TPS is absent from raw summary", number)
-			return
+			return &parsed
 		}
 		value = *parsed.TPSExcludingConnections
 	case "pgbench.latency_mean_us":
 		value = parsed.LatencyMeanMS * 1000
 	default:
 		addIssue(result, "trial %d has unsupported primary metric %q", number, trial.PrimaryMetric)
-		return
+		return &parsed
 	}
 	if trial.PrimaryValue == nil || !equalOptionalFloat(&value, trial.PrimaryValue) {
 		addIssue(result, "trial %d primary value does not match raw pgbench summary", number)
 	}
+	return &parsed
 }
 
 func checkArtifactRef(result *VerifyResult, root string, trial int, label string, ref benchmarkrun.ArtifactRef) (string, bool) {

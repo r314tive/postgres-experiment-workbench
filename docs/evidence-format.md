@@ -10,6 +10,11 @@ Current experiment-run producer contracts are:
   `.pgworkbench-bundle.json`;
 - `pgworkbench.experiment-run-result/v1` from `experiment run --json`.
 
+The CLI emits the experiment-result object only after the runner has initialized
+that schema identity. Catalog, option, runtime, or pack validation that fails
+before a run exists returns nonzero with a diagnostic on stderr and no result on
+stdout; it never serializes a zero-value object as contract v1.
+
 The manifest records a portable spec reference, exact spec digest, a digest of
 effective execution parameters (including environment overrides), resolved
 experiment identity, runtime backend, optional scenario-pack identity, metrics
@@ -18,6 +23,15 @@ closed-field contract is mirrored by
 [`schemas/run-manifest.schema.json`](../schemas/run-manifest.schema.json). It
 intentionally does not store raw hook parameters merely to make the digest
 reproducible; hooks may contain private operator values.
+
+The Go runner reads the selected top-level experiment spec once and uses those
+same bytes for parsing, catalog validation, planning, the result digest, and a
+private read-only execution snapshot. The shell verifies the runner-owned
+digest both before and after sourcing that snapshot and captures the snapshot,
+not a later read of the logical scenario-pack path, as spec provenance. The
+manifest keeps the logical portable spec reference and origin path; a concurrent
+replacement of that path therefore cannot change the bytes executed by an
+already-started run.
 
 Utility-test runs have two specs with different roles. The generated adapter
 under `.tmp/utility-tests/` is recorded by `experiment_spec_*`; the reviewable
@@ -187,7 +201,13 @@ unchanged in the linked experiment run and are referenced from each trial by
 portable path, size, and SHA-256 digest. For ordinary closed-loop output,
 pgbench's summary mean is derived from its global client-time window rather
 than the plain log's transaction-interval accumulator; verification retains
-both and permits only the documented bounded gap.
+both. The summary is bound to an interval re-derived from TPS, clients,
+transaction counts, and the original printed precisions. A full raw-log mean
+may not exceed that interval's upper bound. There is deliberately no empirical
+lower-gap percentage: pgbench provides no universal bound for time outside its
+per-transaction intervals. Typed execution fixes progress output off, so the
+detailed-summary marker is itself protocol-bound: it is present exactly for a
+declared rate or latency limit, not accepted as a summary-controlled switch.
 
 The PostgreSQL sampler normalization selects the minimal sample sequence that
 brackets the measure phase. It records exact CSV identity and coverage, the
@@ -198,6 +218,47 @@ session/lock gauges. Protocol v2 additionally binds the typed collector/reset
 artifacts and their raw sources. Calibrated timing rows must correlate one for
 one with regular `metrics.csv` rows; at most one intentionally untimed terminal
 boundary row is allowed.
+
+Before any measured workload starts, the experiment runner waits for an empty,
+non-symlink `.metrics-ready` directory token. Under benchmark contract v2, the
+Go-owned sampler publishes it only after parsing a quote-aware, typed 25-field
+SQL row and writing the first complete row to regular `metrics.csv`; successful
+publication verifies exact mode `0700`. The compatibility sampler publishes the
+same token with one `mkdir` under umask `077`, but only claims that its first
+`psql` invocation completed and appended a row; it does not inherit the v2 typed
+CSV claim. The runner consumes the token with `rmdir`, so a raced file, FIFO,
+symlink, or nonempty directory fails without opening attacker-controlled state.
+Exiting or timing out before that boundary fails the run. Duration collectors
+handle the runner's cooperative stop request, publish the final boundary row,
+and must exit zero; an unhandled status 143 is never normalized to success.
+
+Samplers and declared background workloads stay inside the Go experiment
+runner's single process group. A fresh Bash supervisor retains each direct
+command as an unreaped job and accepts only an atomically created fixed-path
+directory token, so shell cleanup never signals a cached PID, blocks opening a
+raced FIFO, or creates a detached watchdog. The job
+signal is leader-scoped; the Go runner is the final containment gate for every
+descendant in the shared group. If the shell exits while any residual process
+is alive, the Go runner applies bounded whole-group TERM/KILL cleanup, fails the
+command, and atomically replaces any transient passed shell verdict with a
+failed terminal artifact. After SIGKILL it spends at most one additional second
+polling for process-group disappearance. Containment is reported as confirmed
+only after an error-free cleanup sequence and successful absence probe; a
+still-visible group or any TERM, KILL, or status-probe error remains in the
+command error, and an unconfirmed terminal verdict says so explicitly. SIGHUP,
+SIGINT, and SIGTERM received by the Go runner follow the same cleanup and
+verdict path; they remain distinct from an execution timeout
+(`timed_out=false`) and use conventional exit codes 129, 130, or 143 for the
+received signal. The result's
+`termination_signal` names the last cleanup signal attempted by the runner, not
+the received signal and not proof of successful containment. When that field is
+present, the machine-readable result also requires `containment_status` with
+`confirmed` or `unconfirmed`; the field is omitted when no cleanup signal was
+attempted, and any result carrying cleanup metadata has `status=failed`. Public
+direct `run` and shorthand shell execution always
+delegate through that Go boundary, regardless of ambient
+`PGWORKBENCH_SUPERVISED`; only the runner's private argv action can enter the
+supervised shell body.
 
 A cumulative counter decrease is invalid unless the matching satisfied
 runner-managed reset timestamp lies between exactly those two selected

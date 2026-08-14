@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PGWORKBENCH_SUPERVISED=1
+INTERNAL_RUN_ACTION=__pgworkbench_internal_run_v1
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 manifest_value() {
@@ -43,7 +46,7 @@ EXPERIMENT_RUN_ID="$RUN_ID" \
 EXPERIMENT_STATE_WRITER=go \
 EXPERIMENT_SNAPSHOT=0 \
 EXPERIMENT_METRICS_SAMPLES=1 \
-  "$REPO_DIR/scripts/run_experiment.sh" run smoke >/dev/null
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" smoke >/dev/null
 
 RUN_DIR="$REPO_DIR/runs/$RUN_ID"
 if [[ ! -f "$RUN_DIR/verdict.json" ]]; then
@@ -81,7 +84,7 @@ EXPERIMENT_RUN_ID="$AUTO_WRITER_RUN_ID" \
 EXPERIMENT_STATE_WRITER=auto \
 EXPERIMENT_SNAPSHOT=0 \
 EXPERIMENT_METRICS_SAMPLES=1 \
-  "$REPO_DIR/scripts/run_experiment.sh" run smoke >/dev/null
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" smoke >/dev/null
 
 AUTO_WRITER_RUN_DIR="$REPO_DIR/runs/$AUTO_WRITER_RUN_ID"
 grep -q '"status": "passed"' "$AUTO_WRITER_RUN_DIR/verdict.json"
@@ -94,7 +97,7 @@ CONSTRAINTS_RUN_ID="test-constraints-validation-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$CONSTRAINTS_RUN_ID" \
 EXPERIMENT_SNAPSHOT=0 \
 EXPERIMENT_METRICS_SAMPLES=1 \
-  "$REPO_DIR/scripts/run_experiment.sh" run constraints-validation >/dev/null
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" constraints-validation >/dev/null
 
 CONSTRAINTS_RUN_DIR="$REPO_DIR/runs/$CONSTRAINTS_RUN_ID"
 grep -q '"status": "passed"' "$CONSTRAINTS_RUN_DIR/verdict.json"
@@ -107,7 +110,7 @@ JSONB_RUN_ID="test-jsonb-indexing-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$JSONB_RUN_ID" \
 EXPERIMENT_SNAPSHOT=0 \
 EXPERIMENT_METRICS_SAMPLES=1 \
-  "$REPO_DIR/scripts/run_experiment.sh" run jsonb-indexing >/dev/null
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" jsonb-indexing >/dev/null
 
 JSONB_RUN_DIR="$REPO_DIR/runs/$JSONB_RUN_ID"
 grep -q '"status": "passed"' "$JSONB_RUN_DIR/verdict.json"
@@ -120,7 +123,7 @@ REPLICA_RUN_ID="test-replica-readonly-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$REPLICA_RUN_ID" \
 EXPERIMENT_SNAPSHOT=0 \
 EXPERIMENT_METRICS_SAMPLES=1 \
-  "$REPO_DIR/scripts/run_experiment.sh" run replica-readonly >/dev/null
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" replica-readonly >/dev/null
 
 REPLICA_RUN_DIR="$REPO_DIR/runs/$REPLICA_RUN_ID"
 grep -q '"status": "passed"' "$REPLICA_RUN_DIR/verdict.json"
@@ -133,7 +136,7 @@ LOGICAL_RUN_ID="test-logical-replication-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$LOGICAL_RUN_ID" \
 EXPERIMENT_SNAPSHOT=0 \
 EXPERIMENT_METRICS_SAMPLES=1 \
-  "$REPO_DIR/scripts/run_experiment.sh" run logical-replication >/dev/null
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" logical-replication >/dev/null
 
 LOGICAL_RUN_DIR="$REPO_DIR/runs/$LOGICAL_RUN_ID"
 grep -q '"status": "passed"' "$LOGICAL_RUN_DIR/verdict.json"
@@ -146,7 +149,7 @@ LOGICAL_DDL_RUN_ID="test-logical-ddl-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$LOGICAL_DDL_RUN_ID" \
 EXPERIMENT_SNAPSHOT=0 \
 EXPERIMENT_METRICS_SAMPLES=1 \
-  "$REPO_DIR/scripts/run_experiment.sh" run logical-ddl >/dev/null
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" logical-ddl >/dev/null
 
 LOGICAL_DDL_RUN_DIR="$REPO_DIR/runs/$LOGICAL_DDL_RUN_ID"
 grep -q '"status": "passed"' "$LOGICAL_DDL_RUN_DIR/verdict.json"
@@ -159,7 +162,7 @@ PGBOUNCER_RUN_ID="test-pgbouncer-smoke-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$PGBOUNCER_RUN_ID" \
 EXPERIMENT_SNAPSHOT=0 \
 EXPERIMENT_METRICS_SAMPLES=1 \
-  "$REPO_DIR/scripts/run_experiment.sh" run pgbouncer-smoke >/dev/null
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" pgbouncer-smoke >/dev/null
 
 PGBOUNCER_RUN_DIR="$REPO_DIR/runs/$PGBOUNCER_RUN_ID"
 grep -q '"status": "passed"' "$PGBOUNCER_RUN_DIR/verdict.json"
@@ -170,7 +173,7 @@ fi
 
 UPGRADE_RUN_ID="test-multi-version-upgrade-smoke-$(date -u +%Y%m%d_%H%M%S)"
 EXPERIMENT_RUN_ID="$UPGRADE_RUN_ID" \
-  "$REPO_DIR/scripts/run_experiment.sh" run multi-version-upgrade-smoke >/dev/null
+  "$REPO_DIR/scripts/run_experiment.sh" "$INTERNAL_RUN_ACTION" multi-version-upgrade-smoke >/dev/null
 
 UPGRADE_RUN_DIR="$REPO_DIR/runs/$UPGRADE_RUN_ID"
 grep -q '"status": "passed"' "$UPGRADE_RUN_DIR/verdict.json"

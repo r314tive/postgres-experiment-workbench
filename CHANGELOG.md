@@ -22,6 +22,21 @@
   runnable artifact is published. Release publication now also fails closed on
   a protected, real three-driver draft gate for pinned BenchBase, HammerDB, and
   sysbench execution evidence.
+- Prepared utility-derived experiments now execute with a runner-owned
+  workbench/protocol environment. The CLI projects the selected Docker/native
+  backend configuration, primary disposable PostgreSQL endpoint, and utility
+  sizing controls; the fixed Compose env file is never executed by the host
+  shell, and trusted nested specs cannot downgrade that boundary. Conventional
+  process-bootstrap values such as `HOME`, temporary directories, and `PATH`
+  remain inherited and unattested; native PostgreSQL tool selection therefore
+  requires an explicit bindir or installation directory.
+- Pre-run `experiment run --json` validation failures no longer serialize an
+  uninitialized Go result as the versioned experiment-result contract.
+- Bound experiment planning, validation, result identity, shell sourcing, and
+  captured spec provenance to one runner-selected byte snapshot. The shell
+  verifies the runner-owned digest before and after sourcing the read-only
+  snapshot, so a concurrent replacement of the logical pack path cannot yield
+  a passed run whose JSON result and manifest describe different specs.
 - Replaced syntax-only schema parsing with a network-independent Draft 2020-12
   compile and validation gate. It resolves local cross-schema references,
   asserts formats, evaluates ECMA-compatible regular expressions, and exercises
@@ -43,10 +58,25 @@
   outside the claim.
 
 - Bound the PostgreSQL 15-19 server major observed in pgbench's banner to the
-  linked experiment fingerprint, bounded the raw-log latency cross-check to
-  pgbench's printed precision and its documented global-window versus
-  transaction-interval boundary, and fixed
-  native cleanup so its watchdog cannot leave a timer process behind.
+  linked experiment fingerprint; re-derived ordinary summary latency from TPS,
+  clients, counts, and printed precision; kept the raw-log relation one-sided
+  where pgbench defines no lower gap bound; bound detailed-summary mode to the
+  typed rate/latency-limit protocol; and made the contract-v2 owned sampler
+  publish an atomic first-sample readiness directory token only after strict
+  CSV validation.
+  Samplers and background workloads stay inside the Go runner's single
+  containment group;
+  atomically created stop-token directories and still-unreaped Bash job handles
+  replace raw-PID signals and detached cleanup watchdogs. The outer runner
+  applies bounded TERM/KILL cleanup to residual descendants, confirms group
+  disappearance in a separately bounded post-KILL window, and atomically
+  replaces a transient passed shell verdict with a failed terminal artifact.
+  Signal and status-probe errors and unconfirmed containment stay explicit.
+  Experiment-run JSON/text output publishes `containment_status` as `confirmed`
+  or `unconfirmed` whenever a cleanup signal was attempted.
+  Runner SIGHUP/SIGINT/SIGTERM use the same whole-group cleanup, remain distinct
+  from timeout evidence, and publish failed terminal artifacts with
+  conventional 129/130/143 exit codes.
 - Added the benchmark protocol foundation: first-class specs/plans, native and
   Docker pgbench warm-up/measurement invocations, strict PostgreSQL 15-18 and
   19devel final-summary parsing, normalized plain transaction-log latency and

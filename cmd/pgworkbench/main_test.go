@@ -13,6 +13,7 @@ import (
 
 	"github.com/r314tive/postgres-experiment-workbench/internal/benchmarkab"
 	"github.com/r314tive/postgres-experiment-workbench/internal/benchmarkexternal"
+	"github.com/r314tive/postgres-experiment-workbench/internal/experimentrun"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 )
 
@@ -243,6 +244,24 @@ func TestExperimentRunRejectsIncompatiblePackBeforeRuntime(t *testing.T) {
 	err := runExperiment(root, speccatalog.New(root), []string{"run", "smoke"})
 	if err == nil || !strings.Contains(err.Error(), "scenario pack test-pack requires pgworkbench ^0.3.0") {
 		t.Fatalf("expected pre-runtime engine incompatibility, got %v", err)
+	}
+}
+
+func TestExperimentRunJSONOmitsUninitializedResult(t *testing.T) {
+	var output strings.Builder
+	if err := renderExperimentRunResult(&output, true, experimentrun.Result{}); err != nil {
+		t.Fatal(err)
+	}
+	if output.Len() != 0 {
+		t.Fatalf("pre-result failure emitted invalid schema JSON: %q", output.String())
+	}
+
+	initialized := experimentrun.Result{SchemaVersion: experimentrun.SchemaVersion}
+	if err := renderExperimentRunResult(&output, true, initialized); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"schema_version": "`+experimentrun.SchemaVersion+`"`) {
+		t.Fatalf("initialized experiment result was not rendered: %q", output.String())
 	}
 }
 
@@ -859,8 +878,31 @@ func TestReleaseManifestCreateAndVerifyCLI(t *testing.T) {
 
 func TestUtilityRunCLIForwardsRuntimeAndRunID(t *testing.T) {
 	root := testUtilityCLIWorkspace(t)
+	previousVersion, previousCommit := version, commit
+	version = "0.2.0"
+	commit = "0123456789abcdef0123456789abcdef01234567"
+	t.Cleanup(func() {
+		version, commit = previousVersion, previousCommit
+	})
 	t.Setenv("PGWORKBENCH_RUNTIME", "docker")
 	t.Setenv("UTILITY_TEST_RUN_ID", "ambient-run")
+	t.Setenv("ENV_FILE", ".env.example")
+	t.Setenv("COMPOSE", "docker compose --ansi never")
+	t.Setenv("PGWORKBENCH_NATIVE_BINDIR", "/opt/postgres/bin")
+	t.Setenv("PG_INSTALL_DIR", "/opt/postgres")
+	t.Setenv("POSTGRES_HOST", "127.0.0.1")
+	t.Setenv("POSTGRES_PORT", "59433")
+	t.Setenv("POSTGRES_DB", "pg_experiment_workbench")
+	t.Setenv("POSTGRES_USER", "postgres")
+	t.Setenv("POSTGRES_PASSWORD", "test-password")
+	t.Setenv("PROFILE_SIZE", "medium")
+	t.Setenv("PROFILE_SECONDS", "45")
+	t.Setenv("METRICS_INTERVAL", "2")
+	t.Setenv("METRICS_DURATION", "10")
+	t.Setenv("METRICS_SAMPLES", "3")
+	t.Setenv("UTILITY_TEST_SNAPSHOT", "0")
+	t.Setenv("PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST", "sha256:"+strings.Repeat("a", 64))
+	t.Setenv("PGWORKBENCH_BENCHMARK_CAPSULE_ROOT", "/tmp/hostile-capsule")
 
 	err := runUtility(root, speccatalog.New(root), []string{
 		"run", "--runtime", "native", "--run-id", "cli-run", "smoke",
@@ -873,9 +915,33 @@ func TestUtilityRunCLIForwardsRuntimeAndRunID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, expected := range []string{
 		"PGWORKBENCH_RUNTIME=native\n",
 		"UTILITY_TEST_RUN_ID=cli-run\n",
+		"PGWORKBENCH_ENGINE_VERSION=0.2.0\n",
+		"PGWORKBENCH_ENGINE_COMMIT=0123456789abcdef0123456789abcdef01234567\n",
+		"PGWORKBENCH_BIN=" + executable + "\n",
+		"ENV_FILE=.env.example\n",
+		"COMPOSE=docker compose --ansi never\n",
+		"PGWORKBENCH_NATIVE_BINDIR=/opt/postgres/bin\n",
+		"PG_INSTALL_DIR=/opt/postgres\n",
+		"POSTGRES_HOST=127.0.0.1\n",
+		"POSTGRES_PORT=59433\n",
+		"POSTGRES_DB=pg_experiment_workbench\n",
+		"POSTGRES_USER=postgres\n",
+		"POSTGRES_PASSWORD=test-password\n",
+		"PROFILE_SIZE=medium\n",
+		"PROFILE_SECONDS=45\n",
+		"METRICS_INTERVAL=2\n",
+		"METRICS_DURATION=10\n",
+		"METRICS_SAMPLES=3\n",
+		"UTILITY_TEST_SNAPSHOT=0\n",
+		"PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST=\n",
+		"PGWORKBENCH_BENCHMARK_CAPSULE_ROOT=\n",
 	} {
 		if !strings.Contains(string(content), expected) {
 			t.Fatalf("utility CLI did not forward %q: %s", expected, content)
@@ -950,8 +1016,10 @@ func testUtilityCLIWorkspace(t *testing.T) string {
 			mode:    0o644,
 		},
 		"scripts/run_experiment.sh": {
-			content: "#!/bin/sh\nprintf 'PGWORKBENCH_RUNTIME=%s\\nUTILITY_TEST_RUN_ID=%s\\n' \"$PGWORKBENCH_RUNTIME\" \"$UTILITY_TEST_RUN_ID\" > seen.env\n",
-			mode:    0o755,
+			content: `#!/bin/sh
+printf 'PGWORKBENCH_RUNTIME=%s\nUTILITY_TEST_RUN_ID=%s\nPGWORKBENCH_ENGINE_VERSION=%s\nPGWORKBENCH_ENGINE_COMMIT=%s\nPGWORKBENCH_BIN=%s\nENV_FILE=%s\nCOMPOSE=%s\nPGWORKBENCH_NATIVE_BINDIR=%s\nPG_INSTALL_DIR=%s\nPOSTGRES_HOST=%s\nPOSTGRES_PORT=%s\nPOSTGRES_DB=%s\nPOSTGRES_USER=%s\nPOSTGRES_PASSWORD=%s\nPROFILE_SIZE=%s\nPROFILE_SECONDS=%s\nMETRICS_INTERVAL=%s\nMETRICS_DURATION=%s\nMETRICS_SAMPLES=%s\nUTILITY_TEST_SNAPSHOT=%s\nPGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST=%s\nPGWORKBENCH_BENCHMARK_CAPSULE_ROOT=%s\n' "$PGWORKBENCH_RUNTIME" "$UTILITY_TEST_RUN_ID" "$PGWORKBENCH_ENGINE_VERSION" "$PGWORKBENCH_ENGINE_COMMIT" "$PGWORKBENCH_BIN" "$ENV_FILE" "$COMPOSE" "$PGWORKBENCH_NATIVE_BINDIR" "$PG_INSTALL_DIR" "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_DB" "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$PROFILE_SIZE" "$PROFILE_SECONDS" "$METRICS_INTERVAL" "$METRICS_DURATION" "$METRICS_SAMPLES" "$UTILITY_TEST_SNAPSHOT" "$PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST" "$PGWORKBENCH_BENCHMARK_CAPSULE_ROOT" > seen.env
+`,
+			mode: 0o755,
 		},
 	}
 	for name, file := range files {

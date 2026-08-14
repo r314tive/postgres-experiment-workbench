@@ -42,7 +42,24 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 	if errs := catalog.Validate("experiment", []string{spec.ID}); len(errs) > 0 {
 		return Plan{}, errors.Join(errs...)
 	}
+	return buildPrepared(spec)
+}
 
+// BuildPrepared builds a plan from a spec that was resolved and validated by
+// an internal producer. It deliberately bypasses Catalog.Resolve: generated
+// utility adapters live outside experiments/ and must not become generally
+// addressable experiment inputs.
+func BuildPrepared(spec speccatalog.Spec) (Plan, error) {
+	if spec.Kind != "experiment" {
+		return Plan{}, fmt.Errorf("prepared spec kind must be experiment: %s", spec.Kind)
+	}
+	if strings.TrimSpace(spec.ID) == "" || strings.TrimSpace(spec.Path) == "" || spec.Values == nil {
+		return Plan{}, fmt.Errorf("prepared experiment spec is incomplete")
+	}
+	return buildPrepared(spec)
+}
+
+func buildPrepared(spec speccatalog.Spec) (Plan, error) {
 	values := spec.Values
 	fields := map[string]string{
 		"name":              defaultValue(values["EXPERIMENT_NAME"], spec.ID),

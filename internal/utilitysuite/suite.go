@@ -39,11 +39,15 @@ type PlanEntry struct {
 type UtilityRunner func(root string, catalog speccatalog.Catalog, input string, options utilityrun.Options) (utilityrun.Result, error)
 
 type RunOptions struct {
-	Stdout     io.Writer
-	Stderr     io.Writer
-	Now        func() time.Time
-	Getenv     utilityrun.Env
-	RunUtility UtilityRunner
+	EngineVersion string
+	EngineCommit  string
+	BinaryPath    string
+	Env           []string
+	Stdout        io.Writer
+	Stderr        io.Writer
+	Now           func() time.Time
+	Getenv        utilityrun.Env
+	RunUtility    UtilityRunner
 }
 
 type RunResult struct {
@@ -181,17 +185,21 @@ func Run(root string, catalog speccatalog.Catalog, input string, options RunOpti
 			return result, err
 		}
 
-		env := []string{
-			"UTILITY_TEST_RUN_ID=" + entryRunID,
-			"PROFILE_SIZE=" + entry.ProfileSize,
-			"UTILITY_TEST_SNAPSHOT=" + plan.Snapshot,
-		}
+		env := append([]string(nil), options.Env...)
+		env = append(env,
+			"UTILITY_TEST_RUN_ID="+entryRunID,
+			"PROFILE_SIZE="+entry.ProfileSize,
+			"UTILITY_TEST_SNAPSHOT="+plan.Snapshot,
+		)
 		utilityResult, runErr := options.RunUtility(root, catalog, entry.UtilityTest, utilityrun.Options{
-			Stdout: logFile,
-			Stderr: logFile,
-			Env:    env,
-			Now:    options.Now,
-			Getenv: overlayEnv(env, options.Getenv),
+			EngineVersion: options.EngineVersion,
+			EngineCommit:  options.EngineCommit,
+			BinaryPath:    options.BinaryPath,
+			Stdout:        logFile,
+			Stderr:        logFile,
+			Env:           env,
+			Now:           options.Now,
+			Getenv:        overlayEnv(env, options.Getenv),
 		})
 		closeErr := logFile.Close()
 		if runErr == nil && closeErr != nil {

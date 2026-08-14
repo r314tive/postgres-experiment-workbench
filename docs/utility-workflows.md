@@ -52,6 +52,30 @@ input after relocation. These internal `PGWORKBENCH_*` values are set by the Go
 runner and are not a supported mechanism for admitting arbitrary experiment
 paths.
 
+The prepared runner uses an exact workbench/protocol environment, not a complete
+OS environment capture. The CLI explicitly projects the selected runtime and
+`COMPOSE`, fixes `ENV_FILE=.env.example`, supplies the native
+`PGWORKBENCH_NATIVE_BINDIR` or documented `PG_INSTALL_DIR` fallback and wait
+budget, the primary `POSTGRES_HOST`/`POSTGRES_PORT`/database/user/password tuple,
+and utility profile/metrics/snapshot controls. In exact mode the host shell
+resolves that env-file path only so Docker Compose can receive `--env-file`; it
+never sources `.env.example`, a checkout-local `.env`, or a caller-selected
+`ENV_FILE`. Trusted experiment, workload, and dataset specs cannot change the
+runner-owned exact-mode marker.
+
+Ambient experiment hooks, workload commands, benchmark/capsule capabilities,
+and a claimed native-toolchain digest are not inherited. Conventional
+process-bootstrap names (`HOME`, `LOGNAME`, `PATH`, `TEMP`, `TMP`, `TMPDIR`, and
+`USER`) remain inherited, with locale/timezone and `BASH_ENV` fixed by the
+runner. They are not evidence identity or host attestation: in particular,
+`PATH` can still select the shell and ordinary host helper commands. Native
+utility execution does not use `PATH` as its PostgreSQL-tool fallback; it
+requires the explicit bindir or installation directory above. The existing
+experiment target guard still requires a disposable loopback, non-system
+database, while the native backend still validates the canonical local port and
+identifiers. Engine version, commit, and executable identity are supplied
+directly by the CLI rather than recovered from ambient protocol variables.
+
 Before a passed verdict is written, the generated spec, reviewed source
 utility-test spec, and every declared `UTILITY_TEST_EXPECT_FILES` output are
 copied into `runs/<run-id>/artifacts/`. They therefore enter the complete

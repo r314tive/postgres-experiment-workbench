@@ -2,6 +2,9 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=exact_environment.sh
+source "$REPO_DIR/scripts/exact_environment.sh"
+pgworkbench_initialize_exact_environment
 # shellcheck source=target_arg_guard.sh
 source "$REPO_DIR/scripts/target_arg_guard.sh"
 # shellcheck source=benchmark_phase.sh
@@ -12,6 +15,8 @@ source "$REPO_DIR/scripts/benchmark_control.sh"
 source "$REPO_DIR/scripts/benchmark_capsule.sh"
 # shellcheck source=capture_effective_pg_settings.sh
 source "$REPO_DIR/scripts/capture_effective_pg_settings.sh"
+# shellcheck source=process_lifecycle.sh
+source "$REPO_DIR/scripts/process_lifecycle.sh"
 PRESERVED_ENV_NAMES=()
 PRESERVED_ENV_VALUES=()
 
@@ -176,6 +181,10 @@ capture_env_overrides() {
   local name
   while IFS= read -r name; do
     case "$name" in
+      PGWORKBENCH_EXACT_ENVIRONMENT)
+        # Runner-owned and readonly; broad restore loops must never assign it.
+        continue
+        ;;
       ENV_FILE|COMPOSE|GOCACHE|GOMODCACHE|POSTGRES_*|PGBOUNCER_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*|LOGICAL_REPLICATION_*|PG_CONFIG|PROFILE_*|DATASET_*|METRICS_*|WORKLOAD_*|PGBENCH_*|EXPERIMENT_*|PGWORKBENCH_*)
         PRESERVED_ENV_NAMES+=("$name")
         PRESERVED_ENV_VALUES+=("${!name}")
@@ -567,7 +576,7 @@ load_repo_env() {
   fi
 
   ENV_PATH="$env_file"
-  if [[ -f "$ENV_PATH" ]]; then
+  if [[ -f "$ENV_PATH" ]] && ! pgworkbench_exact_environment_active; then
     capture_env_overrides
     set -a
     # shellcheck disable=SC1090
@@ -578,19 +587,21 @@ load_repo_env() {
 }
 
 load_spec() {
-  local desired_spec_id desired_spec_ref
+  local desired_spec_id desired_spec_ref logical_spec_file execution_spec_file
+  local expected_spec_digest digest_before_source digest_after_source
 
-  EXPERIMENT_SPEC_FILE="$(resolve_spec "$1")"
+  logical_spec_file="$(resolve_spec "$1")"
+  EXPERIMENT_SPEC_FILE="$logical_spec_file"
   case "${PGWORKBENCH_EXPERIMENT_SPEC_SCOPE:-}" in
     utility-derived)
       desired_spec_id="$PGWORKBENCH_DERIVED_EXPERIMENT_ID"
-      desired_spec_ref=".tmp/utility-tests/$(basename "$EXPERIMENT_SPEC_FILE")"
+      desired_spec_ref=".tmp/utility-tests/$(basename "$logical_spec_file")"
       ;;
     "")
       if benchmark_capsule_active; then
         desired_spec_id="${PGWORKBENCH_BENCHMARK_EXPERIMENT_SPEC_ID:-}"
       else
-        desired_spec_id="${EXPERIMENT_SPEC_FILE#"$(realpath "$REPO_DIR")/experiments/"}"
+        desired_spec_id="${logical_spec_file#"$(realpath "$REPO_DIR")/experiments/"}"
         desired_spec_id="${desired_spec_id%.env}"
       fi
       desired_spec_ref="experiments/$desired_spec_id.env"
@@ -601,12 +612,43 @@ load_spec() {
       ;;
   esac
 
+  execution_spec_file="${PGWORKBENCH_EXECUTION_SPEC_FILE:-$logical_spec_file}"
+  if [[ "$execution_spec_file" != /* || -L "$execution_spec_file" || ! -f "$execution_spec_file" ]]; then
+    echo "Runner-selected experiment spec snapshot must be an absolute regular non-symlink file" >&2
+    return 2
+  fi
+  digest_before_source="$(sha256_digest_file "$execution_spec_file")"
+  expected_spec_digest="${EXPERIMENT_SPEC_SHA256:-}"
+  if [[ -n "${PGWORKBENCH_EXECUTION_SPEC_FILE:-}" && -z "$expected_spec_digest" ]]; then
+    echo "Runner-selected experiment spec snapshot requires its expected digest" >&2
+    return 2
+  fi
+  if [[ -n "$expected_spec_digest" ]]; then
+    if [[ "$expected_spec_digest" =~ ^[0-9a-f]{64}$ ]]; then
+      expected_spec_digest="sha256:$expected_spec_digest"
+    elif [[ ! "$expected_spec_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+      echo "Runner-selected experiment spec digest is not canonical" >&2
+      return 2
+    fi
+    if [[ "$digest_before_source" != "$expected_spec_digest" ]]; then
+      echo "Runner-selected experiment spec snapshot digest mismatch" >&2
+      return 2
+    fi
+  fi
+
   capture_env_overrides
   set -a
   # shellcheck disable=SC1090
-  source "$EXPERIMENT_SPEC_FILE"
+  source "$execution_spec_file"
   set +a
   restore_env_overrides
+
+  digest_after_source="$(sha256_digest_file "$execution_spec_file")"
+  if [[ "$digest_after_source" != "$digest_before_source" ||
+        ( -n "$expected_spec_digest" && "$digest_after_source" != "$expected_spec_digest" ) ]]; then
+    echo "Runner-selected experiment spec snapshot changed while it was sourced" >&2
+    return 2
+  fi
 
   if benchmark_capsule_active; then
     # The env spec is executable shell. Re-check the immutable capability after
@@ -619,7 +661,7 @@ load_spec() {
 
   case "${PGWORKBENCH_EXPERIMENT_SPEC_SCOPE:-}" in
     utility-derived)
-      canonical_utility_derived_spec "$EXPERIMENT_SPEC_FILE" >/dev/null
+      canonical_utility_derived_spec "$logical_spec_file" >/dev/null
       ;;
     "")
       validate_standard_spec_capability
@@ -627,9 +669,11 @@ load_spec() {
   esac
   EXPERIMENT_SPEC_ID="$desired_spec_id"
   EXPERIMENT_SPEC_REF="$desired_spec_ref"
-  EXPERIMENT_SPEC_SHA256="$(sha256_digest_file "$EXPERIMENT_SPEC_FILE")"
+  EXPERIMENT_SPEC_ORIGIN_FILE="$logical_spec_file"
+  EXPERIMENT_SPEC_FILE="$execution_spec_file"
+  EXPERIMENT_SPEC_SHA256="$digest_before_source"
   unset EXPERIMENT_SPEC_DIGEST
-  export EXPERIMENT_SPEC_FILE EXPERIMENT_SPEC_ID EXPERIMENT_SPEC_REF EXPERIMENT_SPEC_SHA256
+  export EXPERIMENT_SPEC_FILE EXPERIMENT_SPEC_ORIGIN_FILE EXPERIMENT_SPEC_ID EXPERIMENT_SPEC_REF EXPERIMENT_SPEC_SHA256
 }
 
 write_manifest_shell() {
@@ -644,7 +688,7 @@ write_manifest_go() {
 
   RUN_ID="$RUN_ID" \
   STARTED_AT="$STARTED_AT" \
-  EXPERIMENT_SPEC_FILE="$EXPERIMENT_SPEC_FILE" \
+  EXPERIMENT_SPEC_FILE="${EXPERIMENT_SPEC_ORIGIN_FILE:-$EXPERIMENT_SPEC_FILE}" \
 	EXPERIMENT_SPEC_ID="$spec_id" \
 	EXPERIMENT_SPEC_REF="$spec_ref" \
 	EXPERIMENT_SPEC_SHA256="${EXPERIMENT_SPEC_SHA256:-}" \
@@ -942,8 +986,17 @@ snapshot() {
 }
 
 start_metrics() {
+  local ready_status=0
   if [[ "${EXPERIMENT_METRICS:-1}" != "1" ]]; then
     return 0
+  fi
+
+  METRICS_STOP_FILE="$RUN_DIR/.metrics-supervisor.stop"
+  METRICS_READY_FILE="$RUN_DIR/.metrics-ready"
+  if [[ -e "$METRICS_STOP_FILE" || -L "$METRICS_STOP_FILE" ||
+        -e "$METRICS_READY_FILE" || -L "$METRICS_READY_FILE" ]]; then
+    echo "Refusing pre-existing metrics lifecycle state in $RUN_DIR" >&2
+    return 2
   fi
 
   if benchmark_control_v2_active; then
@@ -960,118 +1013,110 @@ start_metrics() {
     else
       sampler_args+=(--duration-seconds "${EXPERIMENT_METRICS_DURATION:-${METRICS_DURATION:-30}}")
     fi
-    "$PGWORKBENCH_BIN" benchmark sample-metrics-v2 "${sampler_args[@]}" > "$RUN_DIR/metrics.log" 2>&1 &
+    pgworkbench_start_owned_process METRICS_PID "$METRICS_STOP_FILE" "$RUN_DIR/metrics.log" \
+      "$PGWORKBENCH_BIN" benchmark sample-metrics-v2 "${sampler_args[@]}"
   else
-    METRICS_INTERVAL="${EXPERIMENT_METRICS_INTERVAL:-${METRICS_INTERVAL:-1}}" \
-    METRICS_DURATION="${EXPERIMENT_METRICS_DURATION:-${METRICS_DURATION:-30}}" \
-    METRICS_SAMPLES="${EXPERIMENT_METRICS_SAMPLES:-${METRICS_SAMPLES:-}}" \
-    METRICS_OUT="$RUN_DIR/metrics.csv" \
-      "$REPO_DIR/scripts/sample_metrics.sh" > "$RUN_DIR/metrics.log" 2>&1 &
+    pgworkbench_start_owned_process METRICS_PID "$METRICS_STOP_FILE" "$RUN_DIR/metrics.log" \
+      env \
+        "METRICS_INTERVAL=${EXPERIMENT_METRICS_INTERVAL:-${METRICS_INTERVAL:-1}}" \
+        "METRICS_DURATION=${EXPERIMENT_METRICS_DURATION:-${METRICS_DURATION:-30}}" \
+        "METRICS_SAMPLES=${EXPERIMENT_METRICS_SAMPLES:-${METRICS_SAMPLES:-}}" \
+        "METRICS_OUT=$RUN_DIR/metrics.csv" \
+        "METRICS_READY_FILE=$METRICS_READY_FILE" \
+        "$REPO_DIR/scripts/sample_metrics.sh"
   fi
-  METRICS_PID="$!"
-}
-
-wait_after_termination() {
-  local pid="${1:?pid is required}"
-  local grace="${PGWORKBENCH_CLEANUP_GRACE_SECONDS:-15}"
-  local watchdog status=0
-
-  if [[ ! "$grace" =~ ^[1-9][0-9]*$ ]]; then
-    grace=15
+  pgworkbench_wait_for_metrics_ready \
+    "$METRICS_PID" "$RUN_DIR/metrics.csv" "$METRICS_READY_FILE" "$METRICS_STOP_FILE" || ready_status="$?"
+  if [[ "$ready_status" != "0" ]]; then
+    METRICS_EXIT="$ready_status"
+    if ! pgworkbench_owned_process_running "$METRICS_PID"; then
+      METRICS_PID=""
+    fi
+    # A header or partial row is not evidence. Failed runs deliberately permit
+    # an absent metrics.csv, while retaining metrics.log for diagnosis.
+    if [[ -f "$RUN_DIR/metrics.csv" && ! -L "$RUN_DIR/metrics.csv" ]]; then
+      rm -- "$RUN_DIR/metrics.csv"
+    fi
+    return "$ready_status"
   fi
-  (
-    # This watchdog is only the shell-side cleanup backstop. The Go runner
-    # independently terminates the entire process group at the same deadline.
-    # Keep the timer as an explicit child and reap it from the signal trap.
-    # Otherwise terminating the watchdog shell can orphan `sleep` in the
-    # experiment process group and make an otherwise successful run fail the
-    # runner's live-descendant check.
-    watchdog_sleep=""
-    stop_watchdog() {
-      if [[ -n "$watchdog_sleep" ]]; then
-        kill "$watchdog_sleep" >/dev/null 2>&1 || true
-        wait "$watchdog_sleep" >/dev/null 2>&1 || true
-      fi
-      exit 0
-    }
-    trap stop_watchdog HUP INT TERM
-    sleep "$grace" &
-    watchdog_sleep="$!"
-    wait "$watchdog_sleep" >/dev/null 2>&1 || exit 0
-    kill -KILL "$pid" >/dev/null 2>&1 || true
-  ) &
-  watchdog="$!"
-  if wait "$pid" >/dev/null 2>&1; then
-    status=0
-  else
-    status="$?"
-  fi
-  kill "$watchdog" >/dev/null 2>&1 || true
-  wait "$watchdog" >/dev/null 2>&1 || true
-  return "$status"
 }
 
 stop_metrics() {
   local samples="${EXPERIMENT_METRICS_SAMPLES:-${METRICS_SAMPLES:-}}"
   local status=0
-  local terminated_by_runner=0
+  local stop_requested=0
   if [[ -n "${METRICS_PID:-}" ]]; then
     # A bounded sampler is evidence-producing foreground work: let it finish
     # and preserve its real exit status. Duration-based sampling is stopped
     # when the experiment completes because it intentionally has no fixed
     # sample count.
-    if [[ -z "$samples" ]] && kill -0 "$METRICS_PID" >/dev/null 2>&1; then
-      if kill "$METRICS_PID" >/dev/null 2>&1; then
-        terminated_by_runner=1
-      fi
+    if [[ -d "${METRICS_STOP_FILE:-}" && ! -L "${METRICS_STOP_FILE:-}" ]]; then
+      stop_requested=1
+    elif [[ -z "$samples" || "${PGWORKBENCH_TERMINATING:-0}" = "1" ]]; then
+      pgworkbench_request_owned_stop "$METRICS_STOP_FILE"
+      stop_requested=1
     fi
-    if [[ "$terminated_by_runner" = "1" || "${PGWORKBENCH_TERMINATING:-0}" = "1" ]]; then
-      wait_after_termination "$METRICS_PID" || status="$?"
+    if [[ "$stop_requested" = "1" ]]; then
+      pgworkbench_wait_after_stop_request "$METRICS_PID" "$METRICS_STOP_FILE" || status="$?"
     else
       # A fixed-sample metrics collector is declared evidence work and may
       # legitimately outlive the foreground workload. The outer execution
       # deadline still bounds this wait.
-      wait "$METRICS_PID" >/dev/null 2>&1 || status="$?"
+      pgworkbench_wait_owned_process "$METRICS_PID" "$METRICS_STOP_FILE" || status="$?"
     fi
-    # SIGTERM is the expected stop for a still-running sampler. Any other
-    # nonzero status means metrics failed before the experiment completed.
-    if [[ "$status" != "0" ]] && ! [[ "$status" = "143" && "$terminated_by_runner" = "1" ]]; then
+    # Both owned samplers handle cooperative SIGTERM, publish a final boundary
+    # sample, and exit zero. A raw 143 means termination won the startup race or
+    # the handler failed, so it must never be normalized to success.
+    if [[ "$status" != "0" ]]; then
       METRICS_EXIT="$status"
+    fi
+    if pgworkbench_owned_process_running "$METRICS_PID"; then
+      return "$status"
     fi
     METRICS_PID=""
   fi
+  return "$status"
 }
 
 wait_background_specs() {
-  local pid status
-  for pid in "${BACKGROUND_PIDS[@]}"; do
+  local index pid stop_file status
+  for ((index = 0; index < ${#BACKGROUND_PIDS[@]}; index++)); do
+    pid="${BACKGROUND_PIDS[$index]}"
+    stop_file="${BACKGROUND_STOP_FILES[$index]}"
     status=0
-    # The runner-owned process-group deadline bounds this intentional wait.
+    # The outer Go execution deadline bounds this intentional wait.
     # Do not reuse cleanup grace here: a declared background workload may be
     # longer than cleanup itself.
-    wait "$pid" >/dev/null 2>&1 || status="$?"
+    pgworkbench_wait_owned_process "$pid" "$stop_file" || status="$?"
     if [[ "$status" != "0" ]]; then
       BACKGROUND_EXIT="$status"
     fi
   done
   BACKGROUND_PIDS=()
+  BACKGROUND_STOP_FILES=()
 }
 
 start_background_specs() {
   local specs="${EXPERIMENT_BACKGROUND_SPECS:-}"
-  local spec safe log
+  local spec safe log stop_file background_pid index=0
   mkdir -p "$RUN_DIR/background"
 
   for spec in $specs; do
+    index=$((index + 1))
     safe="$(sanitize_id "$spec")"
     log="$RUN_DIR/background/$safe.log"
-    WORKLOAD_RUN_LOG=0 \
-    WORKLOAD_LOG_DIR="$RUN_DIR/background" \
-    PGWORKBENCH_BENCHMARK_PHASE_FILE='' \
-    PROFILE_SIZE="${EXPERIMENT_PROFILE_SIZE:-${PROFILE_SIZE:-small}}" \
-    PROFILE_SECONDS="${EXPERIMENT_PROFILE_SECONDS:-${PROFILE_SECONDS:-30}}" \
-      "$REPO_DIR/scripts/run_workload.sh" run "$spec" > "$log" 2>&1 &
-    BACKGROUND_PIDS+=("$!")
+    stop_file="$RUN_DIR/background/.supervisor-$index.stop"
+    background_pid=""
+    pgworkbench_start_owned_process background_pid "$stop_file" "$log" \
+      env \
+        WORKLOAD_RUN_LOG=0 \
+        "WORKLOAD_LOG_DIR=$RUN_DIR/background" \
+        PGWORKBENCH_BENCHMARK_PHASE_FILE='' \
+        "PROFILE_SIZE=${EXPERIMENT_PROFILE_SIZE:-${PROFILE_SIZE:-small}}" \
+        "PROFILE_SECONDS=${EXPERIMENT_PROFILE_SECONDS:-${PROFILE_SECONDS:-30}}" \
+        "$REPO_DIR/scripts/run_workload.sh" run "$spec"
+    BACKGROUND_PIDS+=("$background_pid")
+    BACKGROUND_STOP_FILES+=("$stop_file")
     BACKGROUND_LOGS+=("$log")
   done
 
@@ -1081,26 +1126,47 @@ start_background_specs() {
 }
 
 stop_background_specs() {
-  local pid status
-  local -A terminated_by_runner=()
-  for pid in "${BACKGROUND_PIDS[@]}"; do
-    if kill -0 "$pid" >/dev/null 2>&1; then
-      if kill "$pid" >/dev/null 2>&1; then
-        terminated_by_runner["$pid"]=1
-      fi
-    fi
+  local index pid stop_file status
+  local overall_status=0
+  local -a remaining_pids=()
+  local -a remaining_stop_files=()
+  for stop_file in "${BACKGROUND_STOP_FILES[@]}"; do
+    pgworkbench_request_owned_stop "$stop_file"
   done
 
-  for pid in "${BACKGROUND_PIDS[@]}"; do
+  for ((index = 0; index < ${#BACKGROUND_PIDS[@]}; index++)); do
+    pid="${BACKGROUND_PIDS[$index]}"
+    stop_file="${BACKGROUND_STOP_FILES[$index]}"
     status=0
-    wait_after_termination "$pid" || status="$?"
-    # SIGTERM is expected only when this cleanup actually sent it to this PID.
-    # A child that independently exits 143 is still a workload failure.
-    if [[ "$status" != "0" ]] && ! [[ "$status" = "143" && "${terminated_by_runner[$pid]:-0}" = "1" ]]; then
+    pgworkbench_wait_after_stop_request "$pid" "$stop_file" || status="$?"
+    if pgworkbench_owned_process_running "$pid"; then
+      remaining_pids+=("$pid")
+      remaining_stop_files+=("$stop_file")
+    fi
+    # The supervisor normalizes only a SIGTERM it successfully delivered after
+    # observing this token. Any raw 143 here is an independent lifecycle failure.
+    if [[ "$status" != "0" ]]; then
       BACKGROUND_EXIT="$status"
+      overall_status="$status"
     fi
   done
-  BACKGROUND_PIDS=()
+  BACKGROUND_PIDS=("${remaining_pids[@]}")
+  BACKGROUND_STOP_FILES=("${remaining_stop_files[@]}")
+  return "$overall_status"
+}
+
+begin_owned_children_stop() {
+  local force_metrics="${1:-0}"
+  local stop_file
+
+  pgworkbench_begin_owned_cleanup
+  if [[ -n "${METRICS_PID:-}" &&
+        ( "$force_metrics" = "1" || -z "${EXPERIMENT_METRICS_SAMPLES:-${METRICS_SAMPLES:-}}" ) ]]; then
+    pgworkbench_request_owned_stop "$METRICS_STOP_FILE"
+  fi
+  for stop_file in "${BACKGROUND_STOP_FILES[@]}"; do
+    pgworkbench_request_owned_stop "$stop_file"
+  done
 }
 
 verify_finalized_manifest() {
@@ -1231,7 +1297,10 @@ terminal_cleanup() {
       EXPERIMENT_SPEC_REF="${BENCHMARK_PREFLIGHT_SPEC_REF:-experiments/benchmark-preflight.env}"
       EXPERIMENT_SPEC_SHA256="${BENCHMARK_PREFLIGHT_SPEC_SHA256:-}"
       METRICS_PID=""
+      METRICS_STOP_FILE=""
+      METRICS_READY_FILE=""
       BACKGROUND_PIDS=()
+      BACKGROUND_STOP_FILES=()
       EXPERIMENT_WORKLOAD_LIFECYCLE_STARTED=0
     fi
   fi
@@ -1352,8 +1421,10 @@ experiment_workload_action() {
 cleanup() {
   local status=0 current_status=0
 
+  begin_owned_children_stop 1 || status="$?"
   stop_metrics || status="$?"
   stop_background_specs || status="$?"
+  PGWORKBENCH_OWNED_CLEANUP_DEADLINE=""
   if [[ "${EXPERIMENT_WORKLOAD_LIFECYCLE_STARTED:-0}" = "1" &&
         -n "${RUN_DIR:-}" && -n "${EXPERIMENT_WORKLOAD_SPEC:-}" ]]; then
     current_status=0
@@ -1462,7 +1533,10 @@ begin_benchmark_preflight() {
   RUN_DIRECTORY_OWNED=0
   RUN_DIR=""
   METRICS_PID=""
+  METRICS_STOP_FILE=""
+  METRICS_READY_FILE=""
   BACKGROUND_PIDS=()
+  BACKGROUND_STOP_FILES=()
   BACKGROUND_LOGS=()
   BACKGROUND_EXIT=0
   METRICS_EXIT=0
@@ -1569,6 +1643,28 @@ run_selected_experiment() {
   run_experiment
 }
 
+delegate_selected_experiment() {
+  local input="${1:-}"
+  local -a runner_args=(experiment run)
+
+  # Public/direct shell entrypoints always route through the Go runner. An
+  # ambient PGWORKBENCH_SUPERVISED value is deliberately not authorization:
+  # only the private argv action below enters the supervised shell body.
+  if [[ -n "${PGWORKBENCH_RUNTIME:-}" ]]; then
+    runner_args+=(--runtime "$PGWORKBENCH_RUNTIME")
+  fi
+  if [[ -n "${EXPERIMENT_RUN_ID:-}" ]]; then
+    runner_args+=(--run-id "$EXPERIMENT_RUN_ID")
+  fi
+  if [[ -n "${PGWORKBENCH_EXECUTION_TIMEOUT:-}" ]]; then
+    runner_args+=(--timeout "$PGWORKBENCH_EXECUTION_TIMEOUT")
+  fi
+  if [[ -n "${PGWORKBENCH_CLEANUP_GRACE:-}" ]]; then
+    runner_args+=(--cleanup-grace "$PGWORKBENCH_CLEANUP_GRACE")
+  fi
+  run_pgworkbench "${runner_args[@]}" "$input"
+}
+
 run_experiment() {
   local topology="${EXPERIMENT_TOPOLOGY:-${TOPOLOGY:-single}}"
   local -a scan_paths=()
@@ -1589,7 +1685,10 @@ run_experiment() {
     prepare_runs_root
     RUN_DIR="$RUNS_ROOT/$RUN_ID"
     METRICS_PID=""
+    METRICS_STOP_FILE=""
+    METRICS_READY_FILE=""
     BACKGROUND_PIDS=()
+    BACKGROUND_STOP_FILES=()
     BACKGROUND_LOGS=()
     BACKGROUND_EXIT=0
     METRICS_EXIT=0
@@ -1708,8 +1807,10 @@ run_experiment() {
     wait_background_specs
   fi
 
+  begin_owned_children_stop 0
   stop_background_specs
   stop_metrics
+  PGWORKBENCH_OWNED_CLEANUP_DEADLINE=""
   phase_finished="$(benchmark_phase_now)"
   phase_status=passed
   phase_reason=""
@@ -1902,9 +2003,20 @@ case "$ACTION" in
     sed -n '1,220p' "$(resolve_spec "${1:?experiment spec is required}")"
     ;;
   run)
-    run_selected_experiment "${1:-}"
+    delegate_selected_experiment "${1:-}"
+    ;;
+  __pgworkbench_internal_run_v1)
+    if [[ "${PGWORKBENCH_SUPERVISED:-0}" != "1" ]]; then
+      echo "Refusing internal experiment route without Go supervision" >&2
+      exit 2
+    fi
+    if [[ $# -ne 1 ]]; then
+      echo "Internal experiment route requires exactly one resolved spec path" >&2
+      exit 2
+    fi
+    run_selected_experiment "$1"
     ;;
   *)
-    run_selected_experiment "$ACTION"
+    delegate_selected_experiment "$ACTION"
     ;;
 esac
