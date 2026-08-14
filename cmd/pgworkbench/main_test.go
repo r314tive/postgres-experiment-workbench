@@ -300,6 +300,36 @@ func TestParseRunVerifyArgs(t *testing.T) {
 	}
 }
 
+func TestParseMatrixCandidateVerifyArgs(t *testing.T) {
+	options, jsonOutput, input, err := parseMatrixCandidateVerifyArgs([]string{
+		"--json",
+		"--version", "0.2.0",
+		"--commit", "0123456789abcdef0123456789abcdef01234567",
+		"--expected-runs", "9",
+		"runs/matrices/release-matrix",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !jsonOutput || input != "runs/matrices/release-matrix" || options.ExpectedVersion != "0.2.0" || options.ExpectedCommit != "0123456789abcdef0123456789abcdef01234567" || options.ExpectedRuns != 9 {
+		t.Fatalf("unexpected parsed matrix candidate options: options=%#v json=%t input=%q", options, jsonOutput, input)
+	}
+
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--version", "0.2.0", "--commit", "abc", "matrix"}, "usage:"},
+		{[]string{"--version", "0.2.0", "--version", "0.2.1", "--commit", "abc", "--expected-runs", "1", "matrix"}, "duplicate option"},
+		{[]string{"--version", "0.2.0", "--commit", "abc", "--expected-runs", "01", "matrix"}, "canonical positive integer"},
+		{[]string{"--version", "0.2.0", "--commit", "abc", "--expected-runs", "1", "--latest", "matrix"}, "unknown option"},
+	} {
+		if _, _, _, err := parseMatrixCandidateVerifyArgs(test.args); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("args %#v: got %v, want %q", test.args, err, test.want)
+		}
+	}
+}
+
 func TestParseBenchmarkHostInspectArgs(t *testing.T) {
 	options, err := parseBenchmarkHostInspectArgs([]string{
 		"--json",

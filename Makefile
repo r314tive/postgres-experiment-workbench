@@ -70,6 +70,8 @@ PGDRILL_BASELINE ?=
 PGDRILL_PREDICATE_FILE ?=
 PGDRILL_REQUIRE_BUNDLE ?= 1
 MATRIX_SPEC ?= smoke
+MATRIX_RUN ?=
+MATRIX_EXPECTED_RUNS ?=
 PATCHSET ?= chaos/master
 SOURCE_WORKLOAD_SPEC ?= pg-source/check
 SOURCE_CHECK_PATH ?= generated/pg-source
@@ -249,6 +251,7 @@ help:
 	@printf '  %-24s %s\n' 'make matrix-plan-go' 'Preview MATRIX_SPEC combinations with Go CLI'
 	@printf '  %-24s %s\n' 'make matrix-plan-json' 'Render MATRIX_SPEC plan as JSON'
 	@printf '  %-24s %s\n' 'make matrix-run' 'Run MATRIX_SPEC combinations'
+	@printf '  %-24s %s\n' 'make matrix-candidate-verify' 'Verify every run in an exact candidate matrix'
 	@printf '  %-24s %s\n' 'make spec-list' 'List SPEC_KIND specs with Go CLI'
 	@printf '  %-24s %s\n' 'make spec-show' 'Show SPEC_KIND/SPEC_ID with Go CLI'
 	@printf '  %-24s %s\n' 'make spec-reference' 'Render env spec reference with Go CLI'
@@ -979,6 +982,13 @@ matrix-plan-json:
 .PHONY: matrix-run
 matrix-run:
 	./scripts/run_experiment_matrix.sh run "$(MATRIX_SPEC)"
+
+.PHONY: matrix-candidate-verify
+matrix-candidate-verify:
+	@test -n "$(MATRIX_RUN)" || { echo 'Usage: make matrix-candidate-verify MATRIX_RUN=runs/matrices/<id> MATRIX_EXPECTED_RUNS=<count> VERSION=<version> BUILD_COMMIT=<full-commit> PGWORKBENCH_CLI=<candidate-binary>' >&2; exit 2; }
+	@test -n "$(MATRIX_EXPECTED_RUNS)" || { echo 'MATRIX_EXPECTED_RUNS is required' >&2; exit 2; }
+	GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" $(PGWORKBENCH_CLI) matrix verify-candidate \
+		--version "$(VERSION)" --commit "$(BUILD_COMMIT)" --expected-runs "$(MATRIX_EXPECTED_RUNS)" "$(MATRIX_RUN)"
 
 .PHONY: spec-list
 spec-list:

@@ -4,6 +4,13 @@
 
 ## [0.2.0] - 2026-08-13
 
+- Added an exact-candidate matrix verifier that requires a predeclared row
+  count, applies full live-run verification to every indexed TSV row, rejects
+  path or symlink escape, binds retained experiment-spec bytes to the current
+  checkout scenario pack, and requires both run evidence and the verifier
+  executable to name one non-development version and full commit. The release
+  runbook now uses a scrubbed process environment in a fresh detached evidence
+  worktree and pins Docker plus `.env.example`.
 - Pinned release and CI builds to the exact Go 1.26.5 patch toolchain, made
   candidate preflight reject toolchain drift and pack-visible untracked files,
   and bound the embedded toolchain across all four archives into the verified

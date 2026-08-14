@@ -35,6 +35,7 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentrun"
 	"github.com/r314tive/postgres-experiment-workbench/internal/failurescan"
+	"github.com/r314tive/postgres-experiment-workbench/internal/matrixartifact"
 	"github.com/r314tive/postgres-experiment-workbench/internal/matrixplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/metricsplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/operationbench"
@@ -154,7 +155,7 @@ func run(args []string) error {
 	case "experiment":
 		return runExperiment(root, speccatalog.New(root), args[1:])
 	case "matrix":
-		return runMatrix(speccatalog.New(root), args[1:])
+		return runMatrix(root, speccatalog.New(root), args[1:])
 	case "metrics":
 		return runMetrics(root, args[1:])
 	case "source":
@@ -269,6 +270,7 @@ func usage() {
   pgworkbench matrix list [--raw]
   pgworkbench matrix show [--raw] <matrix-spec>
   pgworkbench matrix plan [--json|--raw] <matrix-spec>
+  pgworkbench matrix verify-candidate [--json] --version version --commit full-commit --expected-runs count <matrix-dir>
   pgworkbench metrics plan [--json] [output.csv]
   pgworkbench topology list [--raw]
   pgworkbench topology show [--raw] <topology>
@@ -3311,12 +3313,35 @@ func oneOfString(value string, allowed ...string) bool {
 	return false
 }
 
-func runMatrix(catalog speccatalog.Catalog, args []string) error {
+func runMatrix(root string, catalog speccatalog.Catalog, args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("matrix action is required")
 	}
 
 	switch args[0] {
+	case "verify-candidate":
+		options, jsonOutput, input, err := parseMatrixCandidateVerifyArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		options.VerifierVersion = version
+		options.VerifierCommit = commit
+		result, err := matrixartifact.VerifyCandidate(root, input, options)
+		if err != nil {
+			return err
+		}
+		if jsonOutput {
+			err = matrixartifact.RenderJSON(os.Stdout, result)
+		} else {
+			err = matrixartifact.Render(os.Stdout, result)
+		}
+		if err != nil {
+			return err
+		}
+		if !result.Valid() {
+			return fmt.Errorf("matrix candidate verification failed")
+		}
+		return nil
 	case "plan":
 		jsonOutput := false
 		rawOutput := false
@@ -3352,6 +3377,58 @@ func runMatrix(catalog speccatalog.Catalog, args []string) error {
 	default:
 		return runKindCatalog("matrix", catalog, args)
 	}
+}
+
+func parseMatrixCandidateVerifyArgs(args []string) (matrixartifact.Options, bool, string, error) {
+	var options matrixartifact.Options
+	jsonOutput := false
+	var inputs []string
+	seen := make(map[string]bool)
+
+	for index := 0; index < len(args); index++ {
+		argument := args[index]
+		if argument == "--" {
+			inputs = append(inputs, args[index+1:]...)
+			break
+		}
+		if !strings.HasPrefix(argument, "-") {
+			inputs = append(inputs, argument)
+			continue
+		}
+		if seen[argument] {
+			return options, false, "", fmt.Errorf("duplicate option: %s", argument)
+		}
+		seen[argument] = true
+		if argument == "--json" {
+			jsonOutput = true
+			continue
+		}
+		if !oneOfString(argument, "--version", "--commit", "--expected-runs") {
+			return options, false, "", fmt.Errorf("unknown option: %s", argument)
+		}
+		if index+1 >= len(args) {
+			return options, false, "", fmt.Errorf("%s requires a value", argument)
+		}
+		value := args[index+1]
+		index++
+		switch argument {
+		case "--version":
+			options.ExpectedVersion = value
+		case "--commit":
+			options.ExpectedCommit = value
+		case "--expected-runs":
+			count, err := strconv.Atoi(value)
+			if err != nil || count < 1 || strconv.Itoa(count) != value {
+				return options, false, "", fmt.Errorf("--expected-runs must be a canonical positive integer")
+			}
+			options.ExpectedRuns = count
+		}
+	}
+
+	if len(inputs) != 1 || options.ExpectedVersion == "" || options.ExpectedCommit == "" || options.ExpectedRuns == 0 {
+		return options, false, "", fmt.Errorf("usage: pgworkbench matrix verify-candidate [--json] --version version --commit full-commit --expected-runs count <matrix-dir>")
+	}
+	return options, jsonOutput, inputs[0], nil
 }
 
 func runMetrics(root string, args []string) error {

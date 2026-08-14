@@ -13,49 +13,93 @@ make check
 make native-test
 make test
 
+PGWORKBENCH_RUNTIME=docker ENV_FILE=.env.example \
 MATRIX_PROFILE_SIZES=medium MATRIX_REPEATS=3 \
   make matrix-run MATRIX_SPEC=massive-dml-strategy
 ```
 
 After committing those exact bytes, build one candidate binary and run the
-immutable-candidate gates from a clean checkout. `candidate-preflight` and
-therefore `release-check` deliberately reject a dirty worktree. They also
+immutable-candidate gates from a fresh detached worktree with no prior ignored
+or generated state. Do not reuse a development checkout: an old `.env`, `runs/`,
+`generated/`, or `.tmp/` tree can otherwise alter or contaminate the evidence.
+`candidate-preflight`, and therefore `release-check`, deliberately reject a
+dirty worktree. They also
 require the exact stable Go patch release recorded in `.go-version`; the same
 pin is used by every GitHub build job. Supplying the candidate binary to both
 the manual matrix and `release-check` keeps generated manifests bound to the
 candidate SemVer and commit instead of `dev`/`unknown`:
 
 ```bash
-candidate_sha="$(git rev-parse HEAD)"
-candidate_bin="$PWD/.tmp/release-candidate/pgworkbench"
 go_bin="${PGWORKBENCH_GO:-go}"
+native_bindir="${PGWORKBENCH_NATIVE_BINDIR:?set native PostgreSQL bindir}"
+release_env=(
+  env -i
+  "HOME=${HOME:?HOME is required}"
+  "PATH=${PATH:?PATH is required}"
+  "TMPDIR=${TMPDIR:-/tmp}"
+  "USER=${USER:-pgworkbench}"
+  "LOGNAME=${LOGNAME:-${USER:-pgworkbench}}"
+  LANG=C LC_ALL=C TZ=UTC
+  GOENV=off GOWORK=off GOFLAGS= GOTOOLCHAIN=local
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+)
 
-PGWORKBENCH_GO="$go_bin" \
+candidate_sha="$("${release_env[@]}" git rev-parse HEAD)"
+candidate_parent="$("${release_env[@]}" mktemp -d "${TMPDIR:-/tmp}/pgworkbench-v0.2.0.XXXXXX")"
+candidate_checkout="$candidate_parent/checkout"
+"${release_env[@]}" git worktree add --detach "$candidate_checkout" "$candidate_sha"
+cd -P "$candidate_checkout"
+for path in .env runs generated .tmp; do test ! -e "$path"; done
+
+candidate_bin="$PWD/.tmp/release-candidate/pgworkbench"
+matrix_run_id="v0.2.0-massive-dml-${candidate_sha:0:12}"
+matrix_dir="$PWD/runs/matrices/$matrix_run_id"
+
+"${release_env[@]}" PGWORKBENCH_GO="$go_bin" \
   ./scripts/build_candidate_binary.sh 0.2.0 "$candidate_sha" "$candidate_bin"
 
-make candidate-preflight \
+"${release_env[@]}" make candidate-preflight \
   VERSION=0.2.0 BUILD_COMMIT="$candidate_sha" GO="$go_bin"
 
-PGWORKBENCH_BIN="$candidate_bin" \
+"${release_env[@]}" \
+PGWORKBENCH_BIN="$candidate_bin" PGWORKBENCH_RUNTIME=docker \
+ENV_FILE=.env.example MATRIX_RUN_ID="$matrix_run_id" \
 MATRIX_PROFILE_SIZES=medium MATRIX_REPEATS=3 \
   make matrix-run MATRIX_SPEC=massive-dml-strategy
 
-PGWORKBENCH_BIN="$candidate_bin" \
+"${release_env[@]}" PGWORKBENCH_CLI="$candidate_bin" \
+  make matrix-candidate-verify \
+  MATRIX_RUN="$matrix_dir" MATRIX_EXPECTED_RUNS=9 \
+  VERSION=0.2.0 BUILD_COMMIT="$candidate_sha"
+
+"${release_env[@]}" \
+PGWORKBENCH_BIN="$candidate_bin" PGWORKBENCH_RUNTIME=docker \
+ENV_FILE=.env.example \
   make release-check \
     VERSION=0.2.0 BUILD_COMMIT="$candidate_sha" GO="$go_bin" \
     PGWORKBENCH_CLI="$candidate_bin" \
-    PGWORKBENCH_NATIVE_BINDIR="${PGWORKBENCH_NATIVE_BINDIR:?set native PostgreSQL bindir}"
+    PGWORKBENCH_NATIVE_BINDIR="$native_bindir"
 ```
 
-If merging the pull request creates a different commit SHA, rebuild the binary
-and repeat this block from a clean checkout of that final `main` commit before
-tagging. Manual matrix evidence counts for the release only when its manifests
-name the same SemVer and commit that the tag will reference.
+The intentionally inherited `HOME`, `PATH`, temporary-directory, and user
+values are process bootstrap only and remain outside the experiment evidence
+claim. Persistent Go environment/workspace state, ambient build flags, and
+system/global Git configuration are disabled explicitly. All workbench,
+PostgreSQL, profile, workload, and experiment controls are removed before each
+gate and only the values shown above are reintroduced.
+
+If merging the pull request creates a different commit SHA, create another
+fresh detached worktree, rebuild the binary, and repeat this block for that
+final `main` commit before tagging. Do not reuse the candidate evidence root.
+Manual matrix evidence counts for the release only when every run and the
+verifier binary name the same SemVer and commit that the tag will reference.
+Keep the detached worktree until its evidence has been copied into the durable
+release index.
 
 Verify every matrix row and release archive:
 
 ```bash
-make experiment-summary SUMMARY_INPUT=runs/matrices/<matrix-run-id>
+make experiment-summary SUMMARY_INPUT="$matrix_dir"
 make scan-artifacts
 make privacy-scan
 cd generated/release && shasum -a 256 -c pgworkbench-0.2.0-SHA256SUMS.txt

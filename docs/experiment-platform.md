@@ -165,6 +165,9 @@ make matrix-list
 make matrix-plan MATRIX_SPEC=smoke
 make matrix-plan-json MATRIX_SPEC=smoke
 make matrix-run MATRIX_SPEC=smoke
+PGWORKBENCH_CLI=/path/to/candidate make matrix-candidate-verify \
+  MATRIX_RUN=runs/matrices/<matrix-run-id> MATRIX_EXPECTED_RUNS=<count> \
+  VERSION=<version> BUILD_COMMIT=<full-commit>
 ```
 
 Matrix specs live under `matrices/**/*.env`. They vary experiment specs,
@@ -172,6 +175,15 @@ PostgreSQL config profiles, profile sizes, and repeat counts. Matrix artifacts
 are written under `runs/matrices/<matrix-run-id>/`, including `statistics.md`.
 Use `matrix-plan-json` when another tool needs a stable machine-readable list
 of planned combinations without starting Docker.
+
+`matrix-candidate-verify` is a release qualification gate, not a selector for
+the newest local output. It requires the exact expected row count, applies the
+live-run artifact verifier to every indexed run, checks the retained
+experiment-spec digest, current checkout scenario-pack identity,
+row-to-manifest/verdict bindings, and path containment, and requires both every
+run and the verifier binary itself to name the supplied non-development version
+and full commit. This gate verifies live artifacts; portable bundle inventory
+and relocated verification remain separate contracts.
 
 ## Spec Responsibilities
 
