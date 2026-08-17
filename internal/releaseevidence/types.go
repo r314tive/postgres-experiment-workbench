@@ -101,6 +101,7 @@ type Evidence struct {
 type EvidenceRecord struct {
 	SchemaVersion string `json:"schema_version"`
 	ArtifactType  string `json:"artifact_type"`
+	Adapter       string `json:"adapter,omitempty"`
 }
 
 // EvidenceAssurance separates record/content verification from remote

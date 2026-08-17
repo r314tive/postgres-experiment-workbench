@@ -1,6 +1,7 @@
 package schemavalidation
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,6 +159,25 @@ func validateRepresentativeContracts(t *testing.T, registry *Registry) {
 		}
 	})
 
+	validDraftAssetVerification := releaseAssetVerification(digest, "draft")
+	t.Run("positive/release-draft-asset-verification", func(t *testing.T) {
+		if err := registry.Validate("release-asset-verification.schema.json", validDraftAssetVerification); err != nil {
+			t.Fatal(err)
+		}
+	})
+	validPublicAssetVerification := releaseAssetVerification(digest, "published")
+	t.Run("positive/release-public-asset-verification", func(t *testing.T) {
+		if err := registry.Validate("release-asset-verification.schema.json", validPublicAssetVerification); err != nil {
+			t.Fatal(err)
+		}
+	})
+	validPublicationVerification := releasePublicationVerification(validPublicAssetVerification)
+	t.Run("positive/release-publication-verification", func(t *testing.T) {
+		if err := registry.Validate("release-publication-verification.schema.json", validPublicationVerification); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	invalidVerdict := cloneMap(validVerdict)
 	invalidVerdict["workload_exit"] = 1
 	assertRejected(t, registry, "run-verdict.schema.json", "passed-verdict-with-failed-workload", invalidVerdict)
@@ -197,6 +217,19 @@ func validateRepresentativeContracts(t *testing.T, registry *Registry) {
 	userSelectedExternalDriverBoolean := externalDriverVerification(digest)
 	userSelectedExternalDriverBoolean["passed"] = true
 	assertRejected(t, registry, "release-external-driver-verification.schema.json", "external-driver-user-selected-passed-flag", userSelectedExternalDriverBoolean)
+	userSelectedAssetOutcome := releaseAssetVerification(digest, "draft")
+	userSelectedAssetOutcome["status"] = "passed"
+	assertRejected(t, registry, "release-asset-verification.schema.json", "release-asset-user-selected-outcome", userSelectedAssetOutcome)
+	publicClaim := releaseAssetVerification(digest, "published")
+	publicAssurance := cloneMap(publicClaim["assurance"].(map[string]any))
+	publicAssurance["performance_claim"] = true
+	publicClaim["assurance"] = publicAssurance
+	assertRejected(t, registry, "release-asset-verification.schema.json", "release-asset-performance-claim", publicClaim)
+	mutatingPublication := releasePublicationVerification(validPublicAssetVerification)
+	publicationObservation := cloneMap(mutatingPublication["observation"].(map[string]any))
+	publicationObservation["mutation_performed_by_verifier"] = true
+	mutatingPublication["observation"] = publicationObservation
+	assertRejected(t, registry, "release-publication-verification.schema.json", "publication-mutating-verifier", mutatingPublication)
 	tooLongExternalDriverRunID := externalDriverVerification(digest)
 	tooLongWorkflowRun := cloneMap(tooLongExternalDriverRunID["workflow_run"].(map[string]any))
 	tooLongWorkflowRun["id"] = strings.Repeat("9", 33)
@@ -430,6 +463,100 @@ func externalDriverVerification(digest string) map[string]any {
 			"provider_artifact_reverified":            true,
 			"release_archive_provenance_verified":     true,
 			"release_manifest_provenance_verified":    true,
+		},
+	}
+}
+
+func releaseAssetVerification(digest, mode string) map[string]any {
+	commit := strings.Repeat("a", 40)
+	fingerprint := strings.Repeat("b", 64)
+	assets := make([]any, 16)
+	for index := range assets {
+		assets[index] = map[string]any{
+			"id": index + 1, "name": fmt.Sprintf("asset-%02d.json", index+1),
+			"size": index + 1, "digest": digest,
+		}
+	}
+	job := "draft-verify"
+	isDraft := true
+	publicOnly := "not-applicable"
+	provider := map[string]any{
+		"tag": "v1.2.3", "tag_target_sha": commit, "release_state": mode,
+		"is_draft": isDraft, "asset_count": 16, "asset_fingerprint": fingerprint,
+	}
+	source := map[string]any{"asset_inventory_digest": digest, "release_manifest_digest": digest}
+	if mode == "published" {
+		job = "public-verify"
+		isDraft = false
+		provider["is_draft"] = isDraft
+		provider["is_immutable"] = true
+		publicOnly = "verified"
+		source["release_attestation_digest"] = digest
+	}
+	return map[string]any{
+		"schema_version":     "pgworkbench.release-asset-verification/v1",
+		"artifact_type":      "pgworkbench.release-asset-verification",
+		"qualification_mode": mode,
+		"candidate": map[string]any{
+			"version": "1.2.3", "tag": "v1.2.3", "git_commit": commit,
+			"asset_fingerprint": fingerprint,
+			"scenario_pack":     map[string]any{"id": "builtin", "version": "1.2.3", "digest": digest},
+		},
+		"captured_at": "2026-08-13T00:00:01Z",
+		"workflow_run": map[string]any{
+			"id": "123456789", "attempt": 1, "head_sha": commit,
+			"repository": "r314tive/postgres-experiment-workbench", "workflow": "release-snapshot",
+			"job": job, "ref": "refs/tags/v1.2.3",
+		},
+		"inventory": map[string]any{
+			"schema_version": "pgworkbench.release-asset-inventory/v1",
+			"artifact_type":  "pgworkbench.release-asset-inventory", "release_state": mode,
+			"tag": "v1.2.3", "git_commit": commit, "captured_at": "2026-08-13T00:00:00Z",
+			"fingerprint_algorithm": "github-release-assets-jq-cS/v1",
+			"asset_fingerprint":     fingerprint, "assets": assets,
+		},
+		"provider_observation": provider,
+		"source":               source,
+		"checks": map[string]any{
+			"tag_target": "verified", "closed_asset_set": "verified", "downloaded_asset_bytes": "verified",
+			"archive_checksums": "verified", "metadata_checksums": "verified", "release_manifest": "verified",
+			"candidate_binary_identity": "verified", "provenance_attestations": "verified",
+			"sbom_attestations": "verified", "sbom_contents": "verified",
+			"immutable_release": publicOnly, "release_attestation": publicOnly,
+		},
+		"assurance": map[string]any{
+			"purpose":            "release-asset-authenticity-and-integrity",
+			"verification_scope": "workflow-local-provider-and-content", "actions_artifact_durable": false,
+			"candidate_identity_reverified": true, "provider_asset_set_recomputed": true,
+			"all_downloaded_bytes_verified": true, "performance_claim": false,
+			"benchmark_comparability_claim": false, "recovery_claim": false,
+			"production_decision_eligible": false,
+		},
+	}
+}
+
+func releasePublicationVerification(publicAsset map[string]any) map[string]any {
+	commit := strings.Repeat("a", 40)
+	fingerprint := strings.Repeat("b", 64)
+	return map[string]any{
+		"schema_version":            "pgworkbench.release-publication-verification/v1",
+		"artifact_type":             "pgworkbench.release-publication-verification",
+		"candidate":                 publicAsset["candidate"],
+		"captured_at":               "2026-08-13T00:00:01Z",
+		"workflow_run":              publicAsset["workflow_run"],
+		"public_asset_verification": publicAsset,
+		"observation": map[string]any{
+			"post_publication_observation": true, "mutation_performed_by_verifier": false,
+			"draft_public_fingerprint_equal": true, "release_state": "published",
+			"is_draft": false, "is_immutable": true, "tag_target_sha": commit,
+			"asset_count": 16, "asset_fingerprint": fingerprint, "release_attestation": "verified",
+		},
+		"assurance": map[string]any{
+			"purpose":            "post-publication-read-only-observation",
+			"verification_scope": "workflow-local-provider-and-content", "actions_artifact_durable": false,
+			"candidate_identity_reverified": true, "performance_claim": false,
+			"benchmark_comparability_claim": false, "recovery_claim": false,
+			"production_decision_eligible": false,
 		},
 	}
 }

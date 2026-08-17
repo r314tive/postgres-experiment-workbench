@@ -6,10 +6,11 @@ import (
 )
 
 const (
-	ExternalDriverVerificationSchema = "pgworkbench.release-external-driver-verification/v1"
-	ExternalDriverVerificationType   = "pgworkbench.release-external-driver-verification"
-	externalDriverQualificationMode  = "draft-release-smoke"
-	externalDriverRepository         = "r314tive/postgres-experiment-workbench"
+	ExternalDriverVerificationSchema  = "pgworkbench.release-external-driver-verification/v1"
+	ExternalDriverVerificationType    = "pgworkbench.release-external-driver-verification"
+	ExternalDriverVerificationAdapter = "pgworkbench.release-external-driver-verification/draft/v1"
+	externalDriverQualificationMode   = "draft-release-smoke"
+	externalDriverRepository          = "r314tive/postgres-experiment-workbench"
 )
 
 var (

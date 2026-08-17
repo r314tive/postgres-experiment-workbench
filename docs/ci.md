@@ -75,6 +75,18 @@ derives `draft_external_drivers=passed` only from its exact candidate and fixed
 assurance contract. Its Actions artifact is still 90-day transport and must be
 copied byte-for-byte to the durable URI supplied during attachment.
 
+The read-only draft verifier also emits
+`pgworkbench.release-asset-verification/v1` in `draft` mode after authenticating
+the tag target, complete 16-asset set, checksums, manifest, SBOM contents, and
+attestations. The fresh public verifier emits the same record in `published`
+mode after independently observing `isDraft=false`, `isImmutable=true`, and the
+same draft/public fingerprint. It then emits the self-contained
+`pgworkbench.release-publication-verification/v1` record, embedding that public
+asset verification. The mutating publisher emits neither record. These files
+live inside the existing draft/public verification artifacts; Actions remains
+transport-only, and offline attachment classifies durable presence and producer
+authenticity as operator-asserted/unverified.
+
 `macos-15` is selected because it is the current arm64 GitHub-hosted image; the job still
 fails closed unless `uname -m` is exactly `arm64`. Runner availability depends
 on the repository and GitHub plan. If GitHub cannot allocate that label, the

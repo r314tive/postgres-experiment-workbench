@@ -39,7 +39,7 @@ func TestAttachGateCreatesOneCandidateBoundRevision(t *testing.T) {
 	if result.PreviousIndexDigest != digestExactBytes(indexBytes) || result.EvidenceDigest != digestExactBytes(recordBytes) {
 		t.Fatalf("exact byte digests not retained: %+v", result)
 	}
-	if result.EvidenceDurability != EvidenceDurabilityAsserted || result.EvidenceAuthenticity != EvidenceAuthenticityUnverified || result.RecordSchemaVersion != ExternalDriverVerificationSchema || result.RecordArtifactType != ExternalDriverVerificationType {
+	if result.EvidenceDurability != EvidenceDurabilityAsserted || result.EvidenceAuthenticity != EvidenceAuthenticityUnverified || result.RecordSchemaVersion != ExternalDriverVerificationSchema || result.RecordArtifactType != ExternalDriverVerificationType || result.RecordAdapter != ExternalDriverVerificationAdapter {
 		t.Fatalf("record scope missing from result: %+v", result)
 	}
 	if !result.IndexVerification.Valid || result.IndexVerification.Status != StatusOpen || result.IndexVerification.Decision != DecisionNoGo || len(result.IndexVerification.OpenGates) != 15 || len(result.IndexVerification.PassedGates) != 1 {
@@ -70,7 +70,7 @@ func TestAttachGateCreatesOneCandidateBoundRevision(t *testing.T) {
 	if gate.Evidence.Assurance == nil || *gate.Evidence.Assurance != (EvidenceAssurance{Durability: EvidenceDurabilityAsserted, Authenticity: EvidenceAuthenticityUnverified}) {
 		t.Fatalf("attached gate trust boundary = %+v", gate.Evidence.Assurance)
 	}
-	if gate.Evidence.Record == nil || *gate.Evidence.Record != (EvidenceRecord{SchemaVersion: ExternalDriverVerificationSchema, ArtifactType: ExternalDriverVerificationType}) {
+	if gate.Evidence.Record == nil || *gate.Evidence.Record != (EvidenceRecord{SchemaVersion: ExternalDriverVerificationSchema, ArtifactType: ExternalDriverVerificationType, Adapter: ExternalDriverVerificationAdapter}) {
 		t.Fatalf("attached gate record contract = %+v", gate.Evidence.Record)
 	}
 	if attached.SchemaVersion != SchemaVersionV3 {

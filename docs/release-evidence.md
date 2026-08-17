@@ -243,22 +243,35 @@ commit. Copying a predecessor into a separate directory can still create a
 detectable fork; the local CLI does not claim a distributed global head or
 compare-and-swap service.
 
-The currently supported positive adapter is
-`pgworkbench.release-external-driver-verification/v1` to
-`draft_external_drivers`. It is pass-only and records the exact three drivers,
-complete candidate, workflow/provider identities, source digests, and narrow
-assurance boundary. Missing, malformed, contradictory, wrong-candidate, or
-wrong-gate records produce no revision. An already passed or failed gate is not
-silently superseded.
+The supported positive mappings are deliberately closed:
+
+- `pgworkbench.release-external-driver-verification/v1` to
+  `draft_external_drivers`;
+- `pgworkbench.release-asset-verification/v1` in `draft` mode to
+  `draft_asset_verification`;
+- the same asset contract in `published` mode to
+  `public_asset_verification`;
+- `pgworkbench.release-publication-verification/v1` to `publication`.
+
+The asset record embeds the complete provider inventory and full candidate,
+requires the fixed 16-asset set, and binds the verified manifest asset. The
+publication record is emitted only by the fresh read-only `public-verify` job
+after it observes a published immutable release and verifies the release
+attestation; it embeds the complete published-asset record. It is never emitted
+by the mutating `publish-release` job. All four mappings are pass-only and carry
+fixed non-performance/non-production assurance facts. Missing, malformed,
+contradictory, wrong-candidate, or wrong-gate records produce no revision. An
+already passed or failed gate is not silently superseded.
 
 `--evidence-ref` is an operator assertion. Offline attachment verifies URI
 shape, typed record semantics, and local content digest but does not fetch,
 authenticate, or prove remote retention. Its machine-readable result therefore
 reports `evidence_durability=operator-asserted-not-verified` and
 `evidence_authenticity=record-semantics-verified-remote-authenticity-not-verified`.
-The typed record identity and same trust pair are persisted inside the attached
-gate evidence; they are not lost after the CLI exits. Independent verification
-reports that gate in `unqualified_evidence` and derives
+The typed record identity, derived adapter discriminator, and same trust pair
+are persisted inside the attached gate evidence; draft and published uses of
+the shared asset schema cannot be swapped after the CLI exits. Independent
+verification reports that gate in `unqualified_evidence` and derives
 `status=open decision=no-go`, even if it was the last gate whose typed record
 had a positive outcome. V3 defines no self-declared verified class. A future
 proof-backed class may be added only together with an adapter that actually

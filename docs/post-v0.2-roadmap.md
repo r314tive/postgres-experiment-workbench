@@ -62,9 +62,11 @@ Current execution state on `next/v0.3`:
 - Candidate initialization is implemented and committed: exact 16-asset
   snapshot, manifest/inventory cross-binding, revision zero, copy-on-write
   publication, and typed ambiguous-commit handling.
-- The typed attachment framework and its first pass-only adapter are implemented
-  in the current tranche. `pgworkbench.release-external-driver-verification/v1` can close
-  only `draft_external_drivers`; the caller cannot supply an outcome.
+- The typed attachment framework and four pass-only mappings are implemented.
+  External-driver, draft/public asset, and post-publication records close only
+  their adapter-owned gates; the caller cannot supply an outcome. The persisted
+  adapter discriminator keeps draft and published uses of the shared asset
+  record type distinct during later semantic verification.
 - M1.2 remains open until the remaining workflow producers emit equally strict
   candidate-bound records and preventive controls have a separate atomic
   attachment adapter. Unsupported records stay open rather than being inferred
@@ -464,11 +466,16 @@ The current M1.2b tranche establishes the attachment substrate:
    authorization decisions; legacy v1/v2 `GO` remains readable but is not
    grandfathered when its evidence lacks persisted trust metadata, and one
    passed current record leaves the release `NO-GO`;
-5. next: typed source/draft/published compatibility, aggregate-attempt,
-   asset-authenticity, publication, and repository-control summaries and
-   adapters. Their current untyped directories or asset inventory alone are not
-   accepted as positive evidence;
-6. exit: finish the remaining adapters, full fault/race/standalone matrix, and
+5. completed: candidate-bound draft/public asset-authenticity summaries and
+   adapters plus a self-contained publication record emitted only by the fresh
+   read-only public verifier; all three outcomes remain operator-attested and
+   non-authorizing;
+6. next: typed source/draft/published compatibility and aggregate-attempt
+   records require post-draft sealing over exact provider artifact identities;
+   preventive controls require a separate atomic three-control adapter over a
+   final live recheck. Current raw directories, workflow success, pre-draft
+   control snapshots, or asset inventories alone are not positive evidence;
+7. exit: finish the remaining adapters, full fault/race/standalone matrix, and
    only then mark M1.2 complete.
 
 M1.3 typed pilot/critical-review readers and M1.4 relocated closed bundles then

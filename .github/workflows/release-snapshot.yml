@@ -855,6 +855,10 @@ jobs:
             --release-dir "$GITHUB_WORKSPACE/downloaded" \
             --manifest "pgworkbench-$VERSION-release-manifest.json"
 
+          identity="$("$verifier" version)"
+          test "$(sed -n 's/.* version=\([^ ]*\).*/\1/p' <<<"$identity")" = "$VERSION"
+          test "$(sed -n 's/.* commit=\([^ ]*\).*/\1/p' <<<"$identity")" = "$GITHUB_SHA"
+
           sbom_verify_base="$RUNNER_TEMP/pgworkbench-draft-sbom-verify"
           mkdir -p "$sbom_verify_base"
           for platform in darwin-amd64 darwin-arm64 linux-amd64 linux-arm64; do
@@ -883,6 +887,102 @@ jobs:
           } > draft-verification/result.env
           find downloaded -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort \
             > draft-verification/assets.txt
+
+          inventory_path=draft-verification/asset-inventory.json
+          manifest_path="downloaded/pgworkbench-$VERSION-release-manifest.json"
+          manifest_name="pgworkbench-$VERSION-release-manifest.json"
+          jq -e --arg version "$VERSION" --arg commit "$GITHUB_SHA" \
+            '.schema_version == "pgworkbench.release-manifest/v1" and
+             .version == $version and .git_commit == $commit' \
+            "$manifest_path" >/dev/null
+          asset_inventory_digest="sha256:$(sha256sum "$inventory_path" | awk '{print $1}')"
+          release_manifest_digest="sha256:$(sha256sum "$manifest_path" | awk '{print $1}')"
+          test "$(jq -r --arg name "$manifest_name" \
+            '.assets[] | select(.name == $name) | .digest' "$inventory_path")" = \
+            "$release_manifest_digest"
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,31}$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          jq -n -e --arg value "$GITHUB_RUN_ATTEMPT" \
+            '($value | tonumber) <= 9007199254740991' >/dev/null
+          captured_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg schema_version pgworkbench.release-asset-verification/v1 \
+            --arg artifact_type pgworkbench.release-asset-verification \
+            --arg qualification_mode draft \
+            --arg captured_at "$captured_at" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg head_sha "$GITHUB_SHA" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow release-snapshot \
+            --arg job draft-verify \
+            --arg ref "$GITHUB_REF" \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg asset_inventory_digest "$asset_inventory_digest" \
+            --arg release_manifest_digest "$release_manifest_digest" \
+            --slurpfile manifest "$manifest_path" \
+            --slurpfile inventory "$inventory_path" \
+            '{
+              schema_version: $schema_version,
+              artifact_type: $artifact_type,
+              qualification_mode: $qualification_mode,
+              candidate: {
+                version: $manifest[0].version,
+                tag: $tag,
+                git_commit: $manifest[0].git_commit,
+                asset_fingerprint: $inventory[0].asset_fingerprint,
+                scenario_pack: $manifest[0].scenario_pack
+              },
+              captured_at: $captured_at,
+              workflow_run: {
+                id: $run_id,
+                attempt: $run_attempt,
+                head_sha: $head_sha,
+                repository: $repository,
+                workflow: $workflow,
+                job: $job,
+                ref: $ref
+              },
+              inventory: $inventory[0],
+              provider_observation: {
+                tag: $tag,
+                tag_target_sha: $head_sha,
+                release_state: "draft",
+                is_draft: true,
+                asset_count: 16,
+                asset_fingerprint: $inventory[0].asset_fingerprint
+              },
+              source: {
+                asset_inventory_digest: $asset_inventory_digest,
+                release_manifest_digest: $release_manifest_digest
+              },
+              checks: {
+                tag_target: "verified",
+                closed_asset_set: "verified",
+                downloaded_asset_bytes: "verified",
+                archive_checksums: "verified",
+                metadata_checksums: "verified",
+                release_manifest: "verified",
+                candidate_binary_identity: "verified",
+                provenance_attestations: "verified",
+                sbom_attestations: "verified",
+                sbom_contents: "verified",
+                immutable_release: "not-applicable",
+                release_attestation: "not-applicable"
+              },
+              assurance: {
+                purpose: "release-asset-authenticity-and-integrity",
+                verification_scope: "workflow-local-provider-and-content",
+                actions_artifact_durable: false,
+                candidate_identity_reverified: true,
+                provider_asset_set_recomputed: true,
+                all_downloaded_bytes_verified: true,
+                performance_claim: false,
+                benchmark_comparability_claim: false,
+                recovery_claim: false,
+                production_decision_eligible: false
+              }
+            }' > draft-verification/asset-verification.json
 
       - name: Upload draft verification evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -2605,6 +2705,146 @@ jobs:
           } > public-verification/result.env
           find public-download -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort \
             > public-verification/assets.txt
+
+          inventory_path=public-verification/asset-inventory.json
+          manifest_path="public-download/pgworkbench-$VERSION-release-manifest.json"
+          manifest_name="pgworkbench-$VERSION-release-manifest.json"
+          release_attestation_path=public-verification/release-attestation.json
+          test -s "$release_attestation_path"
+          jq -e --arg version "$VERSION" --arg commit "$GITHUB_SHA" \
+            '.schema_version == "pgworkbench.release-manifest/v1" and
+             .version == $version and .git_commit == $commit' \
+            "$manifest_path" >/dev/null
+          asset_inventory_digest="sha256:$(sha256sum "$inventory_path" | awk '{print $1}')"
+          release_manifest_digest="sha256:$(sha256sum "$manifest_path" | awk '{print $1}')"
+          release_attestation_digest="sha256:$(sha256sum "$release_attestation_path" | awk '{print $1}')"
+          test "$(jq -r --arg name "$manifest_name" \
+            '.assets[] | select(.name == $name) | .digest' "$inventory_path")" = \
+            "$release_manifest_digest"
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,31}$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          jq -n -e --arg value "$GITHUB_RUN_ATTEMPT" \
+            '($value | tonumber) <= 9007199254740991' >/dev/null
+          captured_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg schema_version pgworkbench.release-asset-verification/v1 \
+            --arg artifact_type pgworkbench.release-asset-verification \
+            --arg qualification_mode published \
+            --arg captured_at "$captured_at" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg head_sha "$GITHUB_SHA" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow release-snapshot \
+            --arg job public-verify \
+            --arg ref "$GITHUB_REF" \
+            --arg tag "$tag" \
+            --arg asset_inventory_digest "$asset_inventory_digest" \
+            --arg release_manifest_digest "$release_manifest_digest" \
+            --arg release_attestation_digest "$release_attestation_digest" \
+            --slurpfile manifest "$manifest_path" \
+            --slurpfile inventory "$inventory_path" \
+            '{
+              schema_version: $schema_version,
+              artifact_type: $artifact_type,
+              qualification_mode: $qualification_mode,
+              candidate: {
+                version: $manifest[0].version,
+                tag: $tag,
+                git_commit: $manifest[0].git_commit,
+                asset_fingerprint: $inventory[0].asset_fingerprint,
+                scenario_pack: $manifest[0].scenario_pack
+              },
+              captured_at: $captured_at,
+              workflow_run: {
+                id: $run_id,
+                attempt: $run_attempt,
+                head_sha: $head_sha,
+                repository: $repository,
+                workflow: $workflow,
+                job: $job,
+                ref: $ref
+              },
+              inventory: $inventory[0],
+              provider_observation: {
+                tag: $tag,
+                tag_target_sha: $head_sha,
+                release_state: "published",
+                is_draft: false,
+                is_immutable: true,
+                asset_count: 16,
+                asset_fingerprint: $inventory[0].asset_fingerprint
+              },
+              source: {
+                asset_inventory_digest: $asset_inventory_digest,
+                release_manifest_digest: $release_manifest_digest,
+                release_attestation_digest: $release_attestation_digest
+              },
+              checks: {
+                tag_target: "verified",
+                closed_asset_set: "verified",
+                downloaded_asset_bytes: "verified",
+                archive_checksums: "verified",
+                metadata_checksums: "verified",
+                release_manifest: "verified",
+                candidate_binary_identity: "verified",
+                provenance_attestations: "verified",
+                sbom_attestations: "verified",
+                sbom_contents: "verified",
+                immutable_release: "verified",
+                release_attestation: "verified"
+              },
+              assurance: {
+                purpose: "release-asset-authenticity-and-integrity",
+                verification_scope: "workflow-local-provider-and-content",
+                actions_artifact_durable: false,
+                candidate_identity_reverified: true,
+                provider_asset_set_recomputed: true,
+                all_downloaded_bytes_verified: true,
+                performance_claim: false,
+                benchmark_comparability_claim: false,
+                recovery_claim: false,
+                production_decision_eligible: false
+              }
+            }' > public-verification/asset-verification.json
+
+          jq -n \
+            --arg schema_version pgworkbench.release-publication-verification/v1 \
+            --arg artifact_type pgworkbench.release-publication-verification \
+            --arg captured_at "$captured_at" \
+            --arg head_sha "$GITHUB_SHA" \
+            --arg asset_fingerprint "$asset_fingerprint" \
+            --slurpfile asset_verification public-verification/asset-verification.json \
+            '{
+              schema_version: $schema_version,
+              artifact_type: $artifact_type,
+              candidate: $asset_verification[0].candidate,
+              captured_at: $captured_at,
+              workflow_run: $asset_verification[0].workflow_run,
+              public_asset_verification: $asset_verification[0],
+              observation: {
+                post_publication_observation: true,
+                mutation_performed_by_verifier: false,
+                draft_public_fingerprint_equal: true,
+                release_state: "published",
+                is_draft: false,
+                is_immutable: true,
+                tag_target_sha: $head_sha,
+                asset_count: 16,
+                asset_fingerprint: $asset_fingerprint,
+                release_attestation: "verified"
+              },
+              assurance: {
+                purpose: "post-publication-read-only-observation",
+                verification_scope: "workflow-local-provider-and-content",
+                actions_artifact_durable: false,
+                candidate_identity_reverified: true,
+                performance_claim: false,
+                benchmark_comparability_claim: false,
+                recovery_claim: false,
+                production_decision_eligible: false
+              }
+            }' > public-verification/publication-verification.json
 
       - name: Upload public release verification evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

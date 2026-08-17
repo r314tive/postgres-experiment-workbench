@@ -38,6 +38,7 @@ type GateAttachResult struct {
 	EvidenceAuthenticity string       `json:"evidence_authenticity"`
 	RecordSchemaVersion  string       `json:"record_schema_version"`
 	RecordArtifactType   string       `json:"record_artifact_type"`
+	RecordAdapter        string       `json:"record_adapter"`
 	IndexVerification    Verification `json:"index_verification"`
 }
 
@@ -54,6 +55,7 @@ type derivedGateAttachment struct {
 	RunAttempt    int64
 	SchemaVersion string
 	ArtifactType  string
+	Adapter       string
 }
 
 type gateAttachHooks struct {
@@ -128,7 +130,7 @@ func attachGate(options GateAttachOptions, hooks gateAttachHooks) (GateAttachRes
 	if err != nil {
 		return GateAttachResult{}, fmt.Errorf("inspect gate evidence record: %w", err)
 	}
-	derived, err := adaptGateRecord(evidenceBytes, header, index.Candidate)
+	derived, err := adaptGateRecord(evidenceBytes, header, index)
 	if err != nil {
 		return GateAttachResult{}, fmt.Errorf("verify gate evidence record: %w", err)
 	}
@@ -171,6 +173,7 @@ func attachGate(options GateAttachOptions, hooks gateAttachHooks) (GateAttachRes
 			Record: &EvidenceRecord{
 				SchemaVersion: derived.SchemaVersion,
 				ArtifactType:  derived.ArtifactType,
+				Adapter:       derived.Adapter,
 			},
 			Assurance: &EvidenceAssurance{
 				Durability:   EvidenceDurabilityAsserted,
@@ -207,6 +210,7 @@ func attachGate(options GateAttachOptions, hooks gateAttachHooks) (GateAttachRes
 		EvidenceAuthenticity: targetGate.Evidence.Assurance.Authenticity,
 		RecordSchemaVersion:  targetGate.Evidence.Record.SchemaVersion,
 		RecordArtifactType:   targetGate.Evidence.Record.ArtifactType,
+		RecordAdapter:        targetGate.Evidence.Record.Adapter,
 		IndexVerification:    written.Verification,
 	}
 	return result, writeErr
@@ -411,26 +415,71 @@ func inspectArtifactHeader(content []byte) (artifactHeader, error) {
 	return header, nil
 }
 
-func adaptGateRecord(content []byte, header artifactHeader, candidate Candidate) (derivedGateAttachment, error) {
-	if header.SchemaVersion != ExternalDriverVerificationSchema || header.ArtifactType != ExternalDriverVerificationType {
+func adaptGateRecord(content []byte, header artifactHeader, index Index) (derivedGateAttachment, error) {
+	switch {
+	case header.SchemaVersion == ExternalDriverVerificationSchema && header.ArtifactType == ExternalDriverVerificationType:
+		var record ExternalDriverVerification
+		if err := strictjson.Parse(content, &record); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		if err := validateExternalDriverVerification(record, index.Candidate); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		return derivedGateAttachment{
+			Gate:          "draft_external_drivers",
+			Status:        GateStatusPassed,
+			CapturedAt:    record.CapturedAt,
+			RunID:         record.WorkflowRun.ID,
+			RunAttempt:    record.WorkflowRun.Attempt,
+			SchemaVersion: record.SchemaVersion,
+			ArtifactType:  record.ArtifactType,
+			Adapter:       ExternalDriverVerificationAdapter,
+		}, nil
+	case header.SchemaVersion == ReleaseAssetVerificationSchema && header.ArtifactType == ReleaseAssetVerificationType:
+		var record ReleaseAssetVerification
+		if err := strictjson.Parse(content, &record); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		if err := validateReleaseAssetVerification(record, index.Candidate); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		gate := "draft_asset_verification"
+		adapter := ReleaseAssetDraftAdapter
+		if record.QualificationMode == releaseQualificationPublished {
+			gate = "public_asset_verification"
+			adapter = ReleaseAssetPublishedAdapter
+		}
+		return derivedGateAttachment{
+			Gate:          gate,
+			Status:        GateStatusPassed,
+			CapturedAt:    record.CapturedAt,
+			RunID:         record.WorkflowRun.ID,
+			RunAttempt:    record.WorkflowRun.Attempt,
+			SchemaVersion: record.SchemaVersion,
+			ArtifactType:  record.ArtifactType,
+			Adapter:       adapter,
+		}, nil
+	case header.SchemaVersion == ReleasePublicationSchema && header.ArtifactType == ReleasePublicationType:
+		var record ReleasePublicationVerification
+		if err := strictjson.Parse(content, &record); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		if err := validateReleasePublicationVerification(record, index.Candidate); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		return derivedGateAttachment{
+			Gate:          "publication",
+			Status:        GateStatusPassed,
+			CapturedAt:    record.CapturedAt,
+			RunID:         record.WorkflowRun.ID,
+			RunAttempt:    record.WorkflowRun.Attempt,
+			SchemaVersion: record.SchemaVersion,
+			ArtifactType:  record.ArtifactType,
+			Adapter:       ReleasePublicationAdapter,
+		}, nil
+	default:
 		return derivedGateAttachment{}, fmt.Errorf("unsupported typed gate record %q with schema %q", header.ArtifactType, header.SchemaVersion)
 	}
-	var record ExternalDriverVerification
-	if err := strictjson.Parse(content, &record); err != nil {
-		return derivedGateAttachment{}, err
-	}
-	if err := validateExternalDriverVerification(record, candidate); err != nil {
-		return derivedGateAttachment{}, err
-	}
-	return derivedGateAttachment{
-		Gate:          "draft_external_drivers",
-		Status:        GateStatusPassed,
-		CapturedAt:    record.CapturedAt,
-		RunID:         record.WorkflowRun.ID,
-		RunAttempt:    record.WorkflowRun.Attempt,
-		SchemaVersion: record.SchemaVersion,
-		ArtifactType:  record.ArtifactType,
-	}, nil
 }
 
 func canonicalNextOutput(indexName, outputName, displayOutput string, currentRevision int64) (string, error) {
@@ -448,8 +497,14 @@ func canonicalNextOutput(indexName, outputName, displayOutput string, currentRev
 
 func gatePointer(gates *Gates, name string) (*Gate, error) {
 	switch name {
+	case "draft_asset_verification":
+		return &gates.DraftAssetVerification, nil
 	case "draft_external_drivers":
 		return &gates.DraftExternalDrivers, nil
+	case "publication":
+		return &gates.Publication, nil
+	case "public_asset_verification":
+		return &gates.PublicAssetVerification, nil
 	default:
 		return nil, fmt.Errorf("gate %q has no typed attachment adapter", name)
 	}

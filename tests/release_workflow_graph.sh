@@ -256,6 +256,41 @@ require_text "$draft_verify" 'draft-verification/asset-inventory.json' \
   'draft typed asset inventory must remain outside the fingerprinted release assets'
 require_text "$draft_verify" '--package-root "$package_root" "$sbom"' \
   'draft SPDX verification must bind each document to its extracted platform package'
+require_text "$draft_verify" 'pgworkbench.release-asset-verification/v1' \
+  'draft verifier must emit the typed release-asset fact record'
+require_text "$draft_verify" "--arg job draft-verify" \
+  'draft asset record must identify its only allowed producer job'
+require_text "$draft_verify" 'inventory: $inventory[0]' \
+  'draft asset record must embed the complete provider inventory'
+require_text "$draft_verify" 'scenario_pack: $manifest[0].scenario_pack' \
+  'draft asset record must derive pack identity from the verified manifest'
+require_text "$draft_verify" 'test "$(jq -r --arg name "$manifest_name"' \
+  'draft asset record must bind the manifest bytes to the provider inventory'
+require_text "$draft_verify" '> draft-verification/asset-verification.json' \
+  'draft typed fact record must remain in the existing verification artifact'
+for bounded_fact in \
+  'actions_artifact_durable: false' \
+  'candidate_identity_reverified: true' \
+  'provider_asset_set_recomputed: true' \
+  'all_downloaded_bytes_verified: true' \
+  'performance_claim: false' \
+  'benchmark_comparability_claim: false' \
+  'recovery_claim: false' \
+  'production_decision_eligible: false'; do
+  require_text "$draft_verify" "$bounded_fact" \
+    "draft asset record lacks bounded fact: $bounded_fact"
+done
+if grep -Eq '^[[:space:]]+(status|passed):' <<<"$draft_verify"; then
+  echo 'FAIL: draft asset producer may not emit a caller-selected gate outcome' >&2
+  exit 1
+fi
+draft_manifest_check_line="$(grep -Fn -- '"$verifier" release manifest verify' <<<"$draft_verify" | head -n 1 | cut -d: -f1)"
+draft_summary_line="$(grep -Fn -- 'pgworkbench.release-asset-verification/v1' <<<"$draft_verify" | tail -n 1 | cut -d: -f1)"
+if [[ -z "$draft_manifest_check_line" || -z "$draft_summary_line" ]] || \
+   (( draft_summary_line <= draft_manifest_check_line )); then
+  echo 'FAIL: draft asset summary must follow candidate manifest verification' >&2
+  exit 1
+fi
 require_line "$draft_compatibility" "    if: github.ref_type == 'tag'" 'draft compatibility must be tag-only'
 require_line "$draft_compatibility" '      - attest-and-create-draft' \
   'draft compatibility must depend on protected draft creation'
@@ -740,6 +775,8 @@ require_text "$public_verify" 'test "$(jq -r .isImmutable <<<"$release_json")" =
   'public verification must require the published release to be immutable'
 require_text "$public_verify" 'gh release verify "$tag" --repo "$GITHUB_REPOSITORY" --format json' \
   'public verification must verify the immutable release attestation'
+require_text "$public_verify" 'test -s "$release_attestation_path"' \
+  'public typed summary must reject an empty release-attestation observation'
 require_text "$public_verify" '.assets | length == 16' \
   'public verification must require the complete fixed asset set'
 require_text "$public_verify" 'test "$asset_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"' \
@@ -758,12 +795,63 @@ require_text "$public_verify" '"$verifier" release manifest verify' \
   'public verification must independently verify the release manifest'
 require_text "$public_verify" '--package-root "$package_root" "$sbom"' \
   'public verification must independently verify every SPDX document'
+require_text "$public_verify" 'pgworkbench.release-asset-verification/v1' \
+  'public verifier must emit the typed published-asset fact record'
+require_text "$public_verify" 'pgworkbench.release-publication-verification/v1' \
+  'public verifier must emit the typed post-publication fact record'
+require_text "$public_verify" '--arg job public-verify' \
+  'public asset record must identify the read-only verifier job'
+require_text "$public_verify" 'inventory: $inventory[0]' \
+  'public asset record must embed the complete provider inventory'
+require_text "$public_verify" 'public_asset_verification: $asset_verification[0]' \
+  'publication record must embed the complete published-asset verification'
+require_text "$public_verify" 'post_publication_observation: true' \
+  'publication record must be explicitly post-publication'
+require_text "$public_verify" 'mutation_performed_by_verifier: false' \
+  'read-only public verifier must not claim to have performed publication'
+require_text "$public_verify" 'draft_public_fingerprint_equal: true' \
+  'publication record must retain the verified draft/public fingerprint equality'
+require_text "$public_verify" '> public-verification/asset-verification.json' \
+  'public asset fact record must remain in the existing verification artifact'
+require_text "$public_verify" '> public-verification/publication-verification.json' \
+  'publication fact record must remain in the existing verification artifact'
+for bounded_fact in \
+  'actions_artifact_durable: false' \
+  'candidate_identity_reverified: true' \
+  'performance_claim: false' \
+  'benchmark_comparability_claim: false' \
+  'recovery_claim: false' \
+  'production_decision_eligible: false'; do
+  require_text "$public_verify" "$bounded_fact" \
+    "public release record lacks bounded fact: $bounded_fact"
+done
+if grep -Eq '^[[:space:]]+(status|passed):' <<<"$public_verify"; then
+  echo 'FAIL: public release producers may not emit caller-selected gate outcomes' >&2
+  exit 1
+fi
+public_attestation_line="$(grep -Fn -- 'gh release verify "$tag"' <<<"$public_verify" | head -n 1 | cut -d: -f1)"
+public_asset_summary_line="$(grep -Fn -- 'pgworkbench.release-asset-verification/v1' <<<"$public_verify" | tail -n 1 | cut -d: -f1)"
+publication_summary_line="$(grep -Fn -- 'pgworkbench.release-publication-verification/v1' <<<"$public_verify" | tail -n 1 | cut -d: -f1)"
+if [[ -z "$public_attestation_line" || -z "$public_asset_summary_line" || -z "$publication_summary_line" ]] || \
+   (( public_asset_summary_line <= public_attestation_line || publication_summary_line <= public_asset_summary_line )); then
+  echo 'FAIL: public asset and publication summaries must follow release verification in that order' >&2
+  exit 1
+fi
 require_line "$public_verify" '          name: public-verification-${{ github.ref_name }}-${{ github.sha }}-${{ github.run_attempt }}' \
   'public verification evidence must be rerun-safe'
 if grep -Fq -- 'actions/checkout@' <<<"$public_verify"; then
   echo 'FAIL: public verification must not depend on a source checkout' >&2
   exit 1
 fi
+for forbidden_record in \
+  'pgworkbench.release-asset-verification/v1' \
+  'pgworkbench.release-publication-verification/v1' \
+  'publication-verification.json'; do
+  if grep -Fq -- "$forbidden_record" <<<"$publish_release"; then
+    echo "FAIL: mutating publication job may not produce read-only verification record: $forbidden_record" >&2
+    exit 1
+  fi
+done
 
 require_line "$published_compatibility" "    if: github.ref_type == 'tag'" 'published compatibility must be tag-only'
 require_line "$published_compatibility" '      - public-verify' \

@@ -621,14 +621,33 @@ func validateEvidence(add func(string, ...any), path string, evidence Evidence) 
 }
 
 func validateEvidenceRecord(add func(string, ...any), recordPath, evidencePath string, record EvidenceRecord) bool {
-	if evidencePath == "gates.draft_external_drivers.evidence" {
+	wantSchema, wantType, wantAdapter := "", "", ""
+	adapterRequired := false
+	switch evidencePath {
+	case "gates.draft_asset_verification.evidence":
+		wantSchema, wantType, wantAdapter = ReleaseAssetVerificationSchema, ReleaseAssetVerificationType, ReleaseAssetDraftAdapter
+		adapterRequired = true
+	case "gates.public_asset_verification.evidence":
+		wantSchema, wantType, wantAdapter = ReleaseAssetVerificationSchema, ReleaseAssetVerificationType, ReleaseAssetPublishedAdapter
+		adapterRequired = true
+	case "gates.draft_external_drivers.evidence":
+		wantSchema, wantType, wantAdapter = ExternalDriverVerificationSchema, ExternalDriverVerificationType, ExternalDriverVerificationAdapter
+	case "gates.publication.evidence":
+		wantSchema, wantType, wantAdapter = ReleasePublicationSchema, ReleasePublicationType, ReleasePublicationAdapter
+		adapterRequired = true
+	}
+	if wantSchema != "" {
 		valid := true
-		if record.SchemaVersion != ExternalDriverVerificationSchema {
-			add("%s.schema_version = %q, want %q", recordPath, record.SchemaVersion, ExternalDriverVerificationSchema)
+		if record.SchemaVersion != wantSchema {
+			add("%s.schema_version = %q, want %q", recordPath, record.SchemaVersion, wantSchema)
 			valid = false
 		}
-		if record.ArtifactType != ExternalDriverVerificationType {
-			add("%s.artifact_type = %q, want %q", recordPath, record.ArtifactType, ExternalDriverVerificationType)
+		if record.ArtifactType != wantType {
+			add("%s.artifact_type = %q, want %q", recordPath, record.ArtifactType, wantType)
+			valid = false
+		}
+		if record.Adapter != wantAdapter && (adapterRequired || record.Adapter != "") {
+			add("%s.adapter = %q, want %q", recordPath, record.Adapter, wantAdapter)
 			valid = false
 		}
 		return valid

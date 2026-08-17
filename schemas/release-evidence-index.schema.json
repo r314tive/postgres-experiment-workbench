@@ -167,7 +167,13 @@
       "required": ["schema_version", "artifact_type"],
       "properties": {
         "schema_version": {"type": "string", "minLength": 1, "maxLength": 256},
-        "artifact_type": {"type": "string", "minLength": 1, "maxLength": 256}
+        "artifact_type": {"type": "string", "minLength": 1, "maxLength": 256},
+        "adapter": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[a-z0-9]+(?:[._/-][a-z0-9]+)*$"
+        }
       }
     },
     "evidence_assurance": {

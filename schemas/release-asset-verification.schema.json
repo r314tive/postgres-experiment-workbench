@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/release-asset-verification.schema.json",
+  "title": "pgworkbench release asset verification v1",
+  "description": "Fact-only draft or published release asset verification. A valid record has one adapter-derived passed outcome, but does not prove durable remote presence or authorize release.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "qualification_mode",
+    "candidate",
+    "captured_at",
+    "workflow_run",
+    "inventory",
+    "provider_observation",
+    "source",
+    "checks",
+    "assurance"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.release-asset-verification/v1"},
+    "artifact_type": {"const": "pgworkbench.release-asset-verification"},
+    "qualification_mode": {"enum": ["draft", "published"]},
+    "candidate": {"$ref": "release-evidence-index.schema.json#/$defs/candidate"},
+    "captured_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9]Z$"
+    },
+    "workflow_run": {"$ref": "#/$defs/workflow_run"},
+    "inventory": {"$ref": "release-asset-inventory.schema.json"},
+    "provider_observation": {"$ref": "#/$defs/provider_observation"},
+    "source": {"$ref": "#/$defs/source"},
+    "checks": {"$ref": "#/$defs/checks"},
+    "assurance": {"$ref": "#/$defs/assurance"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"qualification_mode": {"const": "draft"}},
+        "required": ["qualification_mode"]
+      },
+      "then": {
+        "properties": {
+          "workflow_run": {
+            "properties": {"job": {"const": "draft-verify"}},
+            "required": ["job"]
+          },
+          "inventory": {
+            "properties": {"release_state": {"const": "draft"}},
+            "required": ["release_state"]
+          },
+          "provider_observation": {
+            "properties": {
+              "release_state": {"const": "draft"},
+              "is_draft": {"const": true}
+            },
+            "not": {"required": ["is_immutable"]}
+          },
+          "source": {"not": {"required": ["release_attestation_digest"]}},
+          "checks": {
+            "properties": {
+              "immutable_release": {"const": "not-applicable"},
+              "release_attestation": {"const": "not-applicable"}
+            },
+            "required": ["immutable_release", "release_attestation"]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "workflow_run": {
+            "properties": {"job": {"const": "public-verify"}},
+            "required": ["job"]
+          },
+          "inventory": {
+            "properties": {"release_state": {"const": "published"}},
+            "required": ["release_state"]
+          },
+          "provider_observation": {
+            "properties": {
+              "release_state": {"const": "published"},
+              "is_draft": {"const": false},
+              "is_immutable": {"const": true}
+            },
+            "required": ["is_immutable"]
+          },
+          "source": {"required": ["release_attestation_digest"]},
+          "checks": {
+            "properties": {
+              "immutable_release": {"const": "verified"},
+              "release_attestation": {"const": "verified"}
+            },
+            "required": ["immutable_release", "release_attestation"]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "workflow_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "attempt", "head_sha", "repository", "workflow", "job", "ref"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[1-9][0-9]{0,31}$"},
+        "attempt": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "head_sha": {"type": "string", "pattern": "^(?!(?:0{40}|0{64})$)(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "repository": {"const": "r314tive/postgres-experiment-workbench"},
+        "workflow": {"const": "release-snapshot"},
+        "job": {"enum": ["draft-verify", "public-verify"]},
+        "ref": {
+          "type": "string",
+          "pattern": "^refs/tags/v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+        }
+      }
+    },
+    "provider_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "tag_target_sha", "release_state", "is_draft", "asset_count", "asset_fingerprint"],
+      "properties": {
+        "tag": {
+          "type": "string",
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "tag_target_sha": {"type": "string", "pattern": "^(?!(?:0{40}|0{64})$)(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "release_state": {"enum": ["draft", "published"]},
+        "is_draft": {"type": "boolean"},
+        "is_immutable": {"type": "boolean"},
+        "asset_count": {"const": 16},
+        "asset_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_inventory_digest", "release_manifest_digest"],
+      "properties": {
+        "asset_inventory_digest": {"$ref": "#/$defs/digest"},
+        "release_manifest_digest": {"$ref": "#/$defs/digest"},
+        "release_attestation_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tag_target",
+        "closed_asset_set",
+        "downloaded_asset_bytes",
+        "archive_checksums",
+        "metadata_checksums",
+        "release_manifest",
+        "candidate_binary_identity",
+        "provenance_attestations",
+        "sbom_attestations",
+        "sbom_contents",
+        "immutable_release",
+        "release_attestation"
+      ],
+      "properties": {
+        "tag_target": {"const": "verified"},
+        "closed_asset_set": {"const": "verified"},
+        "downloaded_asset_bytes": {"const": "verified"},
+        "archive_checksums": {"const": "verified"},
+        "metadata_checksums": {"const": "verified"},
+        "release_manifest": {"const": "verified"},
+        "candidate_binary_identity": {"const": "verified"},
+        "provenance_attestations": {"const": "verified"},
+        "sbom_attestations": {"const": "verified"},
+        "sbom_contents": {"const": "verified"},
+        "immutable_release": {"enum": ["not-applicable", "verified"]},
+        "release_attestation": {"enum": ["not-applicable", "verified"]}
+      }
+    },
+    "assurance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose",
+        "verification_scope",
+        "actions_artifact_durable",
+        "candidate_identity_reverified",
+        "provider_asset_set_recomputed",
+        "all_downloaded_bytes_verified",
+        "performance_claim",
+        "benchmark_comparability_claim",
+        "recovery_claim",
+        "production_decision_eligible"
+      ],
+      "properties": {
+        "purpose": {"const": "release-asset-authenticity-and-integrity"},
+        "verification_scope": {"const": "workflow-local-provider-and-content"},
+        "actions_artifact_durable": {"const": false},
+        "candidate_identity_reverified": {"const": true},
+        "provider_asset_set_recomputed": {"const": true},
+        "all_downloaded_bytes_verified": {"const": true},
+        "performance_claim": {"const": false},
+        "benchmark_comparability_claim": {"const": false},
+        "recovery_claim": {"const": false},
+        "production_decision_eligible": {"const": false}
+      }
+    }
+  }
+}
