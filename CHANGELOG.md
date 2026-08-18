@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-18
+
+### Fixed
+
+- Installed the required ripgrep scanner in the aggregate release gate before
+  running the full release-check suite.
+
 ## [0.2.2] - 2026-08-18
 
 ### Fixed
