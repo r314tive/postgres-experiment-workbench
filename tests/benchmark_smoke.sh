@@ -9,6 +9,7 @@ run_id="${1:-benchmark-${runtime}-smoke-$(date -u +%Y%m%d_%H%M%S)}"
 peer_run_id="${run_id}-history-peer"
 history_id="history-${run_id}"
 go_command="${PGWORKBENCH_GO:-go}"
+candidate_binary="${PGWORKBENCH_BIN:-}"
 go_cache="${GOCACHE:-$REPO_DIR/.tmp/go-cache}"
 go_mod_cache="${GOMODCACHE:-$REPO_DIR/.tmp/go-mod-cache}"
 series_dir="$REPO_DIR/runs/benchmarks/$run_id"
@@ -21,6 +22,10 @@ cleanup() {
 trap cleanup EXIT
 
 cli() {
+  if [[ -n "$candidate_binary" ]]; then
+    "$candidate_binary" "$@"
+    return
+  fi
   GOCACHE="$go_cache" GOMODCACHE="$go_mod_cache" "$go_command" run ./cmd/pgworkbench "$@"
 }
 
