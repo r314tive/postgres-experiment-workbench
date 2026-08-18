@@ -79,7 +79,7 @@ BUILD_COMMIT="$HEAD_COMMIT" GITHUB_SHA="$HEAD_COMMIT" PGWORKBENCH_GO="$PREFLIGHT
   "$PREFLIGHT/scripts/candidate_preflight.sh" "$VERSION" >/dev/null
 
 printf 'ignored but pack-visible\n' > "$PREFLIGHT/ignored-pack.log"
-if BUILD_COMMIT="$HEAD_COMMIT" PGWORKBENCH_GO="$PREFLIGHT/fake-go" \
+if BUILD_COMMIT="$HEAD_COMMIT" GITHUB_SHA= PGWORKBENCH_GO="$PREFLIGHT/fake-go" \
   FAKE_PACK_EXTRA_PATH=ignored-pack.log \
   "$PREFLIGHT/scripts/candidate_preflight.sh" "$VERSION" >"$TMP_DIR/ignored-pack.out" 2>&1; then
   echo 'FAIL: candidate preflight accepted an ignored file in the scenario pack' >&2
@@ -92,7 +92,7 @@ if ! grep -q 'scenario pack contains files that are not bound to the candidate c
   exit 1
 fi
 
-if BUILD_COMMIT="$HEAD_COMMIT" PGWORKBENCH_GO="$PREFLIGHT/fake-go" \
+if BUILD_COMMIT="$HEAD_COMMIT" GITHUB_SHA= PGWORKBENCH_GO="$PREFLIGHT/fake-go" \
   FAKE_GO_VERSION=go1.26.4 \
   "$PREFLIGHT/scripts/candidate_preflight.sh" "$VERSION" >"$TMP_DIR/go-toolchain.out" 2>&1; then
   echo 'FAIL: candidate preflight accepted a different Go patch toolchain' >&2
@@ -105,7 +105,7 @@ printf 'pgworkbench-pack.json\n' >> "$PREFLIGHT/.gitignore"
 git -C "$PREFLIGHT" add .gitignore
 git -C "$PREFLIGHT" commit -qm 'ignore pack manifest'
 HEAD_COMMIT="$(git -C "$PREFLIGHT" rev-parse HEAD)"
-if BUILD_COMMIT="$HEAD_COMMIT" PGWORKBENCH_GO="$PREFLIGHT/fake-go" \
+if BUILD_COMMIT="$HEAD_COMMIT" GITHUB_SHA= PGWORKBENCH_GO="$PREFLIGHT/fake-go" \
   "$PREFLIGHT/scripts/candidate_preflight.sh" "$VERSION" >"$TMP_DIR/untracked-manifest.out" 2>&1; then
   echo 'FAIL: candidate preflight accepted an untracked scenario-pack manifest' >&2
   exit 1
@@ -118,7 +118,7 @@ git -C "$PREFLIGHT" commit -qm 'track pack manifest'
 HEAD_COMMIT="$(git -C "$PREFLIGHT" rev-parse HEAD)"
 
 WRONG_COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-if BUILD_COMMIT="$WRONG_COMMIT" PGWORKBENCH_GO="$PREFLIGHT/fake-go" \
+if BUILD_COMMIT="$WRONG_COMMIT" GITHUB_SHA= PGWORKBENCH_GO="$PREFLIGHT/fake-go" \
   "$PREFLIGHT/scripts/candidate_preflight.sh" "$VERSION" >"$TMP_DIR/build-commit.out" 2>&1; then
   echo 'FAIL: BUILD_COMMIT different from HEAD was accepted' >&2
   exit 1
