@@ -1518,5 +1518,5 @@ test: docker-up
 	PGWORKBENCH_RUNTIME=docker PGWORKBENCH_GO="$(GO)" GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" ./tests/benchmark_smoke.sh
 
 .PHONY: release-check
-release-check: candidate-preflight doctor check native-test quickstart test scan-artifacts scan-artifacts-go pgworkbench privacy-scan release-smoke
+release-check: candidate-preflight doctor check privacy-scan native-test quickstart test scan-artifacts scan-artifacts-go pgworkbench release-smoke
 	@echo 'PASS: release-check'

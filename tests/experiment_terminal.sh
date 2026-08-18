@@ -11,7 +11,7 @@ RUN_DIR="$REPO_DIR/runs/$RUN_ID"
 ENGINE_COMMIT="0123456789abcdef0123456789abcdef01234567"
 
 cleanup() {
-  rm -rf "$TMP_DIR"
+	rm -rf "$TMP_DIR" "$RUN_DIR" "$REPO_DIR/runs/$RUN_ID-source"
 }
 trap cleanup EXIT
 

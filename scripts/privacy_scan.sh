@@ -32,13 +32,17 @@ rg --hidden --no-ignore -n -i "$PATTERN" "${SCAN_ROOTS[@]}" \
   -g '!logs/**' \
   -g '!runs/**' \
   -g '!generated/**' \
+  -g '!qualification/aggregate-*/pack.json' \
   -g '!.tmp/**' \
+  -g '!.git' \
   -g '!.git/**' \
   -g '!**/notes/**' \
   -g '!**/logs/**' \
   -g '!**/runs/**' \
   -g '!**/generated/**' \
+  -g '!**/qualification/aggregate-*/pack.json' \
   -g '!**/.tmp/**' \
+  -g '!**/.git' \
   -g '!**/.git/**' >"$TMP_FILE" 2>&1
 STATUS="$?"
 set -e

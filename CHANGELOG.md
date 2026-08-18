@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-08-18
+
+### Fixed
+
+- Removed synthetic terminal-contract test runs after their assertions complete,
+  so a release candidate's exact evidence sweep cannot mistake fixture identity
+  for candidate execution evidence.
+
+## [0.2.5] - 2026-08-18
+
+### Fixed
+
+- Kept the privacy source scan strict while excluding only the generated
+  aggregate pack-inspection record, whose evidence contract deliberately
+  retains the local capture root.
+
+## [0.2.4] - 2026-08-18
+
+### Fixed
+
+- Ran the privacy scan before release qualification creates local evidence, and
+  ignored Git worktree pointer files so the scan checks project material rather
+  than repository metadata.
+
+## [0.2.3] - 2026-08-18
+
+### Fixed
+
+- Installed the required ripgrep scanner in the aggregate release gate before
+  running the full release-check suite.
+
+## [0.2.2] - 2026-08-18
+
+### Fixed
+
+- Made the candidate-identity fixture derive its version from the scenario-pack
+  manifest, preserving exact-version qualification across patch releases.
+
+## [0.2.1] - 2026-08-18
+
+### Fixed
+
+- Isolated the native runtime fixture from qualification-injected ports so the
+  aggregate release gate remains reproducible under its exact CI environment.
+
 ## [0.2.0] - 2026-08-13
 
 - Added an exact-candidate matrix verifier that requires a predeclared row

@@ -8,7 +8,8 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 MANIFEST="$TMP_DIR/manifest.env"
 COMMIT=0123456789abcdef0123456789abcdef01234567
-VERSION=0.2.0
+VERSION="$(awk -F '"' '$2 == "version" { print $4; exit }' "$REPO_DIR/pgworkbench-pack.json")"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
 cat > "$MANIFEST" <<EOF
 engine_version="$VERSION"
@@ -16,7 +17,7 @@ engine_commit="$COMMIT"
 EOF
 "$REPO_DIR/scripts/assert_run_candidate_identity.sh" "$MANIFEST" "$VERSION" "$COMMIT" >/dev/null
 
-sed -i.bak 's/engine_version="0.2.0"/engine_version="dev"/' "$MANIFEST"
+sed -i.bak 's/^engine_version=.*/engine_version="dev"/' "$MANIFEST"
 rm -f "$MANIFEST.bak"
 if "$REPO_DIR/scripts/assert_run_candidate_identity.sh" "$MANIFEST" "$VERSION" "$COMMIT" >"$TMP_DIR/dev.out" 2>&1; then
   echo 'FAIL: development manifest identity was accepted' >&2
@@ -47,7 +48,7 @@ fi
 cat <<'JSON'
 {
   "id": "test-pack",
-  "version": "0.2.0",
+  "version": "__VERSION__",
   "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "files": [
     {
@@ -63,6 +64,8 @@ cat <<'JSON'
 JSON
 EOF
 chmod +x "$PREFLIGHT/fake-go"
+sed -i.bak "s/__VERSION__/$VERSION/" "$PREFLIGHT/fake-go"
+rm -f "$PREFLIGHT/fake-go.bak"
 printf '*.log\n' > "$PREFLIGHT/.gitignore"
 printf '1.26.5\n' > "$PREFLIGHT/.go-version"
 printf '{}\n' > "$PREFLIGHT/pgworkbench-pack.json"
