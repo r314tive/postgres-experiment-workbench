@@ -284,6 +284,17 @@ remote durability and signature authenticity remain operator-attested rather
 than authorization-eligible, so even a passed critical-review gate is not a
 release `GO`.
 
+`pgworkbench.adoption-pilot-record/v1` may attach to either
+`adoption_pilot_1` or `adoption_pilot_2`; attachment derives `passed` or
+`failed` only from a completed pilot result, never a caller-supplied status.
+The predecessor stores the pseudonymous external participant identity, so the
+other pilot slot rejects the same person. A completed, passed pilot that records
+an authored/modified scenario, no maintainer shell access, and independent
+bundle verification may additionally attach to
+`independent_authoring_reproduction`. Pilot evidence proves only the listed
+guide/scenario outcome and remains non-authorizing until a future proof-backed
+durability/authenticity adapter exists.
+
 The asset record embeds the complete provider inventory and full candidate,
 requires the fixed 16-asset set, and binds the verified manifest asset. The
 publication record is emitted only by the fresh read-only `public-verify` job

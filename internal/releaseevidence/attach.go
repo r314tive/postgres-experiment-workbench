@@ -56,6 +56,7 @@ type derivedGateAttachment struct {
 	SchemaVersion string
 	ArtifactType  string
 	Adapter       string
+	Subject       string
 }
 
 type gateAttachHooks struct {
@@ -130,7 +131,7 @@ func attachGate(options GateAttachOptions, hooks gateAttachHooks) (GateAttachRes
 	if err != nil {
 		return GateAttachResult{}, fmt.Errorf("inspect gate evidence record: %w", err)
 	}
-	derived, err := adaptGateRecord(evidenceBytes, header, index)
+	derived, err := adaptGateRecord(evidenceBytes, header, index, options.Gate)
 	if err != nil {
 		return GateAttachResult{}, fmt.Errorf("verify gate evidence record: %w", err)
 	}
@@ -172,6 +173,7 @@ func attachGate(options GateAttachOptions, hooks gateAttachHooks) (GateAttachRes
 				SchemaVersion: derived.SchemaVersion,
 				ArtifactType:  derived.ArtifactType,
 				Adapter:       derived.Adapter,
+				Subject:       derived.Subject,
 			},
 			Assurance: &EvidenceAssurance{
 				Durability:   EvidenceDurabilityAsserted,
@@ -413,7 +415,7 @@ func inspectArtifactHeader(content []byte) (artifactHeader, error) {
 	return header, nil
 }
 
-func adaptGateRecord(content []byte, header artifactHeader, index Index) (derivedGateAttachment, error) {
+func adaptGateRecord(content []byte, header artifactHeader, index Index, requestedGate string) (derivedGateAttachment, error) {
 	switch {
 	case header.SchemaVersion == ExternalDriverVerificationSchema && header.ArtifactType == ExternalDriverVerificationType:
 		var record ExternalDriverVerification
@@ -517,6 +519,12 @@ func adaptGateRecord(content []byte, header artifactHeader, index Index) (derive
 			status = GateStatusPassed
 		}
 		return derivedGateAttachment{Gate: "critical_finding_review", Status: status, CapturedAt: record.Decision.RecordedAt, SchemaVersion: record.SchemaVersion, ArtifactType: record.ArtifactType, Adapter: CriticalFindingReviewAdapter}, nil
+	case header.SchemaVersion == AdoptionPilotSchema && header.ArtifactType == AdoptionPilotType:
+		var record AdoptionPilotRecord
+		if err := strictjson.Parse(content, &record); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		return pilotAttachment(record, index, requestedGate)
 	default:
 		return derivedGateAttachment{}, fmt.Errorf("unsupported typed gate record %q with schema %q", header.ArtifactType, header.SchemaVersion)
 	}
@@ -561,6 +569,12 @@ func gatePointer(gates *Gates, name string) (*Gate, error) {
 		return &gates.PublishedCompatibility7Cells, nil
 	case "critical_finding_review":
 		return &gates.CriticalFindingReview, nil
+	case "adoption_pilot_1":
+		return &gates.AdoptionPilot1, nil
+	case "adoption_pilot_2":
+		return &gates.AdoptionPilot2, nil
+	case "independent_authoring_reproduction":
+		return &gates.IndependentAuthoringReproduction, nil
 	default:
 		return nil, fmt.Errorf("gate %q has no typed attachment adapter", name)
 	}

@@ -102,6 +102,10 @@ type EvidenceRecord struct {
 	SchemaVersion string `json:"schema_version"`
 	ArtifactType  string `json:"artifact_type"`
 	Adapter       string `json:"adapter,omitempty"`
+	// Subject is a pseudonymous immutable identity needed only for adoption
+	// pilots. It lets later attachments reject a second pilot by the same
+	// external participant without recording a mutable free-form note.
+	Subject string `json:"subject,omitempty"`
 }
 
 // EvidenceAssurance separates record/content verification from remote
