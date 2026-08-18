@@ -563,7 +563,7 @@ resolve_spec() {
 }
 
 load_repo_env() {
-  local env_file="${ENV_FILE:-}"
+  local env_file="${ENV_FILE:-}" source_exit=0
 
   if [[ -z "$env_file" ]]; then
     if [[ -f "$REPO_DIR/.env" ]]; then
@@ -580,14 +580,18 @@ load_repo_env() {
     capture_env_overrides
     set -a
     # shellcheck disable=SC1090
-    source "$ENV_PATH"
+    source "$ENV_PATH" || source_exit="$?"
     set +a
     restore_env_overrides
+    if [[ "$source_exit" != "0" ]]; then
+      echo "Repository environment could not be sourced: $ENV_PATH (exit $source_exit)" >&2
+      return "$source_exit"
+    fi
   fi
 }
 
 load_spec() {
-  local desired_spec_id desired_spec_ref logical_spec_file execution_spec_file
+  local desired_spec_id desired_spec_ref logical_spec_file execution_spec_file source_exit=0
   local expected_spec_digest digest_before_source digest_after_source
 
   logical_spec_file="$(resolve_spec "$1")"
@@ -639,9 +643,13 @@ load_spec() {
   capture_env_overrides
   set -a
   # shellcheck disable=SC1090
-  source "$execution_spec_file"
+  source "$execution_spec_file" || source_exit="$?"
   set +a
   restore_env_overrides
+  if [[ "$source_exit" != "0" ]]; then
+    echo "Experiment spec could not be sourced: $execution_spec_file (exit $source_exit)" >&2
+    return "$source_exit"
+  fi
 
   digest_after_source="$(sha256_digest_file "$execution_spec_file")"
   if [[ "$digest_after_source" != "$digest_before_source" ||
