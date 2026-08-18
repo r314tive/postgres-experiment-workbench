@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-18
+
+### Fixed
+
+- Made the candidate-identity fixture derive its version from the scenario-pack
+  manifest, preserving exact-version qualification across patch releases.
+
 ## [0.2.1] - 2026-08-18
 
 ### Fixed
