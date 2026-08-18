@@ -33,12 +33,14 @@ rg --hidden --no-ignore -n -i "$PATTERN" "${SCAN_ROOTS[@]}" \
   -g '!runs/**' \
   -g '!generated/**' \
   -g '!.tmp/**' \
+  -g '!.git' \
   -g '!.git/**' \
   -g '!**/notes/**' \
   -g '!**/logs/**' \
   -g '!**/runs/**' \
   -g '!**/generated/**' \
   -g '!**/.tmp/**' \
+  -g '!**/.git' \
   -g '!**/.git/**' >"$TMP_FILE" 2>&1
 STATUS="$?"
 set -e

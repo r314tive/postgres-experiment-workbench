@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-08-18
+
+### Fixed
+
+- Ran the privacy scan before release qualification creates local evidence, and
+  ignored Git worktree pointer files so the scan checks project material rather
+  than repository metadata.
+
 ## [0.2.3] - 2026-08-18
 
 ### Fixed
