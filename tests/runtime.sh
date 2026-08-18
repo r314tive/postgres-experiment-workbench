@@ -11,6 +11,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# This fixture owns its port contract from .env.example.  Release qualification
+# injects isolated ports for real runtimes; do not let those ambient values alter
+# the fake runtime assertions below.
+unset POSTGRES_PORT POSTGRES_REPLICA_PORT POSTGRES_LOGICAL_SUBSCRIBER_PORT
+unset PGBOUNCER_PORT POSTGRES_UPGRADE_OLD_PORT POSTGRES_UPGRADE_NEW_PORT
+
 mkdir -p "$TEST_DIR/scripts" "$TEST_DIR/fake-bin"
 cp "$REPO_DIR/scripts/runtime.sh" "$TEST_DIR/scripts/runtime.sh"
 cp "$REPO_DIR/scripts/native_runtime.sh" "$TEST_DIR/scripts/native_runtime.sh"
