@@ -650,6 +650,9 @@ func validateEvidenceRecord(add func(string, ...any), recordPath, evidencePath s
 	case "gates.published_compatibility_7_cells.evidence":
 		wantSchema, wantType, wantAdapter = CompatibilityVerificationSchema, CompatibilityVerificationType, CompatibilityPublishedAdapter
 		adapterRequired = true
+	case "gates.critical_finding_review.evidence":
+		wantSchema, wantType, wantAdapter = CriticalFindingReviewSchema, CriticalFindingReviewType, CriticalFindingReviewAdapter
+		adapterRequired = true
 	}
 	if wantSchema != "" {
 		valid := true

@@ -51,8 +51,8 @@ type derivedGateAttachment struct {
 	Gate          string
 	Status        string
 	CapturedAt    string
-	RunID         string
-	RunAttempt    int64
+	RunID         *string
+	RunAttempt    *int64
 	SchemaVersion string
 	ArtifactType  string
 	Adapter       string
@@ -160,16 +160,14 @@ func attachGate(options GateAttachOptions, hooks gateAttachHooks) (GateAttachRes
 	beforeGates := index.Gates
 	previousDigest := digestExactBytes(indexBytes)
 	evidenceDigest := digestExactBytes(evidenceBytes)
-	runID := derived.RunID
-	runAttempt := derived.RunAttempt
 	*targetGate = Gate{
 		Status: derived.Status,
 		Evidence: &Evidence{
 			Ref:        options.EvidenceRef,
 			Digest:     evidenceDigest,
 			CapturedAt: derived.CapturedAt,
-			RunID:      &runID,
-			RunAttempt: &runAttempt,
+			RunID:      derived.RunID,
+			RunAttempt: derived.RunAttempt,
 			Record: &EvidenceRecord{
 				SchemaVersion: derived.SchemaVersion,
 				ArtifactType:  derived.ArtifactType,
@@ -429,8 +427,8 @@ func adaptGateRecord(content []byte, header artifactHeader, index Index) (derive
 			Gate:          "draft_external_drivers",
 			Status:        GateStatusPassed,
 			CapturedAt:    record.CapturedAt,
-			RunID:         record.WorkflowRun.ID,
-			RunAttempt:    record.WorkflowRun.Attempt,
+			RunID:         stringPointer(record.WorkflowRun.ID),
+			RunAttempt:    int64Pointer(record.WorkflowRun.Attempt),
 			SchemaVersion: record.SchemaVersion,
 			ArtifactType:  record.ArtifactType,
 			Adapter:       ExternalDriverVerificationAdapter,
@@ -453,8 +451,8 @@ func adaptGateRecord(content []byte, header artifactHeader, index Index) (derive
 			Gate:          gate,
 			Status:        GateStatusPassed,
 			CapturedAt:    record.CapturedAt,
-			RunID:         record.WorkflowRun.ID,
-			RunAttempt:    record.WorkflowRun.Attempt,
+			RunID:         stringPointer(record.WorkflowRun.ID),
+			RunAttempt:    int64Pointer(record.WorkflowRun.Attempt),
 			SchemaVersion: record.SchemaVersion,
 			ArtifactType:  record.ArtifactType,
 			Adapter:       adapter,
@@ -471,16 +469,20 @@ func adaptGateRecord(content []byte, header artifactHeader, index Index) (derive
 			Gate:          "publication",
 			Status:        GateStatusPassed,
 			CapturedAt:    record.CapturedAt,
-			RunID:         record.WorkflowRun.ID,
-			RunAttempt:    record.WorkflowRun.Attempt,
+			RunID:         stringPointer(record.WorkflowRun.ID),
+			RunAttempt:    int64Pointer(record.WorkflowRun.Attempt),
 			SchemaVersion: record.SchemaVersion,
 			ArtifactType:  record.ArtifactType,
 			Adapter:       ReleasePublicationAdapter,
 		}, nil
 	case header.SchemaVersion == CompatibilityVerificationSchema && header.ArtifactType == CompatibilityVerificationType:
 		var record CompatibilityVerification
-		if err := strictjson.Parse(content, &record); err != nil { return derivedGateAttachment{}, err }
-		if err := validateCompatibilityVerification(record, index.Candidate); err != nil { return derivedGateAttachment{}, err }
+		if err := strictjson.Parse(content, &record); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		if err := validateCompatibilityVerification(record, index.Candidate); err != nil {
+			return derivedGateAttachment{}, err
+		}
 		gate, adapter := "source_compatibility", CompatibilitySourceAdapter
 		switch record.QualificationMode {
 		case releaseQualificationDraft:
@@ -488,18 +490,41 @@ func adaptGateRecord(content []byte, header artifactHeader, index Index) (derive
 		case releaseQualificationPublished:
 			gate, adapter = "published_compatibility_7_cells", CompatibilityPublishedAdapter
 		}
-		return derivedGateAttachment{Gate: gate, Status: GateStatusPassed, CapturedAt: record.CapturedAt, RunID: record.WorkflowRun.ID, RunAttempt: record.WorkflowRun.Attempt, SchemaVersion: record.SchemaVersion, ArtifactType: record.ArtifactType, Adapter: adapter}, nil
+		return derivedGateAttachment{Gate: gate, Status: GateStatusPassed, CapturedAt: record.CapturedAt, RunID: stringPointer(record.WorkflowRun.ID), RunAttempt: int64Pointer(record.WorkflowRun.Attempt), SchemaVersion: record.SchemaVersion, ArtifactType: record.ArtifactType, Adapter: adapter}, nil
 	case header.SchemaVersion == AggregateVerificationSchema && header.ArtifactType == AggregateVerificationType:
 		var record AggregateVerification
-		if err := strictjson.Parse(content, &record); err != nil { return derivedGateAttachment{}, err }
-		if err := validateAggregateVerification(record, index.Candidate, index); err != nil { return derivedGateAttachment{}, err }
+		if err := strictjson.Parse(content, &record); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		if err := validateAggregateVerification(record, index.Candidate, index); err != nil {
+			return derivedGateAttachment{}, err
+		}
 		gate, adapter := "aggregate_attempt_1", AggregateAttempt1Adapter
-		if record.AggregateAttempt == 2 { gate, adapter = "aggregate_attempt_2", AggregateAttempt2Adapter }
-		return derivedGateAttachment{Gate: gate, Status: GateStatusPassed, CapturedAt: record.CapturedAt, RunID: record.WorkflowRun.ID, RunAttempt: record.WorkflowRun.Attempt, SchemaVersion: record.SchemaVersion, ArtifactType: record.ArtifactType, Adapter: adapter}, nil
+		if record.AggregateAttempt == 2 {
+			gate, adapter = "aggregate_attempt_2", AggregateAttempt2Adapter
+		}
+		return derivedGateAttachment{Gate: gate, Status: GateStatusPassed, CapturedAt: record.CapturedAt, RunID: stringPointer(record.WorkflowRun.ID), RunAttempt: int64Pointer(record.WorkflowRun.Attempt), SchemaVersion: record.SchemaVersion, ArtifactType: record.ArtifactType, Adapter: adapter}, nil
+	case header.SchemaVersion == CriticalFindingReviewSchema && header.ArtifactType == CriticalFindingReviewType:
+		var record CriticalFindingReview
+		if err := strictjson.Parse(content, &record); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		if err := validateCriticalFindingReview(record, index.Candidate); err != nil {
+			return derivedGateAttachment{}, err
+		}
+		status := GateStatusFailed
+		if record.Decision.Status == DecisionGo {
+			status = GateStatusPassed
+		}
+		return derivedGateAttachment{Gate: "critical_finding_review", Status: status, CapturedAt: record.Decision.RecordedAt, SchemaVersion: record.SchemaVersion, ArtifactType: record.ArtifactType, Adapter: CriticalFindingReviewAdapter}, nil
 	default:
 		return derivedGateAttachment{}, fmt.Errorf("unsupported typed gate record %q with schema %q", header.ArtifactType, header.SchemaVersion)
 	}
 }
+
+func stringPointer(value string) *string { return &value }
+
+func int64Pointer(value int64) *int64 { return &value }
 
 func canonicalNextOutput(indexName, outputName, displayOutput string, currentRevision int64) (string, error) {
 	wantInputBase := fmt.Sprintf("index-r%d.json", currentRevision)
@@ -534,6 +559,8 @@ func gatePointer(gates *Gates, name string) (*Gate, error) {
 		return &gates.PublicAssetVerification, nil
 	case "published_compatibility_7_cells":
 		return &gates.PublishedCompatibility7Cells, nil
+	case "critical_finding_review":
+		return &gates.CriticalFindingReview, nil
 	default:
 		return nil, fmt.Errorf("gate %q has no typed attachment adapter", name)
 	}

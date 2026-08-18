@@ -273,6 +273,17 @@ The supported positive mappings are deliberately closed:
   `public_asset_verification`;
 - `pgworkbench.release-publication-verification/v1` to `publication`.
 
+The signed `pgworkbench.critical-finding-review/v1` record is also a closed
+human-review mapping to `critical_finding_review`: a valid signed `go` review
+with the fixed controls and no unresolved critical finding derives `passed`; a
+valid signed `no-go` review derives `failed`. It requires the same index
+candidate (version, tag, commit, and scenario-pack digest), exact four-category
+scope, durable digest-bound control/signoff references, and an administrator
+signoff. It has no workflow-run identity. Like every current attachment, its
+remote durability and signature authenticity remain operator-attested rather
+than authorization-eligible, so even a passed critical-review gate is not a
+release `GO`.
+
 The asset record embeds the complete provider inventory and full candidate,
 requires the fixed 16-asset set, and binds the verified manifest asset. The
 publication record is emitted only by the fresh read-only `public-verify` job
