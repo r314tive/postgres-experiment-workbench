@@ -71,6 +71,13 @@ Current execution state on `next/v0.3`:
   candidate-bound records and preventive controls have a separate atomic
   attachment adapter. Unsupported records stay open rather than being inferred
   from artifact presence.
+- M1.3 readers are implemented for signed critical-finding reviews and
+  completed external pilot records. They preserve participant identity across
+  pilot attachments, reject duplicate pilots, and require independently
+  verified no-maintainer-shell authoring evidence before that gate can close.
+  No real external pilot or proof-backed remote record is checked into this
+  repository, so adoption remains open and the effective decision remains
+  `NO-GO`.
 
 ## M0 — publish the frozen v0.2.0 candidate
 

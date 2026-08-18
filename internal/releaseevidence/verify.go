@@ -183,6 +183,9 @@ func validateReadinessRequirements(
 			valid = false
 		}
 	}
+	if !validatePilotCrossRecord(add, gates) {
+		valid = false
+	}
 	controlStates, controlQualifications, controlsValid := validatePreventiveControls(add, controls)
 	for name, state := range controlStates {
 		states[name] = state
@@ -191,6 +194,27 @@ func validateReadinessRequirements(
 		qualifications[name] = qualification
 	}
 	return states, qualifications, valid && controlsValid
+}
+
+func validatePilotCrossRecord(add func(string, ...any), gates Gates) bool {
+	first := pilotSubject(gates.AdoptionPilot1)
+	second := pilotSubject(gates.AdoptionPilot2)
+	if first != "" && second != "" && first == second {
+		add("adoption pilot evidence must name two distinct external participant identities")
+		return false
+	}
+	if authoring := pilotSubject(gates.IndependentAuthoringReproduction); authoring != "" && first != "" && second != "" && authoring != first && authoring != second {
+		add("independent authoring evidence participant must match an attached adoption pilot")
+		return false
+	}
+	return true
+}
+
+func pilotSubject(gate Gate) string {
+	if gate.Evidence == nil || gate.Evidence.Record == nil {
+		return ""
+	}
+	return gate.Evidence.Record.Subject
 }
 
 func aggregateAssuranceStatus(qualifications map[string]string) string {
@@ -623,6 +647,7 @@ func validateEvidence(add func(string, ...any), path string, evidence Evidence) 
 func validateEvidenceRecord(add func(string, ...any), recordPath, evidencePath string, record EvidenceRecord) bool {
 	wantSchema, wantType, wantAdapter := "", "", ""
 	adapterRequired := false
+	subjectRequired := false
 	switch evidencePath {
 	case "gates.source_compatibility.evidence":
 		wantSchema, wantType, wantAdapter = CompatibilityVerificationSchema, CompatibilityVerificationType, CompatibilitySourceAdapter
@@ -650,6 +675,15 @@ func validateEvidenceRecord(add func(string, ...any), recordPath, evidencePath s
 	case "gates.published_compatibility_7_cells.evidence":
 		wantSchema, wantType, wantAdapter = CompatibilityVerificationSchema, CompatibilityVerificationType, CompatibilityPublishedAdapter
 		adapterRequired = true
+	case "gates.critical_finding_review.evidence":
+		wantSchema, wantType, wantAdapter = CriticalFindingReviewSchema, CriticalFindingReviewType, CriticalFindingReviewAdapter
+		adapterRequired = true
+	case "gates.adoption_pilot_1.evidence", "gates.adoption_pilot_2.evidence":
+		wantSchema, wantType, wantAdapter = AdoptionPilotSchema, AdoptionPilotType, AdoptionPilotAdapter
+		adapterRequired, subjectRequired = true, true
+	case "gates.independent_authoring_reproduction.evidence":
+		wantSchema, wantType, wantAdapter = AdoptionPilotSchema, AdoptionPilotType, IndependentAuthoringPilotAdapter
+		adapterRequired, subjectRequired = true, true
 	}
 	if wantSchema != "" {
 		valid := true
@@ -663,6 +697,13 @@ func validateEvidenceRecord(add func(string, ...any), recordPath, evidencePath s
 		}
 		if record.Adapter != wantAdapter && (adapterRequired || record.Adapter != "") {
 			add("%s.adapter = %q, want %q", recordPath, record.Adapter, wantAdapter)
+			valid = false
+		}
+		if subjectRequired && !criticalReviewIDPattern.MatchString(record.Subject) {
+			add("%s.subject must be a canonical external participant identity", recordPath)
+			valid = false
+		} else if !subjectRequired && record.Subject != "" {
+			add("%s.subject is reserved for adoption-pilot evidence", recordPath)
 			valid = false
 		}
 		return valid
