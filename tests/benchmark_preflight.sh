@@ -30,7 +30,11 @@ GOMODCACHE="${GO_MOD_CACHE:-$REPO_DIR/.tmp/go-mod-cache}" \
 assert_phase_journal() {
   local journal="$1"
 
-  [[ "$(wc -l < "$journal" | tr -d ' ')" = "11" ]] || fail "phase journal does not contain exactly eleven events: $journal"
+  if [[ "$(wc -l < "$journal" | tr -d ' ')" != "11" ]]; then
+    echo "FAIL: phase journal does not contain exactly eleven events: $journal" >&2
+    cat "$journal" >&2
+    exit 1
+  fi
   awk -F '\t' '
     NR == 1 && !($3 == 1 && $4 == "preflight" && $5 == "failed" && $8 != "") { exit 1 }
     NR >= 2 && NR <= 10 && !($3 == NR && $5 == "skipped" && $8 != "") { exit 1 }
