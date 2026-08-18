@@ -7,6 +7,7 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
 
 mkdir -p "$TEST_ROOT/safe" "$TEST_ROOT/leak"
 printf '%s\n' 'Documentation may discuss credentials, tokens, and secrets.' >"$TEST_ROOT/safe/README.md"
+printf '%s\n' "gitdir: $HOME/worktree" >"$TEST_ROOT/safe/.git"
 "$REPO_DIR/scripts/privacy_scan.sh" "$TEST_ROOT/safe" >/dev/null
 
 FAKE_GITHUB_TOKEN="gh""p_$(printf 'a%.0s' {1..36})"
