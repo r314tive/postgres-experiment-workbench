@@ -60,6 +60,10 @@ Compatibility and aggregate evidence is retained as GitHub Actions artifacts for
 90 days. Before a v1 decision, copy the exact green run's artifacts into the
 release-specific durable evidence location required by the completion contract;
 workflow-artifact retention alone is not permanent publication.
+For tag releases, post-draft read-only sealing records bind those artifacts by
+exact API ID/name/digest to the full candidate and fixed seven-cell set. These
+records are input to the local evidence adapter, not a substitute for durable
+evidence or an authorization decision.
 The draft external-driver gate uses the same 90-day retention, but its artifact
 is metadata-only. Any durable copy must preserve the exact metadata archive and
 checksum; third-party driver, build, generated-script, database, log, and full

@@ -477,6 +477,25 @@ func adaptGateRecord(content []byte, header artifactHeader, index Index) (derive
 			ArtifactType:  record.ArtifactType,
 			Adapter:       ReleasePublicationAdapter,
 		}, nil
+	case header.SchemaVersion == CompatibilityVerificationSchema && header.ArtifactType == CompatibilityVerificationType:
+		var record CompatibilityVerification
+		if err := strictjson.Parse(content, &record); err != nil { return derivedGateAttachment{}, err }
+		if err := validateCompatibilityVerification(record, index.Candidate); err != nil { return derivedGateAttachment{}, err }
+		gate, adapter := "source_compatibility", CompatibilitySourceAdapter
+		switch record.QualificationMode {
+		case releaseQualificationDraft:
+			gate, adapter = "draft_compatibility_7_cells", CompatibilityDraftAdapter
+		case releaseQualificationPublished:
+			gate, adapter = "published_compatibility_7_cells", CompatibilityPublishedAdapter
+		}
+		return derivedGateAttachment{Gate: gate, Status: GateStatusPassed, CapturedAt: record.CapturedAt, RunID: record.WorkflowRun.ID, RunAttempt: record.WorkflowRun.Attempt, SchemaVersion: record.SchemaVersion, ArtifactType: record.ArtifactType, Adapter: adapter}, nil
+	case header.SchemaVersion == AggregateVerificationSchema && header.ArtifactType == AggregateVerificationType:
+		var record AggregateVerification
+		if err := strictjson.Parse(content, &record); err != nil { return derivedGateAttachment{}, err }
+		if err := validateAggregateVerification(record, index.Candidate, index); err != nil { return derivedGateAttachment{}, err }
+		gate, adapter := "aggregate_attempt_1", AggregateAttempt1Adapter
+		if record.AggregateAttempt == 2 { gate, adapter = "aggregate_attempt_2", AggregateAttempt2Adapter }
+		return derivedGateAttachment{Gate: gate, Status: GateStatusPassed, CapturedAt: record.CapturedAt, RunID: record.WorkflowRun.ID, RunAttempt: record.WorkflowRun.Attempt, SchemaVersion: record.SchemaVersion, ArtifactType: record.ArtifactType, Adapter: adapter}, nil
 	default:
 		return derivedGateAttachment{}, fmt.Errorf("unsupported typed gate record %q with schema %q", header.ArtifactType, header.SchemaVersion)
 	}
@@ -497,14 +516,24 @@ func canonicalNextOutput(indexName, outputName, displayOutput string, currentRev
 
 func gatePointer(gates *Gates, name string) (*Gate, error) {
 	switch name {
+	case "source_compatibility":
+		return &gates.SourceCompatibility, nil
+	case "aggregate_attempt_1":
+		return &gates.AggregateAttempt1, nil
+	case "aggregate_attempt_2":
+		return &gates.AggregateAttempt2, nil
 	case "draft_asset_verification":
 		return &gates.DraftAssetVerification, nil
 	case "draft_external_drivers":
 		return &gates.DraftExternalDrivers, nil
+	case "draft_compatibility_7_cells":
+		return &gates.DraftCompatibility7Cells, nil
 	case "publication":
 		return &gates.Publication, nil
 	case "public_asset_verification":
 		return &gates.PublicAssetVerification, nil
+	case "published_compatibility_7_cells":
+		return &gates.PublishedCompatibility7Cells, nil
 	default:
 		return nil, fmt.Errorf("gate %q has no typed attachment adapter", name)
 	}

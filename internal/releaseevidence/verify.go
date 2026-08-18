@@ -624,6 +624,15 @@ func validateEvidenceRecord(add func(string, ...any), recordPath, evidencePath s
 	wantSchema, wantType, wantAdapter := "", "", ""
 	adapterRequired := false
 	switch evidencePath {
+	case "gates.source_compatibility.evidence":
+		wantSchema, wantType, wantAdapter = CompatibilityVerificationSchema, CompatibilityVerificationType, CompatibilitySourceAdapter
+		adapterRequired = true
+	case "gates.aggregate_attempt_1.evidence":
+		wantSchema, wantType, wantAdapter = AggregateVerificationSchema, AggregateVerificationType, AggregateAttempt1Adapter
+		adapterRequired = true
+	case "gates.aggregate_attempt_2.evidence":
+		wantSchema, wantType, wantAdapter = AggregateVerificationSchema, AggregateVerificationType, AggregateAttempt2Adapter
+		adapterRequired = true
 	case "gates.draft_asset_verification.evidence":
 		wantSchema, wantType, wantAdapter = ReleaseAssetVerificationSchema, ReleaseAssetVerificationType, ReleaseAssetDraftAdapter
 		adapterRequired = true
@@ -634,6 +643,12 @@ func validateEvidenceRecord(add func(string, ...any), recordPath, evidencePath s
 		wantSchema, wantType, wantAdapter = ExternalDriverVerificationSchema, ExternalDriverVerificationType, ExternalDriverVerificationAdapter
 	case "gates.publication.evidence":
 		wantSchema, wantType, wantAdapter = ReleasePublicationSchema, ReleasePublicationType, ReleasePublicationAdapter
+		adapterRequired = true
+	case "gates.draft_compatibility_7_cells.evidence":
+		wantSchema, wantType, wantAdapter = CompatibilityVerificationSchema, CompatibilityVerificationType, CompatibilityDraftAdapter
+		adapterRequired = true
+	case "gates.published_compatibility_7_cells.evidence":
+		wantSchema, wantType, wantAdapter = CompatibilityVerificationSchema, CompatibilityVerificationType, CompatibilityPublishedAdapter
 		adapterRequired = true
 	}
 	if wantSchema != "" {

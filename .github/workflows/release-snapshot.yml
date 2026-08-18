@@ -1005,6 +1005,99 @@ jobs:
       attestations: read
       contents: read
 
+  seal-source-draft-and-aggregate-evidence:
+    if: github.ref_type == 'tag'
+    needs:
+      - prepare
+      - aggregate-attempt-2
+      - draft-verify
+      - draft-compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Seal exact compatibility and aggregate artifact identities
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME"
+          test "$GITHUB_REF_NAME" = "v$VERSION"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq .sha)" = "$GITHUB_SHA"
+          mkdir -p sealed-qualification
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > sealed-qualification/artifacts.json
+          artifact() {
+            local name="$1"
+            jq -ce --arg name "$name" --arg sha "$GITHUB_SHA" '
+              [.artifacts[] | select(.name == $name and .expired == false and .workflow_run.head_sha == $sha)] |
+              if length == 1 then .[0] else error("wanted exactly one active artifact " + $name) end
+            ' sealed-qualification/artifacts.json
+          }
+          identity() {
+            artifact "$1" | jq -c '{id: (.id|tostring), name, digest}'
+          }
+          draft_name="draft-verification-$GITHUB_REF_NAME-$GITHUB_SHA-$GITHUB_RUN_ATTEMPT"
+          draft_identity="$(identity "$draft_name")"
+          draft_id="$(jq -r .id <<<"$draft_identity")"
+          draft_digest="$(jq -r .digest <<<"$draft_identity")"
+          mkdir -p sealed-qualification/draft
+          gh api -L "repos/$GITHUB_REPOSITORY/actions/artifacts/$draft_id/zip" > sealed-qualification/draft.zip
+          test "$draft_digest" = "sha256:$(sha256sum sealed-qualification/draft.zip | awk '{print $1}')"
+          unzip -q sealed-qualification/draft.zip -d sealed-qualification/draft
+          draft_record="$(find sealed-qualification/draft -type f -name asset-verification.json -print -quit)"
+          test -n "$draft_record"
+          jq -e --arg sha "$GITHUB_SHA" --arg tag "$GITHUB_REF_NAME" '
+            .schema_version == "pgworkbench.release-asset-verification/v1" and
+            .artifact_type == "pgworkbench.release-asset-verification" and
+            .qualification_mode == "draft" and .candidate.git_commit == $sha and
+            .candidate.tag == $tag and .workflow_run.id == env.GITHUB_RUN_ID and
+            .workflow_run.attempt == (env.GITHUB_RUN_ATTEMPT|tonumber) and
+            .workflow_run.job == "draft-verify"
+          ' "$draft_record" >/dev/null
+          captured_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          workflow="$(jq -cn --arg id "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" --arg ref "$GITHUB_REF" '{id:$id,attempt:$attempt,head_sha:$sha,repository:$repo,workflow:"release-snapshot",job:"",ref:$ref}')"
+          assurance_compat='{"purpose":"seven-cell-compatibility-observation","verification_scope":"workflow-local-actions-artifact-identity","actions_artifact_durable":false,"candidate_identity_reverified":true,"performance_claim":false,"benchmark_comparability_claim":false,"recovery_claim":false,"production_decision_eligible":false}'
+          assurance_aggregate='{"purpose":"clean-checkout-aggregate-observation","verification_scope":"workflow-local-actions-artifact-identity","actions_artifact_durable":false,"candidate_identity_reverified":true,"performance_claim":false,"benchmark_comparability_claim":false,"recovery_claim":false,"production_decision_eligible":false}'
+          compatibility_record() {
+            local mode="$1" job="$2" output="$3" cells='[]'
+            local cell suffix
+            for cell in docker-linux-amd64-pg15-to-pg16-multi-version-upgrade docker-linux-amd64-pg16-logical-replication docker-linux-amd64-pg16-pgbouncer docker-linux-amd64-pg16-primary-replica docker-linux-amd64-pg16-single native-darwin-arm64-pg16-single native-linux-amd64-pg16-single; do
+              suffix="$cell"
+              case "$cell" in native-darwin-arm64-pg16-single) suffix=native-darwin-arm64-pg16;; native-linux-amd64-pg16-single) suffix=native-linux-amd64-pg16;; esac
+              cells="$(jq -cn --argjson cells "$cells" --arg id "$cell" --argjson artifact "$(identity "compatibility-$mode-$suffix-$GITHUB_SHA-$GITHUB_RUN_ATTEMPT")" '$cells + [{id:$id,artifact:$artifact}]')"
+            done
+            jq -n --arg mode "$mode" --arg captured "$captured_at" --argjson candidate "$(jq -c .candidate "$draft_record")" --argjson run "$(jq -c --arg job "$job" '.job=$job' <<<"$workflow")" --argjson asset "$(jq -c . "$draft_record")" --argjson cells "$cells" --argjson assurance "$assurance_compat" '{schema_version:"pgworkbench.release-compatibility-verification/v1",artifact_type:"pgworkbench.release-compatibility-verification",qualification_mode:$mode,candidate:$candidate,captured_at:$captured,workflow_run:$run,asset_verification:$asset,cells:$cells,assurance:$assurance}' > "$output"
+          }
+          compatibility_record source seal-source-draft-and-aggregate-evidence sealed-qualification/source-compatibility-verification.json
+          compatibility_record draft seal-source-draft-and-aggregate-evidence sealed-qualification/draft-compatibility-verification.json
+          aggregate_record() {
+            local number="$1" output="$2" previous="${3:-}"
+            local previous_arg='{}'
+            if [[ -n "$previous" ]]; then previous_arg="$(jq -cn --arg digest "$previous" '{previous_attempt_record_digest:$digest}')"; fi
+            jq -n --argjson number "$number" --arg captured "$captured_at" --argjson candidate "$(jq -c .candidate "$draft_record")" --argjson run "$(jq -c --arg job seal-source-draft-and-aggregate-evidence '.job=$job' <<<"$workflow")" --argjson asset "$(jq -c . "$draft_record")" --argjson artifact "$(identity "aggregate-$number-$GITHUB_SHA-$GITHUB_RUN_ATTEMPT")" --argjson assurance "$assurance_aggregate" --argjson previous "$previous_arg" '{schema_version:"pgworkbench.release-aggregate-verification/v1",artifact_type:"pgworkbench.release-aggregate-verification",aggregate_attempt:$number,candidate:$candidate,captured_at:$captured,workflow_run:$run,asset_verification:$asset,aggregate_artifact:$artifact,assurance:$assurance} + $previous' > "$output"
+          }
+          aggregate_record 1 sealed-qualification/aggregate-attempt-1-verification.json
+          first_digest="sha256:$(sha256sum sealed-qualification/aggregate-attempt-1-verification.json | awk '{print $1}')"
+          aggregate_record 2 sealed-qualification/aggregate-attempt-2-verification.json "$first_digest"
+          jq -e . sealed-qualification/source-compatibility-verification.json >/dev/null
+          jq -e . sealed-qualification/draft-compatibility-verification.json >/dev/null
+          jq -e . sealed-qualification/aggregate-attempt-1-verification.json >/dev/null
+          jq -e . sealed-qualification/aggregate-attempt-2-verification.json >/dev/null
+
+      - name: Upload sealed source, draft, and aggregate evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sealed-qualification-${{ github.ref_name }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: sealed-qualification/
+          if-no-files-found: error
+          retention-days: 90
+
   draft-external-drivers:
     if: github.ref_type == 'tag'
     needs:
@@ -1012,6 +1105,8 @@ jobs:
       - attest-and-create-draft
       - draft-verify
       - draft-compatibility
+
+      - seal-source-draft-and-aggregate-evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     environment: release-external-drivers
@@ -2865,3 +2960,62 @@ jobs:
     permissions:
       attestations: read
       contents: read
+
+  seal-published-compatibility:
+    if: github.ref_type == 'tag'
+    needs:
+      - public-verify
+      - published-compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Seal exact published compatibility artifact identities
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > artifacts.json
+          artifact() {
+            jq -ce --arg name "$1" --arg sha "$GITHUB_SHA" '[.artifacts[] | select(.name == $name and .expired == false and .workflow_run.head_sha == $sha)] | if length == 1 then .[0] else error("wanted exactly one active artifact " + $name) end' artifacts.json
+          }
+          identity() { artifact "$1" | jq -c '{id:(.id|tostring),name,digest}'; }
+          public_name="public-verification-$GITHUB_REF_NAME-$GITHUB_SHA-$GITHUB_RUN_ATTEMPT"
+          public_identity="$(identity "$public_name")"
+          public_id="$(jq -r .id <<<"$public_identity")"
+          public_digest="$(jq -r .digest <<<"$public_identity")"
+          mkdir -p sealed-published/public
+          gh api -L "repos/$GITHUB_REPOSITORY/actions/artifacts/$public_id/zip" > sealed-published/public.zip
+          test "$public_digest" = "sha256:$(sha256sum sealed-published/public.zip | awk '{print $1}')"
+          unzip -q sealed-published/public.zip -d sealed-published/public
+          public_record="$(find sealed-published/public -type f -name asset-verification.json -print -quit)"
+          test -n "$public_record"
+          jq -e --arg sha "$GITHUB_SHA" --arg tag "$GITHUB_REF_NAME" '
+            .schema_version == "pgworkbench.release-asset-verification/v1" and
+            .artifact_type == "pgworkbench.release-asset-verification" and
+            .qualification_mode == "published" and .candidate.git_commit == $sha and
+            .candidate.tag == $tag and .workflow_run.id == env.GITHUB_RUN_ID and
+            .workflow_run.attempt == (env.GITHUB_RUN_ATTEMPT|tonumber) and .workflow_run.job == "public-verify"
+          ' "$public_record" >/dev/null
+          cells='[]'
+          for cell in docker-linux-amd64-pg15-to-pg16-multi-version-upgrade docker-linux-amd64-pg16-logical-replication docker-linux-amd64-pg16-pgbouncer docker-linux-amd64-pg16-primary-replica docker-linux-amd64-pg16-single native-darwin-arm64-pg16-single native-linux-amd64-pg16-single; do
+            suffix="$cell"
+            case "$cell" in native-darwin-arm64-pg16-single) suffix=native-darwin-arm64-pg16;; native-linux-amd64-pg16-single) suffix=native-linux-amd64-pg16;; esac
+            cells="$(jq -cn --argjson cells "$cells" --arg id "$cell" --argjson artifact "$(identity "compatibility-published-$suffix-$GITHUB_SHA-$GITHUB_RUN_ATTEMPT")" '$cells + [{id:$id,artifact:$artifact}]')"
+          done
+          captured_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n --arg captured "$captured_at" --argjson candidate "$(jq -c .candidate "$public_record")" --argjson run "$(jq -cn --arg id "$GITHUB_RUN_ID" --argjson attempt "$GITHUB_RUN_ATTEMPT" --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" --arg ref "$GITHUB_REF" '{id:$id,attempt:$attempt,head_sha:$sha,repository:$repo,workflow:"release-snapshot",job:"seal-published-compatibility",ref:$ref}')" --argjson asset "$(jq -c . "$public_record")" --argjson cells "$cells" '{schema_version:"pgworkbench.release-compatibility-verification/v1",artifact_type:"pgworkbench.release-compatibility-verification",qualification_mode:"published",candidate:$candidate,captured_at:$captured,workflow_run:$run,asset_verification:$asset,cells:$cells,assurance:{purpose:"seven-cell-compatibility-observation",verification_scope:"workflow-local-actions-artifact-identity",actions_artifact_durable:false,candidate_identity_reverified:true,performance_claim:false,benchmark_comparability_claim:false,recovery_claim:false,production_decision_eligible:false}}' > sealed-published/published-compatibility-verification.json
+          jq -e . sealed-published/published-compatibility-verification.json >/dev/null
+
+      - name: Upload sealed published compatibility evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sealed-published-compatibility-${{ github.ref_name }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: sealed-published/
+          if-no-files-found: error
+          retention-days: 90

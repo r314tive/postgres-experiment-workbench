@@ -20,6 +20,17 @@ record alongside draft/public verification evidence. It is deliberately not a
 seventeenth release asset: including it in the release would make its own
 asset-set fingerprint recursive.
 
+After a draft exists, read-only sealing jobs also emit
+[`release-compatibility-verification`](../schemas/release-compatibility-verification.schema.json)
+and [`release-aggregate-verification`](../schemas/release-aggregate-verification.schema.json)
+records. They enumerate the fixed seven compatibility artifact IDs/names/digests
+or one aggregate artifact identity, embed the candidate-bound asset observation,
+and make aggregate attempt two hash-bind the exact attempt-one record bytes.
+They are deliberately not summaries of a green workflow, nor proof that Actions
+will retain the referenced bytes. The closed local adapters can attach them only
+to their one matching readiness requirement, with operator-attested, `NO-GO`
+assurance.
+
 Copy templates into a release-specific durable location; do not edit the
 templates as historical evidence. A practical layout is
 `releases/v<version>/evidence-index.json`, `pilots/<pilot-id>.json`, and
@@ -106,6 +117,15 @@ final command. A new clean job then requires `isImmutable=true`, verifies the
 release attestation, downloads and authenticates the same 16 assets, and checks
 the draft/public fingerprint. Only after that succeeds do all seven cells run
 again from published archives.
+
+The source, draft, and aggregate sealing job lists current-run artifacts through
+the Actions API, requires one non-expired identity with the exact name and
+candidate SHA, downloads the selected draft verification ZIP by exact artifact
+ID, and rehashes it before writing typed records. A final published sealing job
+repeats that pattern for public verification and all seven published cells. This
+binds local record semantics to observed provider identities without claiming
+remote durability, runtime support, performance comparability, recovery, or
+release authorization.
 
 A failure after publication cannot make the release private again. It means the
 release exists but the release-evidence index stays `NO-GO`; it must not be

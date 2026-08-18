@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/release-aggregate-verification.schema.json",
+  "title": "pgworkbench sealed release aggregate verification v1",
+  "description": "Fact-only identity of one clean-checkout aggregate release gate. Attempt two binds exact attempt-one record bytes; neither attempt is release authorization.",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "aggregate_attempt", "candidate", "captured_at", "workflow_run", "asset_verification", "aggregate_artifact", "assurance"],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.release-aggregate-verification/v1"}, "artifact_type": {"const": "pgworkbench.release-aggregate-verification"},
+    "aggregate_attempt": {"enum": [1, 2]}, "candidate": {"$ref": "release-evidence-index.schema.json#/$defs/candidate"},
+    "captured_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9]Z$"},
+    "workflow_run": {"$ref": "#/$defs/workflow_run"},
+    "asset_verification": {"allOf": [{"$ref": "release-asset-verification.schema.json"}, {"properties": {"qualification_mode": {"const": "draft"}}, "required": ["qualification_mode"]}]},
+    "aggregate_artifact": {"$ref": "#/$defs/artifact"}, "previous_attempt_record_digest": {"$ref": "#/$defs/digest"}, "assurance": {"$ref": "#/$defs/assurance"}
+  },
+  "allOf": [{"if": {"properties": {"aggregate_attempt": {"const": 1}}}, "then": {"not": {"required": ["previous_attempt_record_digest"]}}, "else": {"required": ["previous_attempt_record_digest"]}}],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["id", "name", "digest"], "properties": {"id": {"type": "string", "pattern": "^[1-9][0-9]{0,31}$"}, "name": {"type": "string", "minLength": 1, "maxLength": 512}, "digest": {"$ref": "#/$defs/digest"}}},
+    "workflow_run": {"type": "object", "additionalProperties": false, "required": ["id", "attempt", "head_sha", "repository", "workflow", "job", "ref"], "properties": {"id": {"type": "string", "pattern": "^[1-9][0-9]{0,31}$"}, "attempt": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "head_sha": {"type": "string", "pattern": "^(?!(?:0{40}|0{64})$)(?:[0-9a-f]{40}|[0-9a-f]{64})$"}, "repository": {"const": "r314tive/postgres-experiment-workbench"}, "workflow": {"const": "release-snapshot"}, "job": {"const": "seal-source-draft-and-aggregate-evidence"}, "ref": {"type": "string", "pattern": "^refs/tags/v"}}},
+    "assurance": {"type": "object", "additionalProperties": false, "required": ["purpose", "verification_scope", "actions_artifact_durable", "candidate_identity_reverified", "performance_claim", "benchmark_comparability_claim", "recovery_claim", "production_decision_eligible"], "properties": {"purpose": {"const": "clean-checkout-aggregate-observation"}, "verification_scope": {"const": "workflow-local-actions-artifact-identity"}, "actions_artifact_durable": {"const": false}, "candidate_identity_reverified": {"const": true}, "performance_claim": {"const": false}, "benchmark_comparability_claim": {"const": false}, "recovery_claim": {"const": false}, "production_decision_eligible": {"const": false}}}
+  }
+}

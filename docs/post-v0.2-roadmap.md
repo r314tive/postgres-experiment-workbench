@@ -470,12 +470,15 @@ The current M1.2b tranche establishes the attachment substrate:
    adapters plus a self-contained publication record emitted only by the fresh
    read-only public verifier; all three outcomes remain operator-attested and
    non-authorizing;
-6. next: typed source/draft/published compatibility and aggregate-attempt
-   records require post-draft sealing over exact provider artifact identities;
-   preventive controls require a separate atomic three-control adapter over a
-   final live recheck. Current raw directories, workflow success, pre-draft
-   control snapshots, or asset inventories alone are not positive evidence;
-7. exit: finish the remaining adapters, full fault/race/standalone matrix, and
+6. completed: typed source/draft/published compatibility and aggregate-attempt
+   records are sealed post-draft over exact provider artifact identities; the
+   second aggregate record hash-binds the first. All remain operator-attested
+   and non-authorizing;
+7. next: preventive controls require a separate atomic three-control adapter
+   over a final live recheck. Current raw directories, workflow success,
+   pre-draft control snapshots, or asset inventories alone are not positive
+   evidence;
+8. exit: finish the remaining adapters, full fault/race/standalone matrix, and
    only then mark M1.2 complete.
 
 M1.3 typed pilot/critical-review readers and M1.4 relocated closed bundles then

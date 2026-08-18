@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/release-compatibility-verification.schema.json",
+  "title": "pgworkbench sealed release compatibility verification v1",
+  "description": "Fact-only sealed identities for all seven compatibility cells. It is not a runtime support, benchmark, recovery, or production-decision claim.",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "qualification_mode", "candidate", "captured_at", "workflow_run", "asset_verification", "cells", "assurance"],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.release-compatibility-verification/v1"},
+    "artifact_type": {"const": "pgworkbench.release-compatibility-verification"},
+    "qualification_mode": {"enum": ["source", "draft", "published"]},
+    "candidate": {"$ref": "release-evidence-index.schema.json#/$defs/candidate"},
+    "captured_at": {"type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9]Z$"},
+    "workflow_run": {"$ref": "#/$defs/workflow_run"},
+    "asset_verification": {"$ref": "release-asset-verification.schema.json"},
+    "cells": {"type": "array", "minItems": 7, "maxItems": 7, "uniqueItems": true, "prefixItems": [
+      {"$ref": "#/$defs/upgrade_cell"}, {"$ref": "#/$defs/cell"}, {"$ref": "#/$defs/cell"}, {"$ref": "#/$defs/cell"}, {"$ref": "#/$defs/cell"}, {"$ref": "#/$defs/darwin_cell"}, {"$ref": "#/$defs/linux_cell"}
+    ], "items": false},
+    "assurance": {"$ref": "#/$defs/assurance"}
+  },
+  "allOf": [{"if": {"properties": {"qualification_mode": {"const": "published"}}}, "then": {"properties": {"asset_verification": {"properties": {"qualification_mode": {"const": "published"}}, "required": ["qualification_mode"]}}}, "else": {"properties": {"asset_verification": {"properties": {"qualification_mode": {"const": "draft"}}, "required": ["qualification_mode"]}}}}],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "artifact": {"type": "object", "additionalProperties": false, "required": ["id", "name", "digest"], "properties": {"id": {"type": "string", "pattern": "^[1-9][0-9]{0,31}$"}, "name": {"type": "string", "minLength": 1, "maxLength": 512}, "digest": {"$ref": "#/$defs/digest"}}},
+    "cell": {"type": "object", "additionalProperties": false, "required": ["id", "artifact"], "properties": {"id": {"enum": ["docker-linux-amd64-pg16-logical-replication", "docker-linux-amd64-pg16-pgbouncer", "docker-linux-amd64-pg16-primary-replica", "docker-linux-amd64-pg16-single"]}, "artifact": {"$ref": "#/$defs/artifact"}}},
+    "upgrade_cell": {"type": "object", "additionalProperties": false, "required": ["id", "artifact"], "properties": {"id": {"const": "docker-linux-amd64-pg15-to-pg16-multi-version-upgrade"}, "artifact": {"$ref": "#/$defs/artifact"}}},
+    "darwin_cell": {"type": "object", "additionalProperties": false, "required": ["id", "artifact"], "properties": {"id": {"const": "native-darwin-arm64-pg16-single"}, "artifact": {"$ref": "#/$defs/artifact"}}},
+    "linux_cell": {"type": "object", "additionalProperties": false, "required": ["id", "artifact"], "properties": {"id": {"const": "native-linux-amd64-pg16-single"}, "artifact": {"$ref": "#/$defs/artifact"}}},
+    "workflow_run": {"type": "object", "additionalProperties": false, "required": ["id", "attempt", "head_sha", "repository", "workflow", "job", "ref"], "properties": {"id": {"type": "string", "pattern": "^[1-9][0-9]{0,31}$"}, "attempt": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "head_sha": {"type": "string", "pattern": "^(?!(?:0{40}|0{64})$)(?:[0-9a-f]{40}|[0-9a-f]{64})$"}, "repository": {"const": "r314tive/postgres-experiment-workbench"}, "workflow": {"const": "release-snapshot"}, "job": {"enum": ["seal-source-draft-and-aggregate-evidence", "seal-published-compatibility"]}, "ref": {"type": "string", "pattern": "^refs/tags/v"}}},
+    "assurance": {"type": "object", "additionalProperties": false, "required": ["purpose", "verification_scope", "actions_artifact_durable", "candidate_identity_reverified", "performance_claim", "benchmark_comparability_claim", "recovery_claim", "production_decision_eligible"], "properties": {"purpose": {"const": "seven-cell-compatibility-observation"}, "verification_scope": {"const": "workflow-local-actions-artifact-identity"}, "actions_artifact_durable": {"const": false}, "candidate_identity_reverified": {"const": true}, "performance_claim": {"const": false}, "benchmark_comparability_claim": {"const": false}, "recovery_claim": {"const": false}, "production_decision_eligible": {"const": false}}}
+  }
+}

@@ -47,6 +47,8 @@ verify_publication_evidence="$(job_block verify-publication-evidence)"
 publish_release="$(job_block publish-release)"
 public_verify="$(job_block public-verify)"
 published_compatibility="$(job_block published-compatibility)"
+seal_source_draft_aggregate="$(job_block seal-source-draft-and-aggregate-evidence)"
+seal_published_compatibility="$(job_block seal-published-compatibility)"
 last_job="$(awk '/^  [A-Za-z0-9_-]+:$/ { name = $1; sub(/:$/, "", name) } END { print name }' "$WORKFLOW")"
 release_header="$(awk '/^jobs:$/ { exit } { print }' "$WORKFLOW")"
 check_header="$(awk '/^jobs:$/ { exit } { print }' "$CHECK_WORKFLOW")"
@@ -861,10 +863,24 @@ require_line "$published_compatibility" '      release_tag: ${{ github.ref_name 
 require_line "$published_compatibility" '      qualification_mode: published' \
   'published compatibility must run all declared cells in published mode'
 
-if [[ "$last_job" != published-compatibility ]]; then
-  echo 'FAIL: published compatibility must be the final post-publication qualification job' >&2
+if [[ "$last_job" != seal-published-compatibility ]]; then
+  echo 'FAIL: sealed published compatibility must be the final post-publication qualification job' >&2
   exit 1
 fi
+require_line "$seal_source_draft_aggregate" '      actions: read' \
+  'source/draft/aggregate sealing must have artifact-read permission only'
+require_line "$seal_source_draft_aggregate" '      contents: read' \
+  'source/draft/aggregate sealing must keep repository contents read-only'
+require_text "$seal_source_draft_aggregate" 'pgworkbench.release-compatibility-verification/v1' \
+  'source/draft sealing must emit typed compatibility records'
+require_text "$seal_source_draft_aggregate" 'pgworkbench.release-aggregate-verification/v1' \
+  'source/draft sealing must emit typed aggregate records'
+require_text "$seal_source_draft_aggregate" 'previous_attempt_record_digest' \
+  'aggregate attempt two must bind the exact attempt-one record bytes'
+require_line "$seal_published_compatibility" '      actions: read' \
+  'published compatibility sealing must have artifact-read permission only'
+require_text "$seal_published_compatibility" 'pgworkbench.release-compatibility-verification/v1' \
+  'published compatibility sealing must emit its typed record'
 
 if [[ "$(grep -Fc -- '--draft=false' "$WORKFLOW")" -ne 1 ]]; then
   echo 'FAIL: the workflow must have exactly one draft-to-public transition' >&2
