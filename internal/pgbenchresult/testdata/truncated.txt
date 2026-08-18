@@ -1,0 +1,10 @@
+pgbench (16.14, server 16.14)
+transaction type: <builtin: TPC-B (sort of)>
+scaling factor: 1
+query mode: simple
+number of clients: 10
+number of threads: 1
+maximum number of tries: 1
+duration: 60 s
+number of transactions actually processed: 1000
+number of failed transactions: 0 (0.000%)

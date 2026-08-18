@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-import-mapping.schema.json",
+  "title": "pgworkbench explicit benchmark import mapping",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_type", "driver", "driver_version_pointer", "workload_pointer",
+    "source_format", "primary_metric", "errors", "timing"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.benchmark-import-mapping/v1"},
+    "artifact_type": {"const": "pgworkbench.benchmark-import-mapping"},
+    "driver": {"enum": ["hammerdb", "benchbase"]},
+    "driver_version_pointer": {"$ref": "#/$defs/pointer"},
+    "workload_pointer": {"$ref": "#/$defs/pointer"},
+    "source_format": {"enum": ["hammerdb6-saved-job-report-json", "benchbase-structured-result-json-explicit-mapping"]},
+    "primary_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value_pointer", "unit", "direction"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        "value_pointer": {"$ref": "#/$defs/pointer"},
+        "unit": {"type": "string", "minLength": 1, "maxLength": 64},
+        "direction": {"enum": ["higher", "lower"]}
+      }
+    },
+    "errors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_pointer", "messages_pointer"],
+      "properties": {
+        "total_pointer": {"$ref": "#/$defs/pointer"},
+        "messages_pointer": {"$ref": "#/$defs/pointer"}
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["elapsed_seconds_pointer"],
+      "properties": {
+        "elapsed_seconds_pointer": {"$ref": "#/$defs/pointer"},
+        "started_at_pointer": {"$ref": "#/$defs/pointer"},
+        "finished_at_pointer": {"$ref": "#/$defs/pointer"}
+      },
+      "dependentRequired": {
+        "started_at_pointer": ["finished_at_pointer"],
+        "finished_at_pointer": ["started_at_pointer"]
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"driver": {"const": "hammerdb"}}},
+      "then": {
+        "properties": {
+          "source_format": {"const": "hammerdb6-saved-job-report-json"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"driver": {"const": "benchbase"}}},
+      "then": {"properties": {"source_format": {"const": "benchbase-structured-result-json-explicit-mapping"}}}
+    }
+  ],
+  "$defs": {
+    "pointer": {"type": "string", "minLength": 2, "maxLength": 512, "pattern": "^/"}
+  }
+}

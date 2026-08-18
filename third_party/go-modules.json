@@ -1,0 +1,56 @@
+{
+  "schema_version": "pgworkbench.go-module-inventory/v1",
+  "module_path": "github.com/r314tive/postgres-experiment-workbench",
+  "modules": [
+    {
+      "path": "github.com/dlclark/regexp2",
+      "version": "v1.11.0",
+      "scope": "test",
+      "module_sum": "h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=",
+      "go_mod_sum": "h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=",
+      "license": "MIT",
+      "license_files": [
+        {
+          "path": "third_party/licenses/github.com/dlclark/regexp2/v1.11.0/ATTRIB",
+          "sha256": "sha256:8db174fc98abc02f154c20ffdacdfbd37528ef25e0f098e20a2c21defd76329a"
+        },
+        {
+          "path": "third_party/licenses/github.com/dlclark/regexp2/v1.11.0/LICENSE",
+          "sha256": "sha256:9be5d04bb4d706914d5bf943710da4afeb42048f7c529902fb57c82762a991a9"
+        }
+      ]
+    },
+    {
+      "path": "github.com/santhosh-tekuri/jsonschema/v6",
+      "version": "v6.0.2",
+      "scope": "test",
+      "module_sum": "h1:KRzFb2m7YtdldCEkzs6KqmJw4nqEVZGK7IN2kJkjTuQ=",
+      "go_mod_sum": "h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=",
+      "license": "Apache-2.0",
+      "license_files": [
+        {
+          "path": "third_party/licenses/github.com/santhosh-tekuri/jsonschema/v6/v6.0.2/LICENSE",
+          "sha256": "sha256:09e8a9bcec8067104652c168685ab0931e7868f9c8284b66f5ae6edae5f1130b"
+        }
+      ]
+    },
+    {
+      "path": "golang.org/x/text",
+      "version": "v0.14.0",
+      "scope": "test",
+      "module_sum": "h1:ScX5w1eTa3QqT8oi6+ziP7dTV1S2+ALU0bI+0zXKWiQ=",
+      "go_mod_sum": "h1:18ZOQIKpY8NJVqYksKHtTdi31H5itFRjB5/qKTNYzSU=",
+      "license": "BSD-3-Clause",
+      "license_files": [
+        {
+          "path": "third_party/licenses/golang.org/x/text/v0.14.0/LICENSE",
+          "sha256": "sha256:2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067"
+        },
+        {
+          "path": "third_party/licenses/golang.org/x/text/v0.14.0/PATENTS",
+          "sha256": "sha256:96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"
+        }
+      ]
+    }
+  ]
+}

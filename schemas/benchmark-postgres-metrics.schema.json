@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-postgres-metrics.schema.json",
+  "title": "pgworkbench measure-scoped PostgreSQL sampler summary v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "parser_version",
+    "postgres_server_major",
+    "source",
+    "measure",
+    "coverage",
+    "cadence",
+    "statistics_reset",
+    "database",
+    "counter_deltas",
+    "gauges",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.benchmark-postgres-metrics/v2"},
+    "artifact_type": {"const": "pgworkbench.benchmark-postgres-metrics"},
+    "parser_version": {"const": "postgresql-sampler-csv/v2"},
+    "postgres_server_major": {"enum": ["15", "16", "17", "18", "19"]},
+    "source": {"$ref": "#/$defs/source"},
+    "measure": {"$ref": "#/$defs/measure"},
+    "coverage": {"$ref": "#/$defs/coverage"},
+    "cadence": {"$ref": "#/$defs/cadence"},
+    "statistics_reset": {"$ref": "#/$defs/statistics_reset"},
+    "database": {"$ref": "#/$defs/database"},
+    "counter_deltas": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/counter_delta"}
+    },
+    "gauges": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {"$ref": "#/$defs/gauge"}
+    },
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "decimal_integer": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest", "size_bytes"],
+      "properties": {
+        "path": {"const": "metrics.csv"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 67108864}
+      }
+    },
+    "measure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "finished_at"],
+      "properties": {
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "first_sample_at",
+        "last_sample_at",
+        "samples",
+        "total_samples",
+        "leading_slack_ns",
+        "trailing_slack_ns"
+      ],
+      "properties": {
+        "first_sample_at": {"type": "string", "format": "date-time"},
+        "last_sample_at": {"type": "string", "format": "date-time"},
+        "samples": {"type": "integer", "minimum": 2},
+        "total_samples": {"type": "integer", "minimum": 2},
+        "leading_slack_ns": {"type": "integer", "minimum": 0},
+        "trailing_slack_ns": {"type": "integer", "minimum": 0}
+      }
+    },
+    "cadence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "collector", "declared_interval_ns", "max_consecutive_gap_ns",
+        "max_allowed_gap_ns", "verification_mode", "regular_samples_matched",
+        "boundary_samples"
+      ],
+      "properties": {
+        "collector": {"enum": ["postgresql-sampler-v1", "postgresql-sampler-v2"]},
+        "declared_interval_ns": {"type": "integer", "minimum": 1000000000, "maximum": 3600000000000},
+        "max_consecutive_gap_ns": {"type": "integer", "minimum": 1},
+        "max_allowed_gap_ns": {"type": "integer", "minimum": 2000000000, "maximum": 7200000000000},
+        "verification_mode": {
+          "enum": [
+            "wall-clock-explicit-two-interval-bound",
+            "typed-unquantified-control-plus-wall-clock-explicit-two-interval-bound",
+            "typed-monotonic-regular-grid-plus-wall-clock-explicit-two-interval-bound"
+          ]
+        },
+        "regular_samples_matched": {"type": "integer", "minimum": 0, "maximum": 10000},
+        "boundary_samples": {"type": "integer", "minimum": 0, "maximum": 1},
+        "control_digest": {"$ref": "#/$defs/digest"},
+        "raw_source": {"$ref": "#/$defs/source_control"}
+      }
+    },
+    "statistics_reset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "boundary", "verification_mode", "status", "database", "wal"],
+      "properties": {
+        "policy": {"enum": ["none", "operator-managed", "runner-managed"]},
+        "boundary": {"enum": ["none", "before-trial", "before-warmup", "before-measure"]},
+        "verification_mode": {"enum": ["declaration-only", "typed-control-and-raw-source"]},
+        "status": {"enum": ["not-requested", "operator-managed-unproven", "succeeded"]},
+        "control_digest": {"$ref": "#/$defs/digest"},
+        "raw_source": {"$ref": "#/$defs/source_control"},
+        "database": {"$ref": "#/$defs/reset_database"},
+        "wal": {"$ref": "#/$defs/reset_wal"}
+      }
+    },
+    "source_control": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest", "size_bytes"],
+      "properties": {
+        "path": {"enum": ["statistics-reset.tsv", "collector-overhead.tsv"]},
+        "digest": {"$ref": "#/$defs/digest"},
+        "size_bytes": {"type": "integer", "minimum": 1, "maximum": 2097152}
+      }
+    },
+    "reset_database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "before_availability"],
+      "properties": {
+        "scope": {"const": "pg_stat_database"},
+        "before_availability": {"enum": ["observed", "null", "unavailable"]},
+        "before_reset_at": {"type": "string", "format": "date-time"},
+        "reset_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "reset_wal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "before_availability"],
+      "properties": {
+        "scope": {"const": "pg_stat_wal"},
+        "before_availability": {"enum": ["observed", "null", "unavailable"]},
+        "before_reset_at": {"type": "string", "format": "date-time"},
+        "reset_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 63}
+      }
+    },
+    "counter_delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "name", "first", "last", "delta", "segments", "reset_applied"],
+      "properties": {
+        "scope": {"enum": ["pg_stat_database", "pg_stat_wal"]},
+        "name": {
+          "enum": [
+            "xact_commit", "xact_rollback", "blks_read", "blks_hit",
+            "tup_returned", "tup_fetched", "tup_inserted", "tup_updated",
+            "tup_deleted", "conflicts", "deadlocks", "temp_files", "temp_bytes",
+            "wal_records", "wal_fpi", "wal_bytes"
+          ]
+        },
+        "first": {"$ref": "#/$defs/decimal_integer"},
+        "last": {"$ref": "#/$defs/decimal_integer"},
+        "delta": {"$ref": "#/$defs/decimal_integer"},
+        "segments": {"type": "integer", "minimum": 1, "maximum": 2},
+        "reset_applied": {"type": "boolean"}
+      }
+    },
+    "gauge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "mean", "max"],
+      "properties": {
+        "name": {
+          "enum": [
+            "active_sessions", "waiting_sessions", "lock_waiting_sessions",
+            "blocked_sessions", "locks_total", "locks_waiting"
+          ]
+        },
+        "mean": {"type": "number", "minimum": 0},
+        "max": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

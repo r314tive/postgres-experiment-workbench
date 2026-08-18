@@ -35,17 +35,57 @@ Run a utility-test through the existing experiment runner when you want a full
 ```bash
 make utility-run UTILITY_TEST_SPEC=pg-dump/smoke
 make utility-run-json UTILITY_TEST_SPEC=pg-dump/smoke
-UTILITY_TEST_RUN_ID=manual-pgdump make utility-run UTILITY_TEST_SPEC=pg-dump/smoke
+PGWORKBENCH_RUNTIME=native UTILITY_TEST_RUN_ID=manual-pgdump make utility-run UTILITY_TEST_SPEC=pg-dump/smoke
+go run ./cmd/pgworkbench utility run --runtime native --run-id manual-pgdump pg-dump/smoke
 ```
 
 `utility run` generates an ignored temporary experiment spec under `.tmp/` and
 then delegates to `scripts/run_experiment.sh`. That keeps utility tests generic
 while preserving the same snapshots, metrics, scan, manifest, verdict, report,
-and bundle workflow as experiments.
+and bundle workflow as experiments. The adapter path is constrained to
+`.tmp/utility-tests/`; symlinked source or generated paths are rejected. The
+delegation carries an internal `utility-derived` capability together with the
+portable source utility-test ID/reference and its exact SHA-256 digest. The run
+manifest records both the generated experiment spec identity and this source
+tuple, so a bundle remains attributable to the reviewed `utility-tests/**/*.env`
+input after relocation. These internal `PGWORKBENCH_*` values are set by the Go
+runner and are not a supported mechanism for admitting arbitrary experiment
+paths.
+
+The prepared runner uses an exact workbench/protocol environment, not a complete
+OS environment capture. The CLI explicitly projects the selected runtime and
+`COMPOSE`, fixes `ENV_FILE=.env.example`, supplies the native
+`PGWORKBENCH_NATIVE_BINDIR` or documented `PG_INSTALL_DIR` fallback and wait
+budget, the primary `POSTGRES_HOST`/`POSTGRES_PORT`/database/user/password tuple,
+and utility profile/metrics/snapshot controls. In exact mode the host shell
+resolves that env-file path only so Docker Compose can receive `--env-file`; it
+never sources `.env.example`, a checkout-local `.env`, or a caller-selected
+`ENV_FILE`. Trusted experiment, workload, and dataset specs cannot change the
+runner-owned exact-mode marker.
+
+Ambient experiment hooks, workload commands, benchmark/capsule capabilities,
+and a claimed native-toolchain digest are not inherited. Conventional
+process-bootstrap names (`HOME`, `LOGNAME`, `PATH`, `TEMP`, `TMP`, `TMPDIR`, and
+`USER`) remain inherited, with locale/timezone and `BASH_ENV` fixed by the
+runner. They are not evidence identity or host attestation: in particular,
+`PATH` can still select the shell and ordinary host helper commands. Native
+utility execution does not use `PATH` as its PostgreSQL-tool fallback; it
+requires the explicit bindir or installation directory above. The existing
+experiment target guard still requires a disposable loopback, non-system
+database, while the native backend still validates the canonical local port and
+identifiers. Engine version, commit, and executable identity are supplied
+directly by the CLI rather than recovered from ambient protocol variables.
+
+Before a passed verdict is written, the generated spec, reviewed source
+utility-test spec, and every declared `UTILITY_TEST_EXPECT_FILES` output are
+copied into `runs/<run-id>/artifacts/`. They therefore enter the complete
+run-bundle inventory; later overwrites under `logs/utility/` do not change the
+bundled evidence.
 
 Declare result checks directly in the utility-test spec:
 
 ```bash
+UTILITY_TEST_TRUSTED_SHELL=1
 UTILITY_TEST_EXPECT_FILES="logs/utility/pg-dump-smoke.sql"
 UTILITY_TEST_ASSERT_SQL="SELECT count(*) > 0 FROM restore_check.items;"
 UTILITY_TEST_ASSERT_SQL_FILES="sql/assertions/after_restore.sql"
@@ -53,8 +93,11 @@ UTILITY_TEST_ASSERT_SHELL='test -s "$REPO_DIR/logs/utility/custom.log"'
 UTILITY_TEST_SCAN_PATHS="logs/utility generated/tool-output"
 ```
 
-Expected files are converted into non-empty file assertions. SQL and shell
-assertions are passed through to the experiment runner.
+Expected files are converted into host-shell non-empty file assertions, while
+SQL assertions remain declarative. `UTILITY_TEST_EXPECT_FILES` and
+`UTILITY_TEST_ASSERT_SHELL` therefore require the explicit
+`UTILITY_TEST_TRUSTED_SHELL=1` marker, which is mapped to the experiment
+runner's trust gate. The marker is not required for SQL-only assertions.
 
 Batch utility tests with utility-suite specs:
 
@@ -112,6 +155,13 @@ make workload-run-json WORKLOAD_SPEC=utility/pg-dump-smoke
 make workload-run WORKLOAD_SPEC=utility/pg-restore-smoke
 make workload-run WORKLOAD_SPEC=utility/pg-dumpall
 ```
+
+The built-in `pg-dump`, `pg-dumpall`, and `pg-restore` workload adapters are
+runtime-neutral. Docker runs the matching client in the workbench-owned
+PostgreSQL service; native mode resolves it through
+`PGWORKBENCH_NATIVE_BINDIR`. Output paths are fail-closed to the disposable
+`logs/utility/` and `.tmp/utility-output/` roots; a utility spec cannot replace
+source files or Git metadata.
 
 The dump and restore smoke workloads write local evidence under:
 

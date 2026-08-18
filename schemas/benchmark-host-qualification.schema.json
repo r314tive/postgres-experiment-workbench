@@ -1,0 +1,249 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-host-qualification.schema.json",
+  "title": "pgworkbench benchmark host qualification v1",
+  "description": "Unsigned, operator-recorded host observations. SHA-256 fields provide content integrity only and do not attest host identity or current state.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "collector_version",
+    "recorded_at",
+    "assurance",
+    "snapshot",
+    "policy",
+    "checks",
+    "verdict",
+    "reasons",
+    "snapshot_digest",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "pgworkbench.benchmark-host-qualification/v1" },
+    "artifact_type": { "const": "pgworkbench.benchmark-host-qualification" },
+    "collector_version": { "const": "1" },
+    "recorded_at": { "type": "string", "format": "date-time" },
+    "assurance": { "$ref": "#/$defs/assurance" },
+    "snapshot": { "$ref": "#/$defs/snapshot" },
+    "policy": { "$ref": "#/$defs/policy" },
+    "checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/check" }
+    },
+    "verdict": { "enum": ["qualified", "unqualified"] },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "snapshot_digest": { "$ref": "#/$defs/digest" },
+    "digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "assurance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_origin", "signed", "digest_purpose", "verification_scope"],
+      "properties": {
+        "evidence_origin": { "const": "operator-recorded" },
+        "signed": { "const": false },
+        "digest_purpose": { "const": "content-integrity-only" },
+        "verification_scope": { "const": "structure-and-recorded-content-only" }
+      }
+    },
+    "availability": {
+      "enum": ["observed", "unavailable"]
+    },
+    "source": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$"
+    },
+    "string_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["availability", "source"],
+      "properties": {
+        "availability": { "$ref": "#/$defs/availability" },
+        "value": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "source": { "$ref": "#/$defs/source" }
+      }
+    },
+    "string_list_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["availability", "source"],
+      "properties": {
+        "availability": { "$ref": "#/$defs/availability" },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/source" }
+        },
+        "source": { "$ref": "#/$defs/source" }
+      }
+    },
+    "uint_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["availability", "source"],
+      "properties": {
+        "availability": { "$ref": "#/$defs/availability" },
+        "value": { "type": "integer", "minimum": 0 },
+        "source": { "$ref": "#/$defs/source" }
+      }
+    },
+    "number_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["availability", "source"],
+      "properties": {
+        "availability": { "$ref": "#/$defs/availability" },
+        "value": { "type": "number" },
+        "source": { "$ref": "#/$defs/source" }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "architecture", "kernel"],
+      "properties": {
+        "os": { "$ref": "#/$defs/string_observation" },
+        "architecture": { "$ref": "#/$defs/string_observation" },
+        "kernel": { "$ref": "#/$defs/string_observation" }
+      }
+    },
+    "cpu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "logical_cpus"],
+      "properties": {
+        "model": { "$ref": "#/$defs/string_observation" },
+        "logical_cpus": { "$ref": "#/$defs/uint_observation" }
+      }
+    },
+    "capacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_bytes", "available_bytes", "available_pct"],
+      "properties": {
+        "total_bytes": { "$ref": "#/$defs/uint_observation" },
+        "available_bytes": { "$ref": "#/$defs/uint_observation" },
+        "available_pct": { "$ref": "#/$defs/number_observation" }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "filesystem", "total_bytes", "available_bytes", "available_pct"],
+      "properties": {
+        "label": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+        "filesystem": { "$ref": "#/$defs/string_observation" },
+        "total_bytes": { "$ref": "#/$defs/uint_observation" },
+        "available_bytes": { "$ref": "#/$defs/uint_observation" },
+        "available_pct": { "$ref": "#/$defs/number_observation" }
+      }
+    },
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clocksource"],
+      "properties": {
+        "clocksource": { "$ref": "#/$defs/string_observation" }
+      }
+    },
+    "power": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["governors"],
+      "properties": {
+        "governors": { "$ref": "#/$defs/string_list_observation" }
+      }
+    },
+    "thermal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_celsius"],
+      "properties": {
+        "max_celsius": { "$ref": "#/$defs/number_observation" }
+      }
+    },
+    "client": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["placement"],
+      "properties": {
+        "placement": { "$ref": "#/$defs/string_observation" }
+      }
+    },
+    "interference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["load_1m", "load_1m_per_cpu", "runnable_processes", "process_count"],
+      "properties": {
+        "load_1m": { "$ref": "#/$defs/number_observation" },
+        "load_1m_per_cpu": { "$ref": "#/$defs/number_observation" },
+        "runnable_processes": { "$ref": "#/$defs/uint_observation" },
+        "process_count": { "$ref": "#/$defs/uint_observation" }
+      }
+    },
+    "headroom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["load_capacity_pct", "memory_available_pct", "storage_available_pct"],
+      "properties": {
+        "load_capacity_pct": { "$ref": "#/$defs/number_observation" },
+        "memory_available_pct": { "$ref": "#/$defs/number_observation" },
+        "storage_available_pct": { "$ref": "#/$defs/number_observation" }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "cpu", "memory", "storage", "clock", "power", "thermal", "client", "interference", "headroom"],
+      "properties": {
+        "platform": { "$ref": "#/$defs/platform" },
+        "cpu": { "$ref": "#/$defs/cpu" },
+        "memory": { "$ref": "#/$defs/capacity" },
+        "storage": { "$ref": "#/$defs/storage" },
+        "clock": { "$ref": "#/$defs/clock" },
+        "power": { "$ref": "#/$defs/power" },
+        "thermal": { "$ref": "#/$defs/thermal" },
+        "client": { "$ref": "#/$defs/client" },
+        "interference": { "$ref": "#/$defs/interference" },
+        "headroom": { "$ref": "#/$defs/headroom" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strict"],
+      "properties": {
+        "strict": { "type": "boolean" },
+        "min_logical_cpus": { "type": "integer", "minimum": 1 },
+        "min_memory_available_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "min_storage_available_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "max_load_1m_per_cpu": { "type": "number", "minimum": 0 },
+        "required_clocksource": { "$ref": "#/$defs/source" },
+        "required_governor": { "$ref": "#/$defs/source" },
+        "max_temperature_celsius": { "type": "number", "minimum": -100, "maximum": 250 },
+        "required_client_placement": { "enum": ["same-host", "separate-host", "remote-host"] }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "status", "observation", "requirement"],
+      "properties": {
+        "gate": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["passed", "failed"] },
+        "observation": { "type": "string", "minLength": 1 },
+        "requirement": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -2,7 +2,9 @@ package envfile
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -14,9 +16,19 @@ func Parse(path string) (map[string]string, error) {
 		return nil, err
 	}
 	defer file.Close()
+	return parse(path, file)
+}
 
+// ParseBytes parses one already-selected env-file snapshot. The label is used
+// only in diagnostics; callers can therefore bind validation and later
+// execution to the same byte sequence without reopening a mutable path.
+func ParseBytes(label string, content []byte) (map[string]string, error) {
+	return parse(label, bytes.NewReader(content))
+}
+
+func parse(path string, reader io.Reader) (map[string]string, error) {
 	values := make(map[string]string)
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(reader)
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++

@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-comparison.schema.json",
+  "title": "pgworkbench benchmark comparison v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "analysis_version",
+    "baseline_run_id",
+    "candidate_run_id",
+    "baseline_subject",
+    "candidate_subject",
+    "benchmark",
+    "comparison_key_digest",
+    "primary_metric",
+    "direction",
+    "design",
+    "confidence_level",
+    "bootstrap_method",
+    "bootstrap_resamples",
+    "bootstrap_seed",
+    "baseline_n",
+    "candidate_n",
+    "differences",
+    "status",
+    "decision",
+    "reasons"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "pgworkbench.benchmark-comparison/v1"
+    },
+    "artifact_type": {
+      "const": "pgworkbench.benchmark-comparison"
+    },
+    "analysis_version": {
+      "const": "1.0.0"
+    },
+    "baseline_run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "candidate_run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "baseline_subject": {
+      "type": "string"
+    },
+    "candidate_subject": {
+      "type": "string"
+    },
+    "benchmark": {
+      "type": "string"
+    },
+    "comparison_key_digest": {
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "$ref": "#/$defs/digest"
+        }
+      ]
+    },
+    "primary_metric": {
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "enum": ["pgbench.tps", "pgbench.latency_mean_us"]
+        }
+      ]
+    },
+    "direction": {
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "enum": ["higher", "lower"]
+        }
+      ]
+    },
+    "design": {
+      "const": "independent-series-unpaired"
+    },
+    "confidence_level": {
+      "type": "number",
+      "exclusiveMinimum": 0.5,
+      "exclusiveMaximum": 1
+    },
+    "bootstrap_method": {
+      "const": "percentile-bootstrap-of-median-ratio"
+    },
+    "bootstrap_resamples": {
+      "type": "integer",
+      "minimum": 1000,
+      "maximum": 1000000
+    },
+    "bootstrap_seed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "baseline_n": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "candidate_n": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "baseline_median": {
+      "type": "number"
+    },
+    "candidate_median": {
+      "type": "number"
+    },
+    "change_pct": {
+      "type": "number"
+    },
+    "ci_low_pct": {
+      "type": "number"
+    },
+    "ci_high_pct": {
+      "type": "number"
+    },
+    "regression_threshold_pct": {
+      "type": "number",
+      "minimum": 0
+    },
+    "differences": {
+      "type": "array",
+      "items": {
+        "const": "pg_config"
+      },
+      "uniqueItems": true
+    },
+    "status": {
+      "enum": ["invalid", "inconclusive", "not-comparable"]
+    },
+    "decision": {
+      "enum": ["invalid", "inconclusive", "not-comparable"]
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "invalid"}}},
+      "then": {"properties": {"decision": {"const": "invalid"}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "inconclusive"}}},
+      "then": {"properties": {"decision": {"const": "inconclusive"}}}
+    },
+    {
+      "if": {"properties": {"status": {"const": "not-comparable"}}},
+      "then": {"properties": {"decision": {"const": "not-comparable"}}}
+    }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

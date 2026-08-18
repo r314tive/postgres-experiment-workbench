@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-statistics-reset.schema.json",
+  "title": "pgworkbench benchmark statistics reset v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "run_id", "protocol_digest", "trial", "captured_at", "assurance", "postgres_server_major", "observation_method", "policy", "boundary", "boundary_window", "database_before", "database_after", "wal_before", "wal_after", "raw_source", "operations", "status", "reasons", "digest"],
+  "properties": {
+    "schema_version": { "const": "pgworkbench.benchmark-statistics-reset/v1" },
+    "artifact_type": { "const": "pgworkbench.benchmark-statistics-reset" },
+    "run_id": { "$ref": "#/$defs/runID" },
+    "protocol_digest": { "$ref": "#/$defs/digest" },
+    "trial": { "type": "integer", "minimum": 1 },
+    "captured_at": { "$ref": "#/$defs/timestamp" },
+    "assurance": { "$ref": "#/$defs/assurance" },
+    "postgres_server_major": { "enum": ["15", "16", "17", "18", "19"] },
+    "observation_method": { "const": "pg-stat-reset-timestamps-before-and-after/v1" },
+    "policy": { "enum": ["none", "runner-managed"] },
+    "boundary": { "enum": ["none", "before-trial", "before-warmup", "before-measure"] },
+    "boundary_window": { "$ref": "#/$defs/window" },
+    "database_before": { "$ref": "#/$defs/resetTimestamp" },
+    "database_after": { "$ref": "#/$defs/resetTimestamp" },
+    "wal_before": { "$ref": "#/$defs/resetTimestamp" },
+    "wal_after": { "$ref": "#/$defs/resetTimestamp" },
+    "raw_source": { "$ref": "#/$defs/source" },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["function", "scope", "rows", "command_completed"],
+        "properties": {
+          "function": { "enum": ["pg_catalog.pg_stat_reset", "pg_catalog.pg_stat_reset_shared('wal')"] },
+          "scope": { "enum": ["current-database", "cluster-wal"] },
+          "rows": { "type": "integer", "minimum": 0, "maximum": 1 },
+          "command_completed": { "type": "boolean" }
+        }
+      }
+    },
+    "status": { "enum": ["not-requested", "succeeded", "failed"] },
+    "reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "digest": { "$ref": "#/$defs/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "policy": { "const": "none" } } },
+      "then": { "properties": { "boundary": { "const": "none" }, "operations": { "maxItems": 0 }, "status": { "const": "not-requested" } } },
+      "else": { "properties": { "boundary": { "enum": ["before-trial", "before-warmup", "before-measure"] }, "operations": { "minItems": 2, "maxItems": 2 }, "status": { "enum": ["succeeded", "failed"] } } }
+    }
+  ],
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "runID": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "timestamp": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "window": {
+      "type": "object", "additionalProperties": false, "required": ["started_at", "finished_at"],
+      "properties": { "started_at": { "$ref": "#/$defs/timestamp" }, "finished_at": { "$ref": "#/$defs/timestamp" } }
+    },
+    "resetTimestamp": {
+      "type": "object", "additionalProperties": false, "required": ["availability"],
+      "properties": { "availability": { "enum": ["observed", "null", "unavailable"] }, "value": { "$ref": "#/$defs/timestamp" } },
+      "allOf": [{ "if": { "properties": { "availability": { "const": "observed" } } }, "then": { "required": ["value"] }, "else": { "not": { "required": ["value"] } } }]
+    },
+    "source": {
+      "type": "object", "additionalProperties": false, "required": ["path", "digest", "size_bytes"],
+      "properties": { "path": { "const": "statistics-reset.tsv" }, "digest": { "$ref": "#/$defs/digest" }, "size_bytes": { "type": "integer", "minimum": 1, "maximum": 2097152 } }
+    },
+    "assurance": {
+      "type": "object", "additionalProperties": false, "required": ["evidence_origin", "signed", "digest_purpose", "verification_scope"],
+      "properties": {
+        "evidence_origin": { "const": "runner-recorded" }, "signed": { "const": false }, "digest_purpose": { "const": "content-integrity-only" },
+        "verification_scope": { "const": "structure-digest-raw-source-and-reset-timestamp-advancement-derivation-only" }
+      }
+    }
+  }
+}

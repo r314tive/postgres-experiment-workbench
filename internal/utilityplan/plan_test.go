@@ -31,6 +31,7 @@ func TestBuildUtilityPlanExpanded(t *testing.T) {
 		"UTILITY_TEST_WORKLOAD_SPEC=utility/smoke",
 		"UTILITY_TEST_METRICS=1",
 		"UTILITY_TEST_METRICS_SAMPLES=3",
+		"UTILITY_TEST_TRUSTED_SHELL=1",
 		"UTILITY_TEST_EXPECT_FILES=logs/utility/out.sql",
 		"UTILITY_TEST_ASSERT_SQL=SELECT 1;",
 		"UTILITY_TEST_ASSERT_SHELL=test -s logs/utility/out.sql",
@@ -46,6 +47,9 @@ func TestBuildUtilityPlanExpanded(t *testing.T) {
 
 	if plan.Fields["workload"] != "utility/smoke" {
 		t.Fatalf("unexpected fields: %#v", plan.Fields)
+	}
+	if plan.Fields["trusted_shell"] != "1" {
+		t.Fatalf("unexpected trusted-shell field: %#v", plan.Fields)
 	}
 	if len(plan.Phases) != 9 {
 		t.Fatalf("unexpected phases: %#v", plan.Phases)

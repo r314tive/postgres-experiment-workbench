@@ -1,0 +1,119 @@
+name: aggregate-gate
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Candidate version without a leading v.
+        required: true
+        type: string
+      attempt:
+        description: Sequential aggregate attempt identifier.
+        required: true
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      INPUT_VERSION: ${{ inputs.version }}
+      INPUT_ATTEMPT: ${{ inputs.attempt }}
+
+    steps:
+      - name: Validate reusable workflow inputs
+        id: inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$INPUT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          [[ "$INPUT_ATTEMPT" =~ ^[12]$ ]]
+          printf 'attempt=%s\n' "$INPUT_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Build exact aggregate candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          ./scripts/build_candidate_binary.sh \
+            "$INPUT_VERSION" "$GITHUB_SHA" "$GITHUB_WORKSPACE/generated/bin/pgworkbench"
+
+      - name: Install exact native PostgreSQL runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          bindir=/usr/lib/postgresql/16/bin
+          test -x "$bindir/initdb"
+          "$bindir/postgres" --version | grep -Eq 'PostgreSQL\) 16([.[:space:]]|$)'
+          printf 'PGWORKBENCH_NATIVE_BINDIR=%s\n' "$bindir" >> "$GITHUB_ENV"
+
+      - name: Assert clean candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go env GOOS)" = linux
+          test "$(go env GOARCH)" = amd64
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          evidence_dir="qualification/aggregate-$INPUT_ATTEMPT"
+          mkdir -p "$evidence_dir"
+          "$GITHUB_WORKSPACE/generated/bin/pgworkbench" version > "$evidence_dir/version.txt"
+          grep -Fqx \
+            "pgworkbench version=$INPUT_VERSION commit=$GITHUB_SHA built_at=$(git show -s --format=%cI HEAD)" \
+            "$evidence_dir/version.txt"
+          {
+            printf 'candidate_commit=%s\n' "$(git rev-parse HEAD)"
+            printf 'version=%s\n' "$INPUT_VERSION"
+            printf 'attempt=%s\n' "$INPUT_ATTEMPT"
+            printf 'runner_os=%s\n' "$(uname -s)"
+            printf 'runner_arch=%s\n' "$(uname -m)"
+            printf 'postgres=%s\n' "$("$PGWORKBENCH_NATIVE_BINDIR/postgres" --version)"
+          } > "$evidence_dir/identity.env"
+          "$GITHUB_WORKSPACE/generated/bin/pgworkbench" pack inspect --json > "$evidence_dir/pack.json"
+
+      - name: Assign isolated runtime ports
+        shell: bash
+        run: ./scripts/assign_test_ports.sh >> "$GITHUB_ENV"
+
+      - name: Run aggregate release gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PGWORKBENCH_BIN="$GITHUB_WORKSPACE/generated/bin/pgworkbench"
+          make release-check \
+            VERSION="$INPUT_VERSION" \
+            BUILD_COMMIT="$GITHUB_SHA" \
+            PGWORKBENCH_CLI="$PGWORKBENCH_BIN"
+          found=0
+          while IFS= read -r -d '' manifest; do
+            found=1
+            ./scripts/assert_run_candidate_identity.sh \
+              "$manifest" "$INPUT_VERSION" "$GITHUB_SHA"
+          done < <(find runs -type f -name manifest.env -print0)
+          test "$found" = 1
+
+      - name: Upload aggregate evidence
+        if: always() && steps.inputs.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aggregate-${{ steps.inputs.outputs.attempt }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            qualification/aggregate-${{ steps.inputs.outputs.attempt }}/
+            runs/
+            generated/release/
+          if-no-files-found: warn
+          retention-days: 90

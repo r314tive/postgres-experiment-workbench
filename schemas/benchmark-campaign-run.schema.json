@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-campaign-run.schema.json",
+  "title": "pgworkbench benchmark campaign run v1",
+  "description": "Descriptive ordered report over independently executed benchmark series. It has no composite score or cross-spec verdict.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "scheduler_version", "design", "campaign_id", "run_dir", "protocol", "runtime", "subject", "started_at", "finished_at", "status", "conclusion", "decision", "reasons", "executions", "digest"],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.benchmark-campaign-run/v1"},
+    "artifact_type": {"const": "pgworkbench.benchmark-campaign-run"},
+    "scheduler_version": {"const": "1.0.0"},
+    "design": {"const": "ordered-independent-series-campaign"},
+    "campaign_id": {"$ref": "#/$defs/run_id"},
+    "run_dir": {"const": "."},
+    "protocol": {"$ref": "#/$defs/file_ref"},
+    "runtime": {"enum": ["docker", "native"]},
+    "subject": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\r\\n]+$"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "status": {"enum": ["passed", "failed", "invalid", "inconclusive"]},
+    "conclusion": {"const": "descriptive"},
+    "decision": {"const": "none"},
+    "reasons": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "executions": {"type": "array", "minItems": 1, "maxItems": 1000, "items": {"$ref": "benchmark-campaign-execution.schema.json"}},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 180, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "file_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest", "size"],
+      "properties": {
+        "path": {"const": "protocol.json"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "size": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

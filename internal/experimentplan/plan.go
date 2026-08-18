@@ -42,7 +42,24 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 	if errs := catalog.Validate("experiment", []string{spec.ID}); len(errs) > 0 {
 		return Plan{}, errors.Join(errs...)
 	}
+	return buildPrepared(spec)
+}
 
+// BuildPrepared builds a plan from a spec that was resolved and validated by
+// an internal producer. It deliberately bypasses Catalog.Resolve: generated
+// utility adapters live outside experiments/ and must not become generally
+// addressable experiment inputs.
+func BuildPrepared(spec speccatalog.Spec) (Plan, error) {
+	if spec.Kind != "experiment" {
+		return Plan{}, fmt.Errorf("prepared spec kind must be experiment: %s", spec.Kind)
+	}
+	if strings.TrimSpace(spec.ID) == "" || strings.TrimSpace(spec.Path) == "" || spec.Values == nil {
+		return Plan{}, fmt.Errorf("prepared experiment spec is incomplete")
+	}
+	return buildPrepared(spec)
+}
+
+func buildPrepared(spec speccatalog.Spec) (Plan, error) {
 	values := spec.Values
 	fields := map[string]string{
 		"name":              defaultValue(values["EXPERIMENT_NAME"], spec.ID),
@@ -62,14 +79,15 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 		"metrics_duration":  defaultValue(values["EXPERIMENT_METRICS_DURATION"], "30"),
 		"metrics_samples":   shellDefault(values["EXPERIMENT_METRICS_SAMPLES"]),
 		"snapshot":          defaultValue(values["EXPERIMENT_SNAPSHOT"], "1"),
-		"docker_reset":      defaultValue(values["EXPERIMENT_DOCKER_RESET"], "0"),
+		"runtime_reset":     defaultValue(values["EXPERIMENT_RUNTIME_RESET"], defaultValue(values["EXPERIMENT_DOCKER_RESET"], "0")),
 		"state_writer":      defaultValue(values["EXPERIMENT_STATE_WRITER"], "go"),
 		"scan_paths":        shellDefault(values["EXPERIMENT_SCAN_PATHS"]),
 		"run_id":            shellDefault(values["EXPERIMENT_RUN_ID"]),
+		"timeout":           shellDefault(values["EXPERIMENT_TIMEOUT"]),
 	}
 
 	phases := []Phase{
-		{Name: "runtime", Enabled: true, Details: fmt.Sprintf("start topology `%s` with PostgreSQL config `%s`; docker reset `%s`", fields["topology"], fields["pg_config"], fields["docker_reset"])},
+		{Name: "runtime", Enabled: true, Details: fmt.Sprintf("start topology `%s` with PostgreSQL config `%s`; runtime reset `%s`", fields["topology"], fields["pg_config"], fields["runtime_reset"])},
 		{Name: "dataset", Enabled: fields["dataset"] != "", Details: detailOr(fields["dataset"], "no dataset spec")},
 		{Name: "profile setup", Enabled: fields["profile"] != "" && defaultValue(values["EXPERIMENT_PROFILE_SETUP"], "1") == "1", Details: profileSetupDetails(fields)},
 		{Name: "profile run", Enabled: fields["profile"] != "" && defaultValue(values["EXPERIMENT_PROFILE_RUN"], "0") == "1", Details: profileRunDetails(fields, values)},
@@ -81,7 +99,7 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 		{Name: "background wait", Enabled: fields["background_wait"] == "1", Details: "wait for background workload processes before after-hooks"},
 		{Name: "after hooks", Enabled: hasAny(values, "EXPERIMENT_AFTER_SQL_FILES", "EXPERIMENT_AFTER_SQL", "EXPERIMENT_AFTER_SHELL"), Details: hookDetails(values, "EXPERIMENT_AFTER_SQL_FILES", "EXPERIMENT_AFTER_SQL", "EXPERIMENT_AFTER_SHELL")},
 		{Name: "snapshot after", Enabled: fields["snapshot"] == "1", Details: "capture PostgreSQL snapshot after workload"},
-		{Name: "assertions", Enabled: hasAny(values, "EXPERIMENT_ASSERT_SQL_FILES", "EXPERIMENT_ASSERT_SQL", "EXPERIMENT_ASSERT_SHELL"), Details: hookDetails(values, "EXPERIMENT_ASSERT_SQL_FILES", "EXPERIMENT_ASSERT_SQL", "EXPERIMENT_ASSERT_SHELL")},
+		{Name: "assertions", Enabled: hasAny(values, "EXPERIMENT_ASSERT_SQL_FILES", "EXPERIMENT_ASSERT_SQL", "EXPERIMENT_ASSERT_TRUE_SQL", "EXPERIMENT_ASSERT_SHELL"), Details: hookDetails(values, "EXPERIMENT_ASSERT_SQL_FILES", "EXPERIMENT_ASSERT_SQL", "EXPERIMENT_ASSERT_TRUE_SQL", "EXPERIMENT_ASSERT_SHELL")},
 		{Name: "failure scan", Enabled: true, Details: scanDetails(fields)},
 		{Name: "verdict", Enabled: true, Details: fmt.Sprintf("write `verdict.env` and `verdict.json` using state writer `%s`", fields["state_writer"])},
 	}
@@ -185,6 +203,7 @@ func Render(w io.Writer, plan Plan) error {
 	writeRow(w, "Snapshots", plan.Fields["snapshot"])
 	writeRow(w, "State writer", plan.Fields["state_writer"])
 	writeRow(w, "Run id override", plan.Fields["run_id"])
+	writeRow(w, "Execution timeout", plan.Fields["timeout"])
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "## Execution Phases")
@@ -278,16 +297,12 @@ func scanDetails(fields map[string]string) string {
 	return fmt.Sprintf("scan run directory plus `%s`", fields["scan_paths"])
 }
 
-func hookDetails(values map[string]string, fileKey string, inlineKey string, shellKey string) string {
+func hookDetails(values map[string]string, keys ...string) string {
 	var parts []string
-	if values[fileKey] != "" {
-		parts = append(parts, fmt.Sprintf("%s=`%s`", fileKey, values[fileKey]))
-	}
-	if values[inlineKey] != "" {
-		parts = append(parts, fmt.Sprintf("%s=`%s`", inlineKey, values[inlineKey]))
-	}
-	if values[shellKey] != "" {
-		parts = append(parts, fmt.Sprintf("%s=`%s`", shellKey, values[shellKey]))
+	for _, key := range keys {
+		if values[key] != "" {
+			parts = append(parts, fmt.Sprintf("%s=`%s`", key, values[key]))
+		}
 	}
 	if len(parts) == 0 {
 		return "no hooks"

@@ -1,0 +1,15 @@
+{
+  "schema_version": "pgworkbench.sysbench-native-run-config/v1",
+  "artifact_type": "pgworkbench.sysbench-native-run-config",
+  "threads": 4,
+  "duration_seconds": 60,
+  "report_interval_seconds": 1,
+  "rate": 0,
+  "random_seed": 424242,
+  "postgresql": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "user": "postgres",
+    "database": "benchmark"
+  }
+}

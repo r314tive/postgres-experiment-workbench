@@ -1,0 +1,8 @@
+pgbench (17.9, Server 17.9)
+Transaktionstyp: <eingebaut: TPC-B>
+Skalierungsfaktor: 1
+Abfragemodus: einfach
+Anzahl der Clients: 10
+Anzahl der Threads: 1
+verarbeitete Transaktionen: 10000/10000
+Latenzmittelwert = 11,013 ms

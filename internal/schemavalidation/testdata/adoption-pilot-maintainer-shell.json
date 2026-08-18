@@ -1,0 +1,45 @@
+{
+  "schema_version": "pgworkbench.adoption-pilot-record/v1",
+  "artifact_type": "pgworkbench.adoption-pilot-record",
+  "record_status": "completed",
+  "pilot_id": "invalid-independent-authoring",
+  "recorded_at": "2026-08-13T00:00:00Z",
+  "candidate": {
+    "version": "0.2.0",
+    "git_commit": "1111111111111111111111111111111111111111",
+    "pack_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "participant": {"identifier": "external-user", "relationship": "external-non-maintainer"},
+  "execution": {
+    "guide_ref": "docs/authoring-tutorial.md@v0.2.0",
+    "scenario": "modified-smoke",
+    "runtime": "native",
+    "os": "linux",
+    "arch": "amd64",
+    "postgres_major": 16,
+    "started_at": "2026-08-13T00:00:00Z",
+    "finished_at": "2026-08-13T00:00:01Z",
+    "authored_or_modified_scenario": true,
+    "maintainer_shell_access": true
+  },
+  "acceptance_predicate": "The modified scenario passes and relocates.",
+  "cleanup": {"status": "completed", "details": "Disposed the owned runtime."},
+  "result": {
+    "status": "passed",
+    "summary": "Invalid fixture: maintainer had shell access.",
+    "bundle_evidence": {
+      "ref": "urn:pgworkbench:evidence:pilot-bundle",
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "maintainer_verification": {
+      "ref": "urn:pgworkbench:evidence:verification",
+      "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    }
+  },
+  "unresolved_friction": [],
+  "assurance": {
+    "production_safety_claim": false,
+    "representative_performance_claim": false,
+    "benchmark_decision_claim": false
+  }
+}

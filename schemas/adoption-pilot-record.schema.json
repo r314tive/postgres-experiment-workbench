@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/adoption-pilot-record.schema.json",
+  "title": "pgworkbench adoption pilot record v1",
+  "description": "Bounded external-user adoption evidence. It is not benchmark qualification or a production-safety claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "record_status",
+    "pilot_id",
+    "recorded_at",
+    "candidate",
+    "participant",
+    "execution",
+    "acceptance_predicate",
+    "cleanup",
+    "result",
+    "unresolved_friction",
+    "assurance"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.adoption-pilot-record/v1"},
+    "artifact_type": {"const": "pgworkbench.adoption-pilot-record"},
+    "record_status": {"enum": ["template", "completed"]},
+    "pilot_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "recorded_at": {"type": "string", "format": "date-time"},
+    "candidate": {"$ref": "#/$defs/candidate"},
+    "participant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identifier", "relationship"],
+      "properties": {
+        "identifier": {"type": "string", "minLength": 1, "maxLength": 128},
+        "relationship": {"const": "external-non-maintainer"}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "guide_ref",
+        "scenario",
+        "runtime",
+        "os",
+        "arch",
+        "postgres_major",
+        "started_at",
+        "finished_at",
+        "authored_or_modified_scenario",
+        "maintainer_shell_access"
+      ],
+      "properties": {
+        "guide_ref": {"type": "string", "minLength": 1, "maxLength": 256},
+        "scenario": {"type": "string", "minLength": 1, "maxLength": 128},
+        "runtime": {"enum": ["docker", "native"]},
+        "os": {"enum": ["linux", "darwin"]},
+        "arch": {"enum": ["amd64", "arm64"]},
+        "postgres_major": {"type": "integer", "minimum": 10, "maximum": 99},
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": "string", "format": "date-time"},
+        "authored_or_modified_scenario": {"type": "boolean"},
+        "maintainer_shell_access": {"type": "boolean"}
+      }
+    },
+    "acceptance_predicate": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "details"],
+      "properties": {
+        "status": {"enum": ["completed", "failed", "not-required"]},
+        "details": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "summary"],
+      "properties": {
+        "status": {"enum": ["incomplete", "passed", "failed"]},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "bundle_evidence": {"$ref": "#/$defs/evidence"},
+        "maintainer_verification": {"$ref": "#/$defs/evidence"}
+      }
+    },
+    "unresolved_friction": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "summary"],
+        "properties": {
+          "severity": {"enum": ["critical", "high", "medium", "low"]},
+          "summary": {"type": "string", "minLength": 1, "maxLength": 2000}
+        }
+      }
+    },
+    "assurance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["production_safety_claim", "representative_performance_claim", "benchmark_decision_claim"],
+      "properties": {
+        "production_safety_claim": {"const": false},
+        "representative_performance_claim": {"const": false},
+        "benchmark_decision_claim": {"const": false}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"record_status": {"const": "completed"}},
+        "required": ["record_status"]
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "properties": {"status": {"enum": ["passed", "failed"]}},
+            "required": ["status", "bundle_evidence"]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "execution": {
+            "properties": {"authored_or_modified_scenario": {"const": true}},
+            "required": ["authored_or_modified_scenario"]
+          }
+        },
+        "required": ["execution"]
+      },
+      "then": {
+        "properties": {
+          "execution": {
+            "properties": {"maintainer_shell_access": {"const": false}},
+            "required": ["maintainer_shell_access"]
+          },
+          "result": {"required": ["bundle_evidence", "maintainer_verification"]}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "git_commit", "pack_digest"],
+      "properties": {
+        "version": {"$ref": "#/$defs/semver"},
+        "git_commit": {"type": "string", "pattern": "^(?!(?:0{40}|0{64})$)(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "pack_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "digest"],
+      "properties": {
+        "ref": {"type": "string", "format": "uri", "pattern": "^(?:https|s3|gs|urn):"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

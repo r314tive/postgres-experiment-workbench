@@ -1,5 +1,359 @@
 {
   "$defs": {
+    "benchmark": {
+      "$comment": "Benchmark protocol fields must be static values; runtime shell expansion would make the protocol digest ambiguous. The protocol digest binds resolved parameters and referenced spec content. It is not a claim that two hosts are performance-comparable. Target identity, endpoint-contract version, topology id, and topology-spec digest enter both the protocol and comparison-key digests. Direct and PgBouncer series are distinct populations, not interchangeable baselines. `BENCHMARK_CONNECT_PER_TRANSACTION=1` must use `pgbench.latency_mean_us`; reconnect TPS includes connection setup and is retained as secondary evidence rather than relabeled as ordinary `pgbench.tps`. Cache, operator-managed statistics resets, collector calibration, client placement outside qualified A/B, and resource budgets are recorded declarations unless a runtime gate explicitly verifies them. `BENCHMARK_CONTRACT_VERSION=2` never reinterprets v1 warm, cold, steady, operator-managed, operator-calibrated, or operator-declared declarations; unsupported v2 control modes fail closed. Use BENCHMARK_CLASS=smoke only for fast contract and portability checks.",
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "description": "Benchmark specs live under `benchmarks/**/*.env` and define one immutable pgbench measurement protocol over an existing experiment and workload.",
+      "properties": {
+        "BENCHMARK_ALLOWED_SUBJECT_DIFFERENCES": {
+          "default": "pg_config",
+          "description": "The one explicit subject dimension permitted by counterbalanced A/B; native_toolchain requires two byte-distinct seven-file executable snapshots with matching observed versions for all seven selected tools.",
+          "enum": [
+            "pg_config",
+            "native_toolchain"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_CACHE_MIN_RESIDENT_PCT": {
+          "description": "Minimum pg_buffercache resident-block percentage required for every target relation.",
+          "type": "string",
+          "x-workbench-requirement": "required for v2 postgres-shared-buffer-warm"
+        },
+        "BENCHMARK_CACHE_REGIME": {
+          "description": "V1 is declaration-only. V2 can gate exact target-relation residency in PostgreSQL shared buffers; neither contract controls the operating-system page cache.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_CACHE_TARGET_RELATIONS": {
+          "description": "Exact target relation set whose shared-buffer residency must be evidenced before measure.",
+          "type": "string",
+          "x-workbench-requirement": "required for v2 postgres-shared-buffer-warm"
+        },
+        "BENCHMARK_CLASS": {
+          "default": "measurement",
+          "description": "Evidence class. Smoke exercises the contract but is not performance evidence.",
+          "enum": [
+            "smoke",
+            "measurement"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_CLIENTS": {
+          "description": "Pgbench client count recorded in the protocol.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_CLIENT_PLACEMENT": {
+          "description": "Declared pgbench client placement. Ordinary runs do not attest it; v2 runner-enforced single-container resources require same-host, and counterbalanced A/B requires matching strict qualification bookends.",
+          "enum": [
+            "same-host",
+            "separate-host",
+            "remote-host"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_COLLECTORS": {
+          "description": "Exact space-separated collector set selected by the explicit protocol contract.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_COLLECTOR_INTERVAL_SECONDS": {
+          "description": "PostgreSQL sampler interval in seconds; the benchmark runner passes this value to the sampler.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_COLLECTOR_MAX_DUTY_CYCLE_PCT": {
+          "description": "Maximum permitted per-sample collector duty cycle; every retained sample participates.",
+          "type": "string",
+          "x-workbench-requirement": "required for v2 runner-calibrated-duty-cycle"
+        },
+        "BENCHMARK_COLLECTOR_OVERHEAD_MODE": {
+          "description": "V1 operator calibration is declaration-only. V2 runner calibration retains exact-cadence raw timing rows and independently derives the duty-cycle gate.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_COLLECTOR_OVERHEAD_SAMPLES": {
+          "description": "Minimum number of raw monotonic sampler timing rows required for the duty-cycle gate.",
+          "type": "string",
+          "x-workbench-requirement": "required for v2 runner-calibrated-duty-cycle"
+        },
+        "BENCHMARK_CONNECT_PER_TRANSACTION": {
+          "default": "0",
+          "description": "Open a new database connection for every pgbench transaction and require reconnect-specific result evidence. This mode must use mean latency as its primary metric because its TPS includes reconnection time.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_CONTRACT_VERSION": {
+          "default": "1",
+          "description": "Explicit protocol contract. Version 1 preserves declaration-only legacy controls; version 2 opts in to runner-produced control evidence and strict supported modes.",
+          "enum": [
+            "1",
+            "2"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_CPU_BUDGET_CORES": {
+          "description": "Declared CPU core budget; forbidden when the resource budget mode is unbounded.",
+          "type": "string",
+          "x-workbench-requirement": "required for operator-declared"
+        },
+        "BENCHMARK_CPU_BUDGET_MILLICORES": {
+          "description": "Runner-enforced Docker CPU budget in integer millicores; v2 forbids BENCHMARK_CPU_BUDGET_CORES.",
+          "type": "string",
+          "x-workbench-requirement": "required for v2 runner-enforced"
+        },
+        "BENCHMARK_DIRECTION": {
+          "default": "derived from primary metric",
+          "description": "Improvement direction: TPS is higher, mean latency is lower.",
+          "enum": [
+            "higher",
+            "lower"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_DRIVER": {
+          "default": "pgbench",
+          "description": "Measurement driver; benchmark contracts v1 and v2 support pgbench only.",
+          "enum": [
+            "pgbench"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_EXPERIMENT_SPEC": {
+          "description": "Experiment spec that owns the disposable runtime and prepared database state.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_LATENCY_LIMIT_MS": {
+          "description": "Optional pgbench latency limit in milliseconds.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_LOG_SAMPLE_RATE": {
+          "default": "1",
+          "description": "Sampling rate used when transaction logging is enabled.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_LOG_TRANSACTIONS": {
+          "default": "smoke: 0; measurement: 1",
+          "description": "Capture raw per-transaction pgbench logs for audit and later percentile analysis.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_MAX_CV_PCT": {
+          "default": "10",
+          "description": "Maximum coefficient of variation for a stable measured series.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_MAX_LATENCY_LIMIT_EXCEEDED_PCT": {
+          "description": "Maximum allowed percentage of completed transactions above the latency limit; exceeding it invalidates the trial.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_MAX_TRIES": {
+          "description": "Optional maximum transaction tries. Zero means unlimited and requires fixed-time mode or a latency limit.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_MEASURE_SECONDS": {
+          "description": "Measured duration for fixed-time trials.",
+          "type": "string",
+          "x-workbench-requirement": "required for fixed-time"
+        },
+        "BENCHMARK_MEMORY_BUDGET_MIB": {
+          "description": "Memory budget in MiB; forbidden when the resource budget mode is unbounded.",
+          "type": "string",
+          "x-workbench-requirement": "required for v1 operator-declared or v2 runner-enforced"
+        },
+        "BENCHMARK_MIN_VALID_TRIALS": {
+          "default": "BENCHMARK_TRIALS",
+          "description": "Minimum valid trials required for an aggregate result; cannot exceed BENCHMARK_TRIALS.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_MODE": {
+          "default": "fixed-time",
+          "description": "Termination mode for each measured pgbench trial.",
+          "enum": [
+            "fixed-time",
+            "fixed-transactions"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_NAME": {
+          "description": "Human-readable benchmark name.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_PG_CONFIG": {
+          "default": "default",
+          "description": "PostgreSQL config profile applied to benchmark trials.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_PRIMARY_METRIC": {
+          "default": "pgbench.tps",
+          "description": "Primary metric used by summaries and comparisons.",
+          "enum": [
+            "pgbench.tps",
+            "pgbench.latency_mean_us"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_PROTOCOL": {
+          "default": "simple",
+          "description": "Pgbench query protocol.",
+          "enum": [
+            "simple",
+            "extended",
+            "prepared"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_RANDOM_SEED": {
+          "description": "Explicit deterministic measure seed N; warmup uses N+1, with maximum-int wrap to 0, and both derived phase seeds are protocol-bound.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_RATE": {
+          "description": "Optional target transaction rate passed to pgbench.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_REGRESSION_THRESHOLD_PCT": {
+          "description": "Optional material-regression threshold; omission keeps comparisons descriptive.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_RESET_POLICY": {
+          "default": "rebuild-per-trial",
+          "description": "Database-state policy between trials. Reuse is restricted to pgbench select-only workloads.",
+          "enum": [
+            "rebuild-per-trial",
+            "reuse-readonly"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_RESOURCE_BUDGET_MODE": {
+          "description": "V1 records but does not enforce limits. V2 runner enforcement is restricted to the exact Docker single-container Linux cgroup-v2 provider.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_RESOURCE_BUDGET_SCOPE": {
+          "description": "Fixed v2 scope: server and in-container pgbench share the enforced Docker limit.",
+          "enum": [
+            "postgres-server-and-pgbench-driver"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "required for v2 runner-enforced"
+        },
+        "BENCHMARK_RESOURCE_ENFORCEMENT_PROVIDER": {
+          "description": "Exact supported provider. Native runs and other resource-control providers fail closed.",
+          "enum": [
+            "docker-single-container-linux-cgroup-v2"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "required for v2 runner-enforced"
+        },
+        "BENCHMARK_SCALE": {
+          "description": "Pgbench scale factor recorded in the protocol.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_STATISTICS_RESET_BOUNDARY": {
+          "description": "Declared reset boundary; must be none exactly when the reset policy is none.",
+          "enum": [
+            "none",
+            "before-trial",
+            "before-warmup",
+            "before-measure"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_STATISTICS_RESET_POLICY": {
+          "description": "V1 records operator-managed resets without proof. V2 runner-managed mode executes and verifies current-database and WAL reset evidence at the declared boundary.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_TARGET": {
+          "default": "direct-postgres",
+          "description": "Digest-bound pgbench endpoint contract. `direct-postgres` requires the `single` topology and supports Docker or native execution; `pgbouncer` requires the `pgbouncer` topology and Docker execution.",
+          "enum": [
+            "direct-postgres",
+            "pgbouncer"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_THREADS": {
+          "description": "Pgbench worker thread count recorded in the protocol.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        },
+        "BENCHMARK_TRANSACTIONS_PER_CLIENT": {
+          "description": "Measured transaction count per client; incompatible with BENCHMARK_MEASURE_SECONDS.",
+          "type": "string",
+          "x-workbench-requirement": "required for fixed-transactions"
+        },
+        "BENCHMARK_TRIALS": {
+          "default": "smoke: 1; measurement: 10",
+          "description": "Number of measured trials.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_WARMUP_SECONDS": {
+          "default": "0",
+          "description": "Warmup duration inside each trial; excluded from the measured result.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "BENCHMARK_WORKLOAD_SPEC": {
+          "description": "Workload spec used for the measured pgbench command.",
+          "type": "string",
+          "x-workbench-requirement": "required"
+        }
+      },
+      "required": [
+        "BENCHMARK_NAME",
+        "BENCHMARK_EXPERIMENT_SPEC",
+        "BENCHMARK_WORKLOAD_SPEC",
+        "BENCHMARK_SCALE",
+        "BENCHMARK_CLIENTS",
+        "BENCHMARK_THREADS",
+        "BENCHMARK_CACHE_REGIME",
+        "BENCHMARK_STATISTICS_RESET_POLICY",
+        "BENCHMARK_STATISTICS_RESET_BOUNDARY",
+        "BENCHMARK_COLLECTORS",
+        "BENCHMARK_COLLECTOR_INTERVAL_SECONDS",
+        "BENCHMARK_COLLECTOR_OVERHEAD_MODE",
+        "BENCHMARK_CLIENT_PLACEMENT",
+        "BENCHMARK_RESOURCE_BUDGET_MODE"
+      ],
+      "title": "benchmark env spec",
+      "type": "object"
+    },
     "dataset": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": true,
@@ -74,13 +428,13 @@
       "type": "object"
     },
     "experiment": {
-      "$comment": "Keep interpretation profile-local; experiment specs should describe orchestration. Foreground and background workload specs use the workload contract.",
+      "$comment": "Keep interpretation profile-local; experiment specs should describe orchestration. Foreground and background workload specs use the workload contract. Declarative SQL hooks do not require shell trust. Any host-shell hook fails closed unless `EXPERIMENT_TRUSTED_SHELL=1`; this marker is not a sandbox for the sourced env spec.",
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": true,
       "description": "Experiment specs live under `experiments/**/*.env` and orchestrate topology, setup, workload, monitoring, assertions, and artifacts.",
       "properties": {
         "EXPERIMENT_AFTER_SHELL": {
-          "description": "Host shell hook run after workload.",
+          "description": "Trusted host-shell hook run after workload; requires `EXPERIMENT_TRUSTED_SHELL=1`.",
           "type": "string",
           "x-workbench-requirement": "optional"
         },
@@ -95,7 +449,7 @@
           "x-workbench-requirement": "optional"
         },
         "EXPERIMENT_ASSERT_SHELL": {
-          "description": "Host shell assertion hook.",
+          "description": "Trusted host-shell assertion hook; requires `EXPERIMENT_TRUSTED_SHELL=1`.",
           "type": "string",
           "x-workbench-requirement": "optional"
         },
@@ -106,6 +460,11 @@
         },
         "EXPERIMENT_ASSERT_SQL_FILES": {
           "description": "Space-separated SQL assertion files.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_ASSERT_TRUE_SQL": {
+          "description": "Boolean SQL assertion that must return exactly one `t` row.",
           "type": "string",
           "x-workbench-requirement": "optional"
         },
@@ -131,7 +490,7 @@
           "x-workbench-requirement": "optional"
         },
         "EXPERIMENT_BEFORE_SHELL": {
-          "description": "Host shell hook run before snapshots/workload.",
+          "description": "Trusted host-shell hook run before snapshots/workload; requires `EXPERIMENT_TRUSTED_SHELL=1`.",
           "type": "string",
           "x-workbench-requirement": "optional"
         },
@@ -163,13 +522,13 @@
         },
         "EXPERIMENT_DOCKER_RESET": {
           "default": "0",
-          "description": "Reset runtime before the run.",
+          "description": "Compatibility alias for `EXPERIMENT_RUNTIME_RESET`.",
           "enum": [
             "0",
             "1"
           ],
           "type": "string",
-          "x-workbench-requirement": "optional"
+          "x-workbench-requirement": "legacy alias"
         },
         "EXPERIMENT_METRICS": {
           "default": "1",
@@ -257,6 +616,16 @@
           "type": "string",
           "x-workbench-requirement": "optional"
         },
+        "EXPERIMENT_RUNTIME_RESET": {
+          "default": "0",
+          "description": "Reset the selected disposable runtime before the run.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
         "EXPERIMENT_RUN_ID": {
           "default": "generated",
           "description": "Explicit run id.",
@@ -281,12 +650,17 @@
         },
         "EXPERIMENT_STATE_WRITER": {
           "default": "go",
-          "description": "State-file writer mode for manifest and verdict artifacts. `auto` is a compatibility alias for `go`.",
+          "description": "State-file writer mode for manifest and verdict artifacts. `auto` is a compatibility alias for `go`; legacy `shell` is rejected for v1 evidence.",
           "enum": [
             "auto",
-            "go",
-            "shell"
+            "go"
           ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_TIMEOUT": {
+          "default": "6h",
+          "description": "Runner execution deadline; CLI `--timeout` and `PGWORKBENCH_EXECUTION_TIMEOUT` take precedence.",
           "type": "string",
           "x-workbench-requirement": "optional"
         },
@@ -300,6 +674,16 @@
             "pgbouncer",
             "multi-version-upgrade",
             "source-tree"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "EXPERIMENT_TRUSTED_SHELL": {
+          "default": "0",
+          "description": "Explicitly allow configured host-shell hooks.",
+          "enum": [
+            "0",
+            "1"
           ],
           "type": "string",
           "x-workbench-requirement": "optional"
@@ -323,13 +707,13 @@
       "properties": {
         "MATRIX_DOCKER_RESET": {
           "default": "0",
-          "description": "Reset runtime before each run.",
+          "description": "Compatibility alias for `MATRIX_RUNTIME_RESET`.",
           "enum": [
             "0",
             "1"
           ],
           "type": "string",
-          "x-workbench-requirement": "optional"
+          "x-workbench-requirement": "legacy alias"
         },
         "MATRIX_EXPERIMENTS": {
           "default": "smoke",
@@ -362,6 +746,16 @@
         "MATRIX_REPEATS": {
           "default": "1",
           "description": "Repeat count per combination.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "MATRIX_RUNTIME_RESET": {
+          "default": "0",
+          "description": "Reset the selected runtime before each run.",
+          "enum": [
+            "0",
+            "1"
+          ],
           "type": "string",
           "x-workbench-requirement": "optional"
         },
@@ -499,13 +893,13 @@
       "type": "object"
     },
     "utility-test": {
-      "$comment": "Use utility tests for pg_dump, pg_restore, pg_upgrade, external backup tools, data checkers, fuzzers, and other PostgreSQL-adjacent utilities. Values containing `$` are treated as dynamic by the validator and are not path-checked.",
+      "$comment": "Use utility tests for pg_dump, pg_restore, pg_upgrade, external backup tools, data checkers, fuzzers, and other PostgreSQL-adjacent utilities. Values containing `$` are treated as dynamic by the validator and are not path-checked. SQL assertions do not require shell trust. `UTILITY_TEST_EXPECT_FILES` currently compiles to host-shell `test -s` checks and shares the explicit trust gate with `UTILITY_TEST_ASSERT_SHELL`.",
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": true,
       "description": "Utility test specs live under `utility-tests/**/*.env` and describe a reusable PostgreSQL utility/tool test scenario.",
       "properties": {
         "UTILITY_TEST_ASSERT_SHELL": {
-          "description": "Host shell assertion run after the utility workload.",
+          "description": "Trusted host-shell assertion run after the utility workload; requires `UTILITY_TEST_TRUSTED_SHELL=1`.",
           "type": "string",
           "x-workbench-requirement": "optional"
         },
@@ -516,6 +910,11 @@
         },
         "UTILITY_TEST_ASSERT_SQL_FILES": {
           "description": "Space-separated SQL assertion files run after the utility workload.",
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
+        "UTILITY_TEST_ASSERT_TRUE_SQL": {
+          "description": "Boolean SQL assertion that must return exactly one `t` row.",
           "type": "string",
           "x-workbench-requirement": "optional"
         },
@@ -557,7 +956,7 @@
           "x-workbench-requirement": "optional"
         },
         "UTILITY_TEST_EXPECT_FILES": {
-          "description": "Space-separated output files that must exist and be non-empty after the utility workload.",
+          "description": "Space-separated output files checked in the host shell; requires `UTILITY_TEST_TRUSTED_SHELL=1`.",
           "type": "string",
           "x-workbench-requirement": "optional"
         },
@@ -626,6 +1025,16 @@
           "type": "string",
           "x-workbench-requirement": "optional"
         },
+        "UTILITY_TEST_TRUSTED_SHELL": {
+          "default": "0",
+          "description": "Explicitly allow utility assertions that execute in the host shell.",
+          "enum": [
+            "0",
+            "1"
+          ],
+          "type": "string",
+          "x-workbench-requirement": "optional"
+        },
         "UTILITY_TEST_WORKLOAD_SPEC": {
           "description": "Foreground workload spec that invokes the utility or external tool.",
           "type": "string",
@@ -646,7 +1055,7 @@
       "description": "Workload specs live under `workloads/**/*.env` and define one foreground or background executable workload.",
       "properties": {
         "NOISIA_EXTRA_ARGS": {
-          "description": "Extra noisia arguments split as shell words.",
+          "description": "Extra noisia arguments split as shell words. Experiment-owned runs reject conninfo and option-terminator overrides.",
           "type": "string",
           "x-workbench-requirement": "optional for noisia"
         },
@@ -666,7 +1075,7 @@
           "x-workbench-requirement": "optional for pgbench"
         },
         "PGBENCH_EXTRA_ARGS": {
-          "description": "Extra pgbench arguments split as shell words.",
+          "description": "Extra pgbench arguments split as shell words. Experiment-owned runs reject host, port, user, database, and option-terminator overrides.",
           "type": "string",
           "x-workbench-requirement": "optional for pgbench"
         },
@@ -794,6 +1203,26 @@
           "type": "string",
           "x-workbench-requirement": "required for sql if WORKLOAD_SQL is empty"
         },
+        "UTILITY_ARCHIVE_FILE": {
+          "description": "Custom-format archive used for the pg_restore round trip.",
+          "type": "string",
+          "x-workbench-requirement": "required for pg-restore"
+        },
+        "UTILITY_OUTPUT_FILE": {
+          "description": "Host-side output file written atomically by a PostgreSQL utility adapter.",
+          "type": "string",
+          "x-workbench-requirement": "required for pg-dump, pg-dumpall, pg-restore"
+        },
+        "UTILITY_SOURCE_SCHEMA": {
+          "description": "Source schema selected for a dump or restore round trip.",
+          "type": "string",
+          "x-workbench-requirement": "optional for pg-dump; required for pg-restore"
+        },
+        "UTILITY_TARGET_SCHEMA": {
+          "description": "Schema name produced by the isolated pg_restore round trip.",
+          "type": "string",
+          "x-workbench-requirement": "required for pg-restore"
+        },
         "WORKLOAD_CMD": {
           "description": "Host shell command run with PostgreSQL connection env exported.",
           "type": "string",
@@ -815,6 +1244,9 @@
             "profile-sql",
             "sql",
             "pgbench",
+            "pg-dump",
+            "pg-dumpall",
+            "pg-restore",
             "pg-source-check",
             "noisia",
             "shell",

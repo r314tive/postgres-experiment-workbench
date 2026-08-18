@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-ab-bundle-inventory.schema.json",
+  "title": "pgworkbench counterbalanced benchmark bundle inventory v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "run_id",
+    "run_ref",
+    "baseline_ref",
+    "candidate_ref",
+    "files"
+  ],
+  "properties": {
+    "schema_version": { "const": "pgworkbench.benchmark-ab-bundle/v1" },
+    "artifact_type": { "const": "pgworkbench.benchmark-ab-bundle" },
+    "run_id": { "$ref": "#/$defs/run_id" },
+    "run_ref": { "$ref": "#/$defs/portable_path" },
+    "baseline_ref": { "$ref": "#/$defs/portable_path" },
+    "candidate_ref": { "$ref": "#/$defs/portable_path" },
+    "files": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/file" }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "portable_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "digest"],
+      "properties": {
+        "path": { "$ref": "#/$defs/portable_path" },
+        "size": { "type": "integer", "minimum": 0 },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    }
+  }
+}

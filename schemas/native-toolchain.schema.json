@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/native-toolchain.schema.json",
+  "title": "pgworkbench native PostgreSQL toolchain byte-identity manifest v1",
+  "description": "Portable identity-only snapshots of required native PostgreSQL executable bytes. Snapshot files are intentionally non-executable and do not attest source or build provenance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "source_commit",
+    "build_provenance",
+    "binaries",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": { "const": "pgworkbench.native-toolchain/v1" },
+    "artifact_type": { "const": "pgworkbench.native-toolchain" },
+    "source_commit": { "const": "unattested" },
+    "build_provenance": { "const": "unattested" },
+    "binaries": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": { "$ref": "#/$defs/binary" }
+    },
+    "digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "binary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "path", "digest", "size", "version"],
+      "properties": {
+        "name": {
+          "enum": ["createdb", "initdb", "pg_ctl", "pg_isready", "pgbench", "postgres", "psql"]
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^bin/(?:createdb|initdb|pg_ctl|pg_isready|pgbench|postgres|psql)$"
+        },
+        "digest": { "$ref": "#/$defs/digest" },
+        "size": { "type": "integer", "minimum": 1 },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^[^\\r\\n\\u0000]+$"
+        }
+      }
+    }
+  }
+}

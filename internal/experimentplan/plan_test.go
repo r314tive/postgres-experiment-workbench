@@ -112,6 +112,33 @@ func TestBuildRejectsInvalidExperiment(t *testing.T) {
 	}
 }
 
+func TestBuildPreparedUsesInternalResolvedSpec(t *testing.T) {
+	spec := speccatalog.Spec{
+		Kind: "experiment",
+		ID:   "utility/smoke",
+		Path: "/internal/.tmp/utility-tests/smoke.env",
+		Values: map[string]string{
+			"EXPERIMENT_NAME":          "utility smoke",
+			"EXPERIMENT_WORKLOAD_SPEC": "utility/smoke",
+		},
+	}
+	plan, err := BuildPrepared(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Spec.ID != "utility/smoke" || plan.Spec.Path != spec.Path || plan.Fields["workload"] != "utility/smoke" {
+		t.Fatalf("unexpected prepared plan: %#v", plan)
+	}
+	for _, invalid := range []speccatalog.Spec{
+		{Kind: "workload", ID: "utility/smoke", Path: spec.Path, Values: spec.Values},
+		{Kind: "experiment", ID: "", Path: spec.Path, Values: spec.Values},
+	} {
+		if _, err := BuildPrepared(invalid); err == nil {
+			t.Fatalf("accepted invalid prepared spec: %#v", invalid)
+		}
+	}
+}
+
 func writeFile(t *testing.T, root string, rel string, content string) {
 	t.Helper()
 	path := filepath.Join(root, rel)

@@ -93,6 +93,6 @@ SELECT
     wal_records,
     wal_fpi,
     pg_size_pretty(wal_bytes) AS wal_bytes,
-    wal_write,
-    wal_sync
-FROM pg_stat_wal;
+    COALESCE((to_jsonb(w) ->> 'wal_write')::bigint, 0) AS wal_write,
+    COALESCE((to_jsonb(w) ->> 'wal_sync')::bigint, 0) AS wal_sync
+FROM pg_stat_wal AS w;

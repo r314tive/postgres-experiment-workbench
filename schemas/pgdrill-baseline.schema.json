@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/pgdrill-baseline.schema.json",
+  "title": "pgworkbench external pgdrill baseline provenance v1",
+  "description": "A bounded, unsigned identity bridge from one independently verified ordinary experiment run. It is neither a pgdrill configuration nor recovery evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "contract_version",
+    "classification",
+    "source_verification",
+    "run",
+    "scenario_pack",
+    "experiment_spec",
+    "postgres",
+    "predicate",
+    "assurance_boundary",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.pgdrill-baseline/v1"},
+    "artifact_type": {"const": "pgworkbench.pgdrill-baseline"},
+    "contract_version": {"const": "1.0.0"},
+    "classification": {"const": "external-experiment-baseline-provenance"},
+    "source_verification": {"$ref": "#/$defs/source_verification"},
+    "run": {"$ref": "#/$defs/run"},
+    "scenario_pack": {"$ref": "#/$defs/scenario_pack"},
+    "experiment_spec": {"$ref": "#/$defs/experiment_spec"},
+    "postgres": {"$ref": "#/$defs/postgres"},
+    "predicate": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/predicate"}
+      ]
+    },
+    "assurance_boundary": {"$ref": "#/$defs/assurance_boundary"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "file_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "digest"],
+      "properties": {
+        "file": {"type": "string", "minLength": 1},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "source_verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "verifier_contract", "verified", "bundle_inventory"],
+      "properties": {
+        "mode": {
+          "enum": [
+            "independently-verified-run",
+            "independently-verified-complete-bundle"
+          ]
+        },
+        "verifier_contract": {"const": "pgworkbench.run-verify/v1"},
+        "verified": {"const": true},
+        "bundle_inventory": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "allOf": [
+                {"$ref": "#/$defs/file_binding"},
+                {"properties": {"file": {"const": ".pgworkbench-bundle.json"}}}
+              ]
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"mode": {"const": "independently-verified-run"}},
+            "required": ["mode"]
+          },
+          "then": {"properties": {"bundle_inventory": {"type": "null"}}},
+          "else": {"properties": {"bundle_inventory": {"$ref": "#/$defs/file_binding"}}}
+        }
+      ]
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "started_at", "finished_at", "manifest", "verdict_env", "verdict_json"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "finished_at": {"type": "string", "format": "date-time"},
+        "manifest": {
+          "allOf": [
+            {"$ref": "#/$defs/file_binding"},
+            {"properties": {"file": {"const": "manifest.env"}}}
+          ]
+        },
+        "verdict_env": {
+          "allOf": [
+            {"$ref": "#/$defs/file_binding"},
+            {"properties": {"file": {"const": "verdict.env"}}}
+          ]
+        },
+        "verdict_json": {
+          "allOf": [
+            {"$ref": "#/$defs/file_binding"},
+            {"properties": {"file": {"const": "verdict.json"}}}
+          ]
+        }
+      }
+    },
+    "scenario_pack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "digest"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,159}$"},
+        "version": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._+\\-]{0,127}$"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "experiment_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "ref", "digest"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,159}$"},
+        "ref": {"type": "string", "pattern": "^experiments/[A-Za-z0-9][A-Za-z0-9._/-]*\\.env$"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "postgres": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "runtime_os", "runtime_arch", "server_version_num", "server_major", "fingerprint_observed_at"],
+      "properties": {
+        "runtime": {"enum": ["docker", "native"]},
+        "runtime_os": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+        "runtime_arch": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+        "server_version_num": {"type": "string", "pattern": "^[1-9][0-9]{4,}$"},
+        "server_major": {"type": "string", "pattern": "^(?:[1-9][0-9]*|[1-9][0-9]*\\.[0-9]+)$"},
+        "fingerprint_observed_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "predicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["review_status", "language", "kind", "sql", "digest", "expected_boolean", "execution", "safety_basis"],
+      "properties": {
+        "review_status": {"const": "reviewed"},
+        "language": {"const": "postgresql-sql"},
+        "kind": {"const": "read-only-boolean-predicate"},
+        "sql": {"type": "string", "minLength": 1, "maxLength": 16384},
+        "digest": {"$ref": "#/$defs/digest"},
+        "expected_boolean": {"const": true},
+        "execution": {"const": "future-isolated-consumer-target"},
+        "safety_basis": {"const": "lexical-guard-plus-human-review-not-semantic-proof"}
+      }
+    },
+    "assurance_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "authenticity", "consumer_validation_status"],
+      "properties": {
+        "scope": {"const": "experiment-baseline-identity-only"},
+        "authenticity": {"const": "unsigned-operator-recorded"},
+        "consumer_validation_status": {"const": "required"}
+      }
+    }
+  }
+}

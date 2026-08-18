@@ -38,7 +38,20 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	if errs := catalog.Validate("utility-test", []string{spec.ID}); len(errs) > 0 {
+	return BuildPrepared(catalog, spec)
+}
+
+// BuildPrepared builds a utility plan from one already-selected spec snapshot.
+// Validation consumes the supplied values instead of reopening the mutable
+// catalog path, so the plan and caller-owned source digest cannot diverge.
+func BuildPrepared(catalog speccatalog.Catalog, spec speccatalog.Spec) (Plan, error) {
+	if spec.Kind != "utility-test" {
+		return Plan{}, fmt.Errorf("prepared spec kind must be utility-test: %s", spec.Kind)
+	}
+	if strings.TrimSpace(spec.ID) == "" || strings.TrimSpace(spec.Path) == "" || spec.Values == nil {
+		return Plan{}, fmt.Errorf("prepared utility-test spec is incomplete")
+	}
+	if errs := catalog.ValidateSpec(spec); len(errs) > 0 {
 		return Plan{}, errors.Join(errs...)
 	}
 
@@ -58,9 +71,11 @@ func Build(catalog speccatalog.Catalog, input string) (Plan, error) {
 		"metrics_interval":  defaultValue(values["UTILITY_TEST_METRICS_INTERVAL"], "1"),
 		"metrics_duration":  defaultValue(values["UTILITY_TEST_METRICS_DURATION"], "30"),
 		"metrics_samples":   shellDefault(values["UTILITY_TEST_METRICS_SAMPLES"]),
+		"trusted_shell":     defaultValue(values["UTILITY_TEST_TRUSTED_SHELL"], "0"),
 		"expect_files":      shellDefault(values["UTILITY_TEST_EXPECT_FILES"]),
 		"assert_sql_files":  shellDefault(values["UTILITY_TEST_ASSERT_SQL_FILES"]),
 		"assert_sql":        shellDefault(values["UTILITY_TEST_ASSERT_SQL"]),
+		"assert_true_sql":   shellDefault(values["UTILITY_TEST_ASSERT_TRUE_SQL"]),
 		"assert_shell":      shellDefault(values["UTILITY_TEST_ASSERT_SHELL"]),
 		"scan_paths":        shellDefault(values["UTILITY_TEST_SCAN_PATHS"]),
 		"notes":             shellDefault(values["UTILITY_TEST_NOTES"]),
@@ -155,9 +170,11 @@ func Render(w io.Writer, plan Plan) error {
 	writeRow(w, "Utility workload", plan.Fields["workload"])
 	writeRow(w, "Background workloads", plan.Fields["backgrounds"])
 	writeRow(w, "Metrics", plan.Fields["metrics"])
+	writeRow(w, "Trusted shell", plan.Fields["trusted_shell"])
 	writeRow(w, "Expected files", plan.Fields["expect_files"])
 	writeRow(w, "Assert SQL files", plan.Fields["assert_sql_files"])
 	writeRow(w, "Assert SQL", plan.Fields["assert_sql"])
+	writeRow(w, "Assert true SQL", plan.Fields["assert_true_sql"])
 	writeRow(w, "Assert shell", plan.Fields["assert_shell"])
 	writeRow(w, "Scan paths", plan.Fields["scan_paths"])
 	writeRow(w, "Notes", plan.Fields["notes"])
@@ -260,7 +277,7 @@ func evidenceDetails(fields map[string]string) string {
 }
 
 func hasAssertions(fields map[string]string) bool {
-	return fields["expect_files"] != "" || fields["assert_sql_files"] != "" || fields["assert_sql"] != "" || fields["assert_shell"] != ""
+	return fields["expect_files"] != "" || fields["assert_sql_files"] != "" || fields["assert_sql"] != "" || fields["assert_true_sql"] != "" || fields["assert_shell"] != ""
 }
 
 func assertionDetails(fields map[string]string) string {
@@ -273,6 +290,9 @@ func assertionDetails(fields map[string]string) string {
 	}
 	if fields["assert_sql"] != "" {
 		parts = append(parts, "inline SQL")
+	}
+	if fields["assert_true_sql"] != "" {
+		parts = append(parts, "strict boolean SQL")
 	}
 	if fields["assert_shell"] != "" {
 		parts = append(parts, "shell")

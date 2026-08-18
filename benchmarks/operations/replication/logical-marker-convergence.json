@@ -1,0 +1,21 @@
+{
+  "schema_version": "pgworkbench.operation-benchmark-spec/v1",
+  "id": "replication/logical-marker-convergence",
+  "name": "Logical replication ordered-marker convergence upper bound",
+  "description": "Repeated disposable logical-replication runs that apply a bounded mutation set and wait for an ordered marker on one subscriber.",
+  "classification": "descriptive-engineering",
+  "decision_eligible": false,
+  "experiment_spec": "logical-replication-benchmark",
+  "trials": 5,
+  "max_cv_pct": 35,
+  "supported_runtimes": ["docker"],
+  "measurement": {
+    "basis": "operation-result",
+    "result_path": "artifacts/operation-result.json",
+    "metric": "marker_convergence_ms",
+    "unit": "milliseconds",
+    "direction": "lower-is-better",
+    "scope": "Publisher server-clock interval from marker row timestamp before commit through a publisher clock sample after subscriber detection; includes commit, apply, client round trips, and polling delay; poll interval is 0.1 seconds."
+  },
+  "assurance": "A passing series proves ordered-marker observation, full retained-table signature equality, exact linked-run integrity, and repeatability for one disposable publisher/subscriber topology. It reports a polling-inflated upper bound, not pure WAL transport/apply latency, production lag, durability, failover behavior, or a causal comparison."
+}

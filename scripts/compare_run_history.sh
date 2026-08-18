@@ -16,6 +16,7 @@ USAGE
 
 OUT_FILE=""
 INPUTS=()
+PROTECTED_DIRS=()
 
 CUMULATIVE_METRICS=(
   xact_commit
@@ -269,12 +270,14 @@ append_series() {
   local metric
 
   dir="$(resolve_dir "$input")"
+  PROTECTED_DIRS+=("$dir")
   label="$(series_label "$dir")"
 
   while IFS= read -r run_dir; do
     [[ -z "$run_dir" ]] && continue
     run_dir="$(resolve_dir "$run_dir")"
     run_dirs+=("$run_dir")
+    PROTECTED_DIRS+=("$run_dir")
   done < <(collect_run_dirs "$dir")
 
   if (( ${#run_dirs[@]} == 0 )); then
@@ -388,7 +391,8 @@ render_history() {
 }
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-workbench-history.XXXXXX")"
-trap 'rm -rf "$TMP_DIR"' EXIT
+OUTPUT_TEMP=""
+trap 'rm -rf "$TMP_DIR"; [[ -z "$OUTPUT_TEMP" ]] || rm -f -- "$OUTPUT_TEMP"' EXIT
 SERIES_TSV="$TMP_DIR/series.tsv"
 METRICS_TSV="$TMP_DIR/metrics.tsv"
 
@@ -406,8 +410,31 @@ if [[ -n "$OUT_FILE" ]]; then
   if [[ "$OUT_FILE" != /* ]]; then
     OUT_FILE="$REPO_DIR/$OUT_FILE"
   fi
-  mkdir -p "$(dirname "$OUT_FILE")"
-  render_history > "$OUT_FILE"
+  if [[ -e "$OUT_FILE" || -L "$OUT_FILE" ]]; then
+    echo "Refusing to overwrite run-history report: $OUT_FILE" >&2
+    exit 1
+  fi
+  output_parent="$(dirname "$OUT_FILE")"
+  mkdir -p "$output_parent"
+  output_parent="$(realpath "$output_parent")"
+  OUT_FILE="$output_parent/$(basename "$OUT_FILE")"
+  for protected in "${PROTECTED_DIRS[@]}"; do
+    case "$OUT_FILE/" in
+      "$protected/"*)
+        echo "Refusing to write history inside immutable input: $OUT_FILE" >&2
+        exit 1
+        ;;
+    esac
+  done
+  OUTPUT_TEMP="$(mktemp "$output_parent/.pgworkbench-history.XXXXXX")"
+  render_history > "$OUTPUT_TEMP"
+  chmod 0644 "$OUTPUT_TEMP"
+  if ! ln "$OUTPUT_TEMP" "$OUT_FILE"; then
+    echo "Refusing to overwrite run-history report: $OUT_FILE" >&2
+    exit 1
+  fi
+  rm -f -- "$OUTPUT_TEMP"
+  OUTPUT_TEMP=""
   echo "Wrote run history comparison: $OUT_FILE"
 else
   render_history

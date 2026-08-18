@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/r314tive/postgres-experiment-workbench/internal/pathguard"
 	"github.com/r314tive/postgres-experiment-workbench/internal/speccatalog"
 	"github.com/r314tive/postgres-experiment-workbench/internal/utilityrun"
 )
@@ -38,11 +39,15 @@ type PlanEntry struct {
 type UtilityRunner func(root string, catalog speccatalog.Catalog, input string, options utilityrun.Options) (utilityrun.Result, error)
 
 type RunOptions struct {
-	Stdout     io.Writer
-	Stderr     io.Writer
-	Now        func() time.Time
-	Getenv     utilityrun.Env
-	RunUtility UtilityRunner
+	EngineVersion string
+	EngineCommit  string
+	BinaryPath    string
+	Env           []string
+	Stdout        io.Writer
+	Stderr        io.Writer
+	Now           func() time.Time
+	Getenv        utilityrun.Env
+	RunUtility    UtilityRunner
 }
 
 type RunResult struct {
@@ -130,12 +135,23 @@ func Run(root string, catalog speccatalog.Catalog, input string, options RunOpti
 	if runID == "" {
 		runID = fmt.Sprintf("%s-utility-suite-%s", sanitizeID(plan.Spec), started.Format("20060102_150405"))
 	}
-	runDir := firstNonEmpty(options.Getenv("UTILITY_SUITE_RUN_DIR"), plan.RunDir)
-	if runDir == "" {
-		runDir = filepath.Join(root, "runs", "utility-suites", runID)
-	} else if !filepath.IsAbs(runDir) {
-		runDir = filepath.Join(root, runDir)
+	if !validRunID(runID) {
+		return RunResult{}, fmt.Errorf("invalid utility suite run id %q", runID)
 	}
+	runDir, stagingDir, err := prepareRunDirectory(
+		root,
+		runID,
+		firstNonEmpty(options.Getenv("UTILITY_SUITE_RUN_DIR"), plan.RunDir),
+	)
+	if err != nil {
+		return RunResult{}, err
+	}
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(stagingDir)
+		}
+	}()
 
 	result := RunResult{
 		Suite:     plan.Spec,
@@ -147,35 +163,43 @@ func Run(root string, catalog speccatalog.Catalog, input string, options RunOpti
 		Status:    "passed",
 	}
 
-	if err := os.MkdirAll(filepath.Join(runDir, "driver-logs"), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(stagingDir, "driver-logs"), 0o755); err != nil {
 		return result, err
 	}
-	tsv, err := os.Create(filepath.Join(runDir, "runs.tsv"))
+	tsv, err := os.OpenFile(filepath.Join(stagingDir, "runs.tsv"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return result, err
 	}
-	defer tsv.Close()
-	fmt.Fprintln(tsv, "utility_test\tprofile_size\trepeat\trun_id\texit_code\tstatus\tmessage\trun_dir\texperiment_spec\tdriver_log")
+	if _, err := fmt.Fprintln(tsv, "utility_test\tprofile_size\trepeat\trun_id\texit_code\tstatus\tmessage\trun_dir\texperiment_spec\tdriver_log"); err != nil {
+		_ = tsv.Close()
+		return result, err
+	}
 
 	for _, entry := range plan.Runs {
 		entryRunID := fmt.Sprintf("%s-%s-%s-r%02d", runID, sanitizeID(entry.UtilityTest), sanitizeID(entry.ProfileSize), entry.Repeat)
 		driverLog := filepath.Join(runDir, "driver-logs", entryRunID+".log")
-		logFile, err := os.Create(driverLog)
+		stagingDriverLog := filepath.Join(stagingDir, "driver-logs", entryRunID+".log")
+		logFile, err := os.OpenFile(stagingDriverLog, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err != nil {
+			_ = tsv.Close()
 			return result, err
 		}
 
-		env := []string{
-			"UTILITY_TEST_RUN_ID=" + entryRunID,
-			"PROFILE_SIZE=" + entry.ProfileSize,
-			"UTILITY_TEST_SNAPSHOT=" + plan.Snapshot,
-		}
+		env := append([]string(nil), options.Env...)
+		env = append(env,
+			"UTILITY_TEST_RUN_ID="+entryRunID,
+			"PROFILE_SIZE="+entry.ProfileSize,
+			"UTILITY_TEST_SNAPSHOT="+plan.Snapshot,
+		)
 		utilityResult, runErr := options.RunUtility(root, catalog, entry.UtilityTest, utilityrun.Options{
-			Stdout: logFile,
-			Stderr: logFile,
-			Env:    env,
-			Now:    options.Now,
-			Getenv: overlayEnv(env, options.Getenv),
+			EngineVersion: options.EngineVersion,
+			EngineCommit:  options.EngineCommit,
+			BinaryPath:    options.BinaryPath,
+			Stdout:        logFile,
+			Stderr:        logFile,
+			Env:           env,
+			Now:           options.Now,
+			Getenv:        overlayEnv(env, options.Getenv),
 		})
 		closeErr := logFile.Close()
 		if runErr == nil && closeErr != nil {
@@ -211,7 +235,7 @@ func Run(root string, catalog speccatalog.Catalog, input string, options RunOpti
 			Message:        message,
 		}
 		result.Entries = append(result.Entries, runEntry)
-		fmt.Fprintf(
+		if _, err := fmt.Fprintf(
 			tsv,
 			"%s\t%s\t%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
 			entry.UtilityTest,
@@ -224,20 +248,30 @@ func Run(root string, catalog speccatalog.Catalog, input string, options RunOpti
 			runEntry.RunDir,
 			runEntry.ExperimentSpec,
 			runEntry.DriverLog,
-		)
+		); err != nil {
+			_ = tsv.Close()
+			return result, err
+		}
 
 		if runErr != nil && plan.StopOnFail {
 			break
 		}
 	}
+	if err := tsv.Close(); err != nil {
+		return result, err
+	}
 
 	result.FinishedAt = options.Now().UTC().Format(time.RFC3339)
-	if err := RenderRunJSONFile(filepath.Join(runDir, "result.json"), result); err != nil {
+	if err := RenderRunJSONFile(filepath.Join(stagingDir, "result.json"), result); err != nil {
 		return result, err
 	}
-	if err := RenderSummary(filepath.Join(runDir, "summary.md"), result); err != nil {
+	if err := RenderSummary(filepath.Join(stagingDir, "summary.md"), result); err != nil {
 		return result, err
 	}
+	if err := publishRunDirectory(stagingDir, runDir); err != nil {
+		return result, err
+	}
+	published = true
 	if result.Failed > 0 {
 		return result, fmt.Errorf("utility suite failed: %d/%d failed", result.Failed, result.Total)
 	}
@@ -281,48 +315,129 @@ func RenderRunJSON(w io.Writer, result RunResult) error {
 }
 
 func RenderRunJSONFile(path string, result RunResult) error {
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	return RenderRunJSON(file, result)
+	return renderFile(path, func(file *os.File) error { return RenderRunJSON(file, result) })
 }
 
 func RenderSummary(path string, result RunResult) error {
-	file, err := os.Create(path)
+	return renderFile(path, func(file *os.File) error {
+		if _, err := fmt.Fprintln(file, "# Utility Suite Summary"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(file); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(file, "| Field | Value |"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(file, "| --- | --- |"); err != nil {
+			return err
+		}
+		for _, row := range []struct {
+			label string
+			value any
+		}{
+			{"Suite", tableCell(result.Suite)},
+			{"Name", tableCell(result.Name)},
+			{"Run id", tableCell(result.RunID)},
+			{"Status", tableCell(result.Status)},
+			{"Total", result.Total},
+			{"Passed", result.Passed},
+			{"Failed", result.Failed},
+		} {
+			if _, err := fmt.Fprintf(file, "| %s | `%v` |\n", row.label, row.value); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintln(file); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(file, "| Utility test | Profile size | Repeat | Run id | Status | Exit | Message |"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(file, "| --- | --- | ---: | --- | --- | ---: | --- |"); err != nil {
+			return err
+		}
+		for _, entry := range result.Entries {
+			if _, err := fmt.Fprintf(
+				file,
+				"| `%s` | `%s` | `%d` | `%s` | `%s` | `%d` | %s |\n",
+				tableCell(entry.UtilityTest),
+				tableCell(entry.ProfileSize),
+				entry.Repeat,
+				tableCell(entry.RunID),
+				tableCell(entry.Status),
+				entry.ExitCode,
+				tableCell(entry.Message),
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func prepareRunDirectory(root, runID, requested string) (string, string, error) {
+	suiteParent, err := pathguard.EnsureDirectory(root, filepath.Join("runs", "utility-suites"), 0o755)
+	if err != nil {
+		return "", "", fmt.Errorf("prepare utility suite artifact root: %w", err)
+	}
+	finalDir := filepath.Join(suiteParent, runID)
+	if requested != "" {
+		requestedPath := requested
+		if !filepath.IsAbs(requestedPath) {
+			requestedPath = filepath.Join(root, requestedPath)
+		}
+		requestedPath, err = filepath.Abs(requestedPath)
+		if err != nil {
+			return "", "", fmt.Errorf("resolve utility suite run directory: %w", err)
+		}
+		relative, relErr := filepath.Rel(suiteParent, requestedPath)
+		if relErr != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.Clean(relative) != relative {
+			return "", "", fmt.Errorf("utility suite run directory must be below %s", suiteParent)
+		}
+		if filepath.Base(relative) != runID {
+			return "", "", fmt.Errorf("utility suite run directory basename must match run id %q", runID)
+		}
+		parentRelative := filepath.Dir(relative)
+		parent := suiteParent
+		if parentRelative != "." {
+			parent, err = pathguard.EnsureDirectory(suiteParent, parentRelative, 0o755)
+			if err != nil {
+				return "", "", fmt.Errorf("prepare utility suite run directory parent: %w", err)
+			}
+		}
+		finalDir = filepath.Join(parent, filepath.Base(relative))
+	}
+	if info, statErr := os.Lstat(finalDir); statErr == nil {
+		return "", "", fmt.Errorf("refusing to overwrite immutable utility suite run: %s (%s)", finalDir, info.Mode())
+	} else if !os.IsNotExist(statErr) {
+		return "", "", fmt.Errorf("inspect utility suite run directory: %w", statErr)
+	}
+	stagingDir, err := os.MkdirTemp(filepath.Dir(finalDir), "."+filepath.Base(finalDir)+".staging-")
+	if err != nil {
+		return "", "", fmt.Errorf("create utility suite staging directory: %w", err)
+	}
+	return finalDir, stagingDir, nil
+}
+
+func publishRunDirectory(stagingDir, finalDir string) error {
+	if info, err := os.Lstat(finalDir); err == nil {
+		return fmt.Errorf("refusing to overwrite immutable utility suite run: %s (%s)", finalDir, info.Mode())
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect utility suite run directory before publication: %w", err)
+	}
+	if err := os.Rename(stagingDir, finalDir); err != nil {
+		return fmt.Errorf("publish immutable utility suite run: %w", err)
+	}
+	return nil
+}
+
+func renderFile(path string, render func(*os.File) error) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-	fmt.Fprintln(file, "# Utility Suite Summary")
-	fmt.Fprintln(file)
-	fmt.Fprintln(file, "| Field | Value |")
-	fmt.Fprintln(file, "| --- | --- |")
-	fmt.Fprintf(file, "| Suite | `%s` |\n", tableCell(result.Suite))
-	fmt.Fprintf(file, "| Name | `%s` |\n", tableCell(result.Name))
-	fmt.Fprintf(file, "| Run id | `%s` |\n", tableCell(result.RunID))
-	fmt.Fprintf(file, "| Status | `%s` |\n", tableCell(result.Status))
-	fmt.Fprintf(file, "| Total | `%d` |\n", result.Total)
-	fmt.Fprintf(file, "| Passed | `%d` |\n", result.Passed)
-	fmt.Fprintf(file, "| Failed | `%d` |\n", result.Failed)
-	fmt.Fprintln(file)
-	fmt.Fprintln(file, "| Utility test | Profile size | Repeat | Run id | Status | Exit | Message |")
-	fmt.Fprintln(file, "| --- | --- | ---: | --- | --- | ---: | --- |")
-	for _, entry := range result.Entries {
-		fmt.Fprintf(
-			file,
-			"| `%s` | `%s` | `%d` | `%s` | `%s` | `%d` | %s |\n",
-			tableCell(entry.UtilityTest),
-			tableCell(entry.ProfileSize),
-			entry.Repeat,
-			tableCell(entry.RunID),
-			tableCell(entry.Status),
-			entry.ExitCode,
-			tableCell(entry.Message),
-		)
-	}
-	return nil
+	return errors.Join(render(file), file.Close())
 }
 
 func withDefaults(options RunOptions) RunOptions {
@@ -433,6 +548,10 @@ func sanitizeID(value string) string {
 		return "utility-suite"
 	}
 	return out.String()
+}
+
+func validRunID(value string) bool {
+	return value != "" && value != "." && value != ".." && len(value) <= 200 && sanitizeID(value) == value
 }
 
 func tsvCell(value string) string {

@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-environment.schema.json",
+  "title": "pgworkbench benchmark environment v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "runtime",
+    "runtime_os",
+    "runtime_arch",
+    "driver",
+    "target",
+    "target_endpoint_contract",
+    "target_endpoint_host",
+    "target_endpoint_port",
+    "docker_driver_image_id",
+    "docker_target_image_id",
+    "target_topology",
+    "driver_version",
+    "parser_version",
+    "postgres_server_version_num",
+    "postgres_server_major",
+    "pg_config",
+    "pg_config_digest",
+    "subject_dimension",
+    "native_toolchain_provenance",
+    "engine_version",
+    "engine_commit",
+    "engine_binary_digest",
+    "pack_id",
+    "pack_version",
+    "pack_digest",
+    "qualification",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "pgworkbench.benchmark-environment/v1"
+    },
+    "artifact_type": {
+      "const": "pgworkbench.benchmark-environment"
+    },
+    "runtime": {
+      "enum": ["docker", "native"]
+    },
+    "runtime_os": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runtime_arch": {
+      "type": "string",
+      "minLength": 1
+    },
+    "driver": {
+      "const": "pgbench"
+    },
+    "target": {
+      "enum": ["direct-postgres", "pgbouncer"]
+    },
+    "target_endpoint_contract": {
+      "enum": [
+        "pgworkbench.pgbench-target/direct-postgres/v1",
+        "pgworkbench.pgbench-target/pgbouncer/v1"
+      ]
+    },
+    "target_endpoint_host": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\s]+$"
+    },
+    "target_endpoint_port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "docker_driver_image_id": {
+      "anyOf": [
+        { "const": "not-applicable" },
+        { "$ref": "#/$defs/digest" }
+      ]
+    },
+    "docker_target_image_id": {
+      "anyOf": [
+        { "const": "not-applicable" },
+        { "$ref": "#/$defs/digest" }
+      ]
+    },
+    "target_topology": {
+      "enum": ["single", "pgbouncer"]
+    },
+    "driver_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parser_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "postgres_server_version_num": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "postgres_server_major": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "pg_config": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pg_config_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "subject_dimension": {
+      "enum": ["pg_config", "native_toolchain"]
+    },
+    "native_toolchain_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "native_toolchain_manifest_ref": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$))(?!.*\\\\).+$"
+    },
+    "native_toolchain_provenance": {
+      "enum": ["not-applicable", "unattested"]
+    },
+    "engine_version": {
+      "type": "string"
+    },
+    "engine_commit": {
+      "type": "string"
+    },
+    "engine_binary_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "pack_id": {
+      "type": "string"
+    },
+    "pack_version": {
+      "type": "string"
+    },
+    "pack_digest": {
+      "anyOf": [
+        {
+          "const": ""
+        },
+        {
+          "$ref": "#/$defs/digest"
+        }
+      ]
+    },
+    "qualification": {
+      "const": "unqualified-local"
+    },
+    "digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "runtime": { "const": "native" } },
+        "required": ["runtime"]
+      },
+      "then": {
+        "required": ["native_toolchain_digest", "native_toolchain_manifest_ref"],
+        "properties": {
+          "target": { "const": "direct-postgres" },
+          "target_endpoint_host": { "enum": ["127.0.0.1", "localhost"] },
+          "target_endpoint_port": { "minimum": 1024 },
+          "docker_driver_image_id": { "const": "not-applicable" },
+          "docker_target_image_id": { "const": "not-applicable" },
+          "native_toolchain_provenance": { "const": "unattested" }
+        }
+      },
+      "else": {
+        "properties": {
+          "native_toolchain_provenance": { "const": "not-applicable" },
+          "docker_driver_image_id": { "$ref": "#/$defs/digest" },
+          "docker_target_image_id": { "$ref": "#/$defs/digest" }
+        },
+        "not": {
+          "anyOf": [
+            { "required": ["native_toolchain_digest"] },
+            { "required": ["native_toolchain_manifest_ref"] },
+            {
+              "properties": { "subject_dimension": { "const": "native_toolchain" } },
+              "required": ["subject_dimension"]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

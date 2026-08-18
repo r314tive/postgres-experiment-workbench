@@ -2,6 +2,9 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=exact_environment.sh
+source "$REPO_DIR/scripts/exact_environment.sh"
+pgworkbench_initialize_exact_environment
 PRESERVED_ENV_NAMES=()
 PRESERVED_ENV_VALUES=()
 ENV_PATH=""
@@ -26,7 +29,7 @@ capture_env_overrides() {
   local name
   while IFS= read -r name; do
     case "$name" in
-      ENV_FILE|COMPOSE|POSTGRES_*|PG_UPGRADE_*|ALLOW_*|TOPOLOGY|TOPOLOGY_*)
+      ENV_FILE|COMPOSE|POSTGRES_*|PGBOUNCER_*|PG_UPGRADE_*|ALLOW_*|PGWORKBENCH_EXPERIMENT_MODE|TOPOLOGY|TOPOLOGY_*)
         PRESERVED_ENV_NAMES+=("$name")
         PRESERVED_ENV_VALUES+=("${!name}")
         ;;
@@ -56,7 +59,7 @@ load_repo_env() {
   fi
 
   ENV_PATH="$env_file"
-  if [[ -f "$ENV_PATH" ]]; then
+  if [[ -f "$ENV_PATH" ]] && ! pgworkbench_exact_environment_active; then
     capture_env_overrides
     set -a
     # shellcheck disable=SC1090
@@ -135,6 +138,9 @@ run_native_upgrade() {
 
 REQUESTED_ACTION="${1:-}"
 load_repo_env
+if [[ "${PGWORKBENCH_EXPERIMENT_MODE:-0}" = "1" ]]; then
+  "$REPO_DIR/scripts/guard_local_pg.sh"
+fi
 compose_command
 ACTION="${REQUESTED_ACTION:-${PG_UPGRADE_ACTION:-plan}}"
 

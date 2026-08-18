@@ -1,0 +1,184 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/run-manifest.schema.json",
+  "title": "pgworkbench run manifest v1 logical fields",
+  "description": "JSON Schema mirror of the closed field set serialized as manifest.env.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_type", "run_id", "started_at", "experiment_spec",
+    "experiment_spec_id", "experiment_spec_ref", "experiment_spec_digest",
+    "source_spec_kind", "source_spec_id", "source_spec_ref", "source_spec_digest",
+    "execution_parameters_digest", "experiment_identity_digest", "runtime",
+    "engine_version", "engine_commit",
+    "pack_id", "pack_version", "pack_digest", "runtime_fingerprint_status", "runtime_fingerprint_target",
+    "runtime_os", "runtime_arch", "postgres_server_version_num", "postgres_server_major",
+    "runtime_fingerprint_observed_at", "experiment_name", "experiment_topology",
+    "experiment_pg_config", "profile", "dataset_spec", "profile_size", "workload_spec",
+    "background_specs", "metrics_enabled", "metrics_samples", "artifact_root", "run_dir"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.run-manifest/v1"},
+    "artifact_type": {"const": "pgworkbench.run-manifest"},
+    "run_id": {"type": "string", "minLength": 1},
+    "started_at": {"type": "string", "format": "date-time"},
+    "experiment_spec": {"type": "string"},
+    "experiment_spec_id": {"type": "string", "minLength": 1},
+    "experiment_spec_ref": {"type": "string", "minLength": 1},
+    "experiment_spec_digest": {"$ref": "#/$defs/optional_digest"},
+    "source_spec_kind": {"enum": ["", "utility-test", "benchmark"]},
+    "source_spec_id": {"type": "string"},
+    "source_spec_ref": {"type": "string"},
+    "source_spec_digest": {"$ref": "#/$defs/optional_digest"},
+    "execution_parameters_digest": {"$ref": "#/$defs/digest"},
+    "experiment_identity_digest": {"$ref": "#/$defs/digest"},
+    "runtime": {"enum": ["docker", "native"]},
+    "engine_version": {"$ref": "#/$defs/engine_version"},
+    "engine_commit": {"$ref": "#/$defs/engine_commit"},
+    "pack_id": {"type": "string"},
+    "pack_version": {"type": "string"},
+    "pack_digest": {"$ref": "#/$defs/optional_digest"},
+    "runtime_fingerprint_status": {"enum": ["unavailable", "observed"]},
+    "runtime_fingerprint_target": {"enum": ["primary", "upgrade-new"]},
+    "runtime_os": {"type": "string"},
+    "runtime_arch": {"type": "string"},
+    "postgres_server_version_num": {"type": "string"},
+    "postgres_server_major": {"type": "string"},
+    "runtime_fingerprint_observed_at": {"type": "string"},
+    "experiment_name": {"type": "string"},
+    "experiment_topology": {"type": "string", "minLength": 1},
+    "experiment_pg_config": {"type": "string", "minLength": 1},
+    "profile": {"type": "string"},
+    "dataset_spec": {"type": "string"},
+    "profile_size": {"type": "string", "minLength": 1},
+    "workload_spec": {"type": "string"},
+    "background_specs": {"type": "string"},
+    "metrics_enabled": {"enum": ["0", "1"]},
+    "metrics_samples": {"type": "string", "pattern": "^(?:|[1-9][0-9]*)$"},
+    "artifact_root": {"const": "."},
+    "run_dir": {"const": "."}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"source_spec_kind": {"const": ""}},
+        "required": ["source_spec_kind"]
+      },
+      "then": {
+        "properties": {
+          "source_spec_id": {"const": ""},
+          "source_spec_ref": {"const": ""},
+          "source_spec_digest": {"const": ""}
+        }
+      },
+      "else": {
+        "properties": {
+          "source_spec_id": {"minLength": 1},
+          "source_spec_ref": {"minLength": 1},
+          "source_spec_digest": {"$ref": "#/$defs/digest"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"source_spec_kind": {"const": "utility-test"}},
+        "required": ["source_spec_kind"]
+      },
+      "then": {
+        "properties": {
+          "source_spec_kind": {"const": "utility-test"},
+          "source_spec_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
+          },
+          "source_spec_ref": {
+            "pattern": "^utility-tests/[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*\\.env$"
+          },
+          "source_spec_digest": {"$ref": "#/$defs/digest"},
+          "pack_id": {"const": ""},
+          "pack_version": {"const": ""},
+          "pack_digest": {"const": ""}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"source_spec_kind": {"const": "benchmark"}},
+        "required": ["source_spec_kind"]
+      },
+      "then": {
+        "properties": {
+          "source_spec_id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
+          },
+          "source_spec_ref": {
+            "pattern": "^benchmarks/[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*\\.env$"
+          },
+          "source_spec_digest": {"$ref": "#/$defs/digest"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"experiment_topology": {"const": "multi-version-upgrade"}},
+        "required": ["experiment_topology"]
+      },
+      "then": {
+        "properties": {"runtime_fingerprint_target": {"const": "upgrade-new"}}
+      },
+      "else": {
+        "properties": {"runtime_fingerprint_target": {"const": "primary"}}
+      }
+    },
+    {
+      "if": {
+        "properties": {"runtime_fingerprint_status": {"const": "observed"}},
+        "required": ["runtime_fingerprint_status"]
+      },
+      "then": {
+        "properties": {
+          "runtime_os": {"pattern": "^[a-z0-9][a-z0-9._-]*$"},
+          "runtime_arch": {"pattern": "^[a-z0-9][a-z0-9._-]*$"},
+          "postgres_server_version_num": {"pattern": "^[1-9][0-9]{4,}$"},
+          "postgres_server_major": {"pattern": "^[1-9][0-9]*(\\.[0-9]+)?$"},
+          "runtime_fingerprint_observed_at": {"format": "date-time", "minLength": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"runtime_fingerprint_status": {"const": "unavailable"}},
+        "required": ["runtime_fingerprint_status"]
+      },
+      "then": {
+        "properties": {
+          "runtime_os": {"const": ""},
+          "runtime_arch": {"const": ""},
+          "postgres_server_version_num": {"const": ""},
+          "postgres_server_major": {"const": ""},
+          "runtime_fingerprint_observed_at": {"const": ""}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "engine_version": {
+      "anyOf": [
+        {"const": "unverified"},
+        {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$"}
+      ]
+    },
+    "engine_commit": {
+      "anyOf": [
+        {"const": "unverified"},
+        {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"}
+      ]
+    },
+    "optional_digest": {
+      "anyOf": [
+        {"const": ""},
+        {"$ref": "#/$defs/digest"}
+      ]
+    }
+  }
+}

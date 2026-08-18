@@ -17,6 +17,7 @@ ALLOW_SYSTEM_DB=0
 `)
 
 	result := Run(root, Options{}, fakeDeps(t, root, map[string]string{
+		"bash --version":         "GNU bash, version 5.2.0(1)-release",
 		"go version":             "go version go1.23 linux/amd64",
 		"docker --version":       "Docker version 27.0.0",
 		"docker compose version": "Docker Compose version v2.29.0",
@@ -45,6 +46,7 @@ POSTGRES_DB=pg_experiment_workbench
 `)
 
 	deps := fakeDeps(t, root, map[string]string{
+		"bash --version":         "GNU bash, version 5.2.0(1)-release",
 		"go version":             "go version go1.23 linux/amd64",
 		"docker --version":       "Docker version 27.0.0",
 		"docker compose version": "Docker Compose version v2.29.0",
@@ -72,6 +74,7 @@ ALLOW_NONLOCAL_PG=0
 `)
 
 	result := Run(root, Options{SkipDockerDaemon: true}, fakeDeps(t, root, map[string]string{
+		"bash --version":         "GNU bash, version 5.2.0(1)-release",
 		"go version":             "go version go1.23 linux/amd64",
 		"docker --version":       "Docker version 27.0.0",
 		"docker compose version": "Docker Compose version v2.29.0",
@@ -84,12 +87,51 @@ ALLOW_NONLOCAL_PG=0
 	assertCheck(t, result, Fail, "local target guard")
 }
 
+func TestDoctorNativeDoesNotRequireDocker(t *testing.T) {
+	root := testRoot(t, `POSTGRES_HOST=127.0.0.1
+POSTGRES_DB=pg_experiment_workbench
+`)
+	deps := fakeDeps(t, root, map[string]string{
+		"bash --version": "GNU bash, version 5.2.0(1)-release",
+		"go version":     "go version go1.23 linux/amd64",
+	})
+	deps.LookupPath = func(command string) (string, error) {
+		if command == "docker" {
+			return "", errors.New("missing")
+		}
+		return "/fake/bin/" + command, nil
+	}
+	result := Run(root, Options{Runtime: "native"}, deps)
+	if !result.Valid() {
+		t.Fatalf("expected native doctor to pass without Docker: %#v", result.Checks)
+	}
+	assertCheck(t, result, Pass, "runtime")
+	assertCheck(t, result, Pass, "native runtime")
+}
+
+func TestDoctorRejectsBashThree(t *testing.T) {
+	root := testRoot(t, "POSTGRES_HOST=127.0.0.1\nPOSTGRES_DB=pg_experiment_workbench\n")
+	result := Run(root, Options{Runtime: "native"}, fakeDeps(t, root, map[string]string{
+		"bash --version": "GNU bash, version 3.2.57(1)-release",
+		"go version":     "go version go1.23 linux/amd64",
+	}))
+	if result.Valid() {
+		t.Fatalf("expected Bash 3 to fail the prerequisite gate")
+	}
+	assertCheck(t, result, Fail, "bash version")
+}
+
 func testRoot(t *testing.T, env string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "Makefile"), ".DEFAULT_GOAL := help\n")
 	writeFile(t, filepath.Join(root, "compose.yaml"), "services: {}\n")
 	writeFile(t, filepath.Join(root, ".env.example"), env)
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(root, "scripts", "runtime.sh"), "#!/usr/bin/env bash\n")
+	writeFile(t, filepath.Join(root, "scripts", "native_runtime.sh"), "#!/usr/bin/env bash\n")
 	return root
 }
 

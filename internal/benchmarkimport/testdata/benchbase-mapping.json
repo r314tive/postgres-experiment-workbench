@@ -1,0 +1,21 @@
+{
+  "schema_version": "pgworkbench.benchmark-import-mapping/v1",
+  "artifact_type": "pgworkbench.benchmark-import-mapping",
+  "driver": "benchbase",
+  "driver_version_pointer": "/metadata/driver_version",
+  "workload_pointer": "/metadata/workload",
+  "source_format": "benchbase-structured-result-json-explicit-mapping",
+  "primary_metric": {
+    "name": "requests_per_second",
+    "value_pointer": "/throughput/requests_per_second",
+    "unit": "requests/s",
+    "direction": "higher"
+  },
+  "errors": {
+    "total_pointer": "/errors/total",
+    "messages_pointer": "/errors/messages"
+  },
+  "timing": {
+    "elapsed_seconds_pointer": "/elapsed_seconds"
+  }
+}

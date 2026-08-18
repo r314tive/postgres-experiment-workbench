@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/operation-benchmark-spec.schema.json",
+  "title": "pgworkbench descriptive operation benchmark spec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "name", "description", "classification", "decision_eligible", "experiment_spec", "trials", "max_cv_pct", "supported_runtimes", "measurement", "assurance"],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.operation-benchmark-spec/v1"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,159}$"},
+    "name": {"type": "string", "minLength": 1},
+    "description": {"type": "string", "minLength": 1},
+    "classification": {"const": "descriptive-engineering"},
+    "decision_eligible": {"const": false},
+    "experiment_spec": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,159}$"},
+    "trials": {"type": "integer", "minimum": 2, "maximum": 100},
+    "max_cv_pct": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
+    "supported_runtimes": {"type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": {"enum": ["docker", "native"]}},
+    "measurement": {"$ref": "#/$defs/measurement"},
+    "assurance": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basis", "metric", "unit", "direction", "scope"],
+      "properties": {
+        "basis": {"enum": ["operation-result", "linked-run-wall-clock"]},
+        "result_path": {"type": "string", "pattern": "^artifacts/(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+        "metric": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._/-]{0,159}$"},
+        "unit": {"type": "string", "minLength": 1},
+        "direction": {"enum": ["lower-is-better", "higher-is-better"]},
+        "scope": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"basis": {"const": "operation-result"}}}, "then": {"required": ["result_path"]}, "else": {"not": {"required": ["result_path"]}}}
+      ]
+    }
+  }
+}

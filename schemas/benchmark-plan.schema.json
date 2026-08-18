@@ -1,0 +1,563 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-plan.schema.json",
+  "title": "pgworkbench benchmark protocol plan v1/v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_schema_version",
+    "spec",
+    "spec_path",
+    "spec_digest",
+    "name",
+    "class",
+    "driver",
+    "target",
+    "target_endpoint_contract",
+    "target_topology",
+    "target_topology_path",
+    "target_topology_digest",
+    "experiment_spec",
+    "experiment_path",
+    "experiment_digest",
+    "workload_spec",
+    "workload_path",
+    "workload_digest",
+    "workload_mode",
+    "pg_config",
+    "pg_config_path",
+    "pg_config_digest",
+    "mode",
+    "scale",
+    "clients",
+    "threads",
+    "warmup_seconds",
+    "trials",
+    "min_valid_trials",
+    "reset_policy",
+    "runtime_reset",
+	"cache_regime",
+	"statistics_reset_policy",
+	"statistics_reset_boundary",
+	"collectors",
+	"collector_interval_seconds",
+	"collector_overhead_mode",
+	"client_placement",
+	"resource_budget_mode",
+    "connect_per_transaction",
+    "primary_metric",
+    "direction",
+    "max_cv_pct",
+    "query_protocol",
+    "random_seed_semantics",
+    "log_transactions",
+    "log_sample_rate",
+    "allowed_subject_differences",
+    "protocol_digest",
+    "comparison_key_digest"
+  ],
+  "properties": {
+    "protocol_schema_version": {
+      "enum": ["pgworkbench.benchmark-protocol/v1", "pgworkbench.benchmark-protocol/v2"]
+    },
+    "contract_version": {
+      "const": "2"
+    },
+    "spec": {
+      "type": "string",
+      "minLength": 1
+    },
+    "spec_path": {
+      "$ref": "#/$defs/portablePath"
+    },
+    "spec_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "class": {
+      "enum": ["smoke", "measurement"]
+    },
+    "driver": {
+      "const": "pgbench"
+    },
+    "target": {
+      "enum": ["direct-postgres", "pgbouncer"]
+    },
+    "target_endpoint_contract": {
+      "enum": [
+        "pgworkbench.pgbench-target/direct-postgres/v1",
+        "pgworkbench.pgbench-target/pgbouncer/v1"
+      ]
+    },
+    "target_topology": {
+      "enum": ["single", "pgbouncer"]
+    },
+    "target_topology_path": {
+      "$ref": "#/$defs/portablePath"
+    },
+    "target_topology_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "experiment_spec": {
+      "type": "string",
+      "minLength": 1
+    },
+    "experiment_path": {
+      "$ref": "#/$defs/portablePath"
+    },
+    "experiment_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "workload_spec": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workload_path": {
+      "$ref": "#/$defs/portablePath"
+    },
+    "workload_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "workload_mode": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workload_script": {
+      "$ref": "#/$defs/portablePath"
+    },
+    "workload_script_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "pg_config": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pg_config_path": {
+      "$ref": "#/$defs/portablePath"
+    },
+    "pg_config_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "mode": {
+      "enum": ["fixed-time", "fixed-transactions"]
+    },
+    "scale": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "clients": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "threads": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "warmup_seconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "measure_seconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "transactions_per_client": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "trials": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "min_valid_trials": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "reset_policy": {
+      "enum": ["rebuild-per-trial", "reuse-readonly"]
+    },
+    "runtime_reset": {
+      "type": "boolean"
+    },
+	"cache_regime": {
+	  "enum": ["uncontrolled", "cold", "warm", "steady", "postgres-shared-buffer-warm"]
+	},
+	"cache_target_relations": {
+	  "type": "array",
+	  "minItems": 1,
+	  "uniqueItems": true,
+	  "items": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*\\.[A-Za-z_][A-Za-z0-9_]*$" }
+	},
+	"cache_min_resident_pct": {
+	  "type": "number",
+	  "exclusiveMinimum": 0,
+	  "maximum": 100
+	},
+	"statistics_reset_policy": {
+	  "enum": ["none", "operator-managed", "runner-managed"]
+	},
+	"statistics_reset_boundary": {
+	  "enum": ["none", "before-trial", "before-warmup", "before-measure"]
+	},
+	"collectors": {
+	  "type": "array",
+	  "minItems": 2,
+	  "maxItems": 2,
+	  "items": { "enum": ["pgbench-driver", "postgresql-sampler-v1", "postgresql-sampler-v2"] },
+	  "uniqueItems": true
+	},
+	"collector_interval_seconds": {
+	  "type": "integer",
+	  "minimum": 1
+	},
+	"collector_overhead_mode": {
+	  "enum": ["included-unquantified", "operator-calibrated", "runner-calibrated-duty-cycle"]
+	},
+	"collector_overhead_samples": {
+	  "type": "integer",
+	  "minimum": 1
+	},
+	"collector_max_duty_cycle_pct": {
+	  "type": "number",
+	  "exclusiveMinimum": 0,
+	  "maximum": 100
+	},
+	"client_placement": {
+	  "enum": ["same-host", "separate-host", "remote-host"]
+	},
+	"resource_budget_mode": {
+	  "enum": ["unbounded", "operator-declared", "runner-enforced"]
+	},
+	"cpu_budget_cores": {
+	  "type": "number",
+	  "exclusiveMinimum": 0
+	},
+	"cpu_budget_millicores": {
+	  "type": "integer",
+	  "minimum": 1
+	},
+	"memory_budget_mib": {
+	  "type": "integer",
+	  "minimum": 1
+	},
+	"resource_budget_scope": {
+	  "const": "postgres-server-and-pgbench-driver"
+	},
+	"resource_enforcement_provider": {
+	  "const": "docker-single-container-linux-cgroup-v2"
+	},
+	"resource_provider_constraints": {
+	  "type": "array",
+	  "minItems": 4,
+	  "maxItems": 4,
+	  "prefixItems": [
+		{ "const": "cgroup-v2-required" },
+		{ "const": "docker-engine-required" },
+		{ "const": "linux-only" },
+		{ "const": "postgres-and-driver-share-one-container" }
+	  ],
+	  "items": false
+	},
+    "connect_per_transaction": {
+      "type": "boolean"
+    },
+    "primary_metric": {
+      "enum": ["pgbench.tps", "pgbench.latency_mean_us"]
+    },
+    "direction": {
+      "enum": ["higher", "lower"]
+    },
+    "max_cv_pct": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "regression_threshold_pct": {
+      "type": "number",
+      "minimum": 0
+    },
+    "rate": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "latency_limit_ms": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "max_latency_limit_exceeded_pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "query_protocol": {
+      "enum": ["simple", "extended", "prepared"]
+    },
+    "random_seed": {
+      "type": "integer",
+		"minimum": 0,
+		"maximum": 9223372036854775807
+    },
+	"random_seed_semantics": {
+	  "enum": ["client-random-default", "phase-split-offset-v1"]
+	},
+	"warmup_random_seed": {
+	  "type": "integer",
+	  "minimum": 0,
+	  "maximum": 9223372036854775807
+	},
+	"measure_random_seed": {
+	  "type": "integer",
+	  "minimum": 0,
+	  "maximum": 9223372036854775807
+	},
+    "max_tries": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "log_transactions": {
+      "type": "boolean"
+    },
+    "log_sample_rate": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    },
+    "allowed_subject_differences": {
+      "type": "array",
+      "items": {
+        "enum": ["pg_config", "native_toolchain"]
+      },
+      "uniqueItems": true
+    },
+    "protocol_digest": {
+      "$ref": "#/$defs/digest"
+    },
+    "comparison_key_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "target": { "const": "direct-postgres" } },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": {
+          "target_endpoint_contract": { "const": "pgworkbench.pgbench-target/direct-postgres/v1" },
+          "target_topology": { "const": "single" },
+          "target_topology_path": { "const": "topologies/single.env" }
+        }
+      },
+      "else": {
+        "properties": {
+          "target_endpoint_contract": { "const": "pgworkbench.pgbench-target/pgbouncer/v1" },
+          "target_topology": { "const": "pgbouncer" },
+          "target_topology_path": { "const": "topologies/pgbouncer.env" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "protocol_schema_version": { "const": "pgworkbench.benchmark-protocol/v1" } } },
+      "then": {
+        "properties": {
+          "cache_regime": { "enum": ["uncontrolled", "cold", "warm", "steady"] },
+          "statistics_reset_policy": { "enum": ["none", "operator-managed"] },
+          "collectors": { "prefixItems": [{ "const": "pgbench-driver" }, { "const": "postgresql-sampler-v1" }], "items": false },
+          "collector_overhead_mode": { "enum": ["included-unquantified", "operator-calibrated"] },
+          "resource_budget_mode": { "enum": ["unbounded", "operator-declared"] }
+        },
+        "not": {
+          "anyOf": [
+            { "required": ["contract_version"] },
+            { "required": ["cache_target_relations"] },
+            { "required": ["cache_min_resident_pct"] },
+            { "required": ["collector_overhead_samples"] },
+            { "required": ["collector_max_duty_cycle_pct"] },
+            { "required": ["cpu_budget_millicores"] },
+            { "required": ["resource_budget_scope"] },
+            { "required": ["resource_enforcement_provider"] },
+            { "required": ["resource_provider_constraints"] }
+          ]
+        }
+      },
+      "else": {
+        "required": ["contract_version"],
+        "properties": {
+          "cache_regime": { "enum": ["uncontrolled", "postgres-shared-buffer-warm"] },
+          "statistics_reset_policy": { "enum": ["none", "runner-managed"] },
+          "collectors": { "prefixItems": [{ "const": "pgbench-driver" }, { "const": "postgresql-sampler-v2" }], "items": false },
+          "collector_interval_seconds": { "maximum": 3600 },
+          "collector_overhead_samples": { "maximum": 10000 },
+          "collector_overhead_mode": { "enum": ["included-unquantified", "runner-calibrated-duty-cycle"] },
+          "resource_budget_mode": { "enum": ["unbounded", "runner-enforced"] },
+          "cpu_budget_millicores": { "maximum": 9223372036854 },
+          "memory_budget_mib": { "maximum": 8796093022207 }
+        },
+        "not": { "required": ["cpu_budget_cores"] }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "fixed-time"
+          }
+        }
+      },
+      "then": {
+        "required": ["measure_seconds"],
+        "not": {
+          "required": ["transactions_per_client"]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "fixed-transactions"
+          }
+        }
+      },
+      "then": {
+        "required": ["transactions_per_client"],
+        "not": {
+          "required": ["measure_seconds"]
+        }
+      }
+	},
+	{
+	  "if": {
+		"properties": {
+		  "statistics_reset_policy": { "const": "none" }
+		}
+	  },
+	  "then": {
+		"properties": {
+		  "statistics_reset_boundary": { "const": "none" }
+		}
+	  },
+	  "else": {
+		"not": {
+		  "properties": {
+			"statistics_reset_boundary": { "const": "none" }
+		  },
+		  "required": ["statistics_reset_boundary"]
+		}
+	  }
+	},
+	{
+	  "if": {
+		"properties": {
+		  "resource_budget_mode": { "const": "unbounded" }
+		}
+	  },
+	  "then": {
+		"not": {
+		  "anyOf": [
+			{ "required": ["cpu_budget_cores"] },
+			{ "required": ["cpu_budget_millicores"] },
+			{ "required": ["memory_budget_mib"] },
+			{ "required": ["resource_budget_scope"] },
+			{ "required": ["resource_enforcement_provider"] },
+			{ "required": ["resource_provider_constraints"] }
+		  ]
+		}
+	  },
+	  "else": {
+		"if": { "properties": { "resource_budget_mode": { "const": "operator-declared" } } },
+		"then": {
+		  "required": ["cpu_budget_cores", "memory_budget_mib"],
+		  "not": { "anyOf": [{ "required": ["cpu_budget_millicores"] }, { "required": ["resource_budget_scope"] }, { "required": ["resource_enforcement_provider"] }, { "required": ["resource_provider_constraints"] }] }
+		},
+		"else": {
+		  "required": ["cpu_budget_millicores", "memory_budget_mib", "resource_budget_scope", "resource_enforcement_provider", "resource_provider_constraints"],
+		  "properties": { "client_placement": { "const": "same-host" } },
+		  "not": { "required": ["cpu_budget_cores"] }
+		}
+	  }
+	},
+	{
+	  "if": {
+		"properties": {
+		  "protocol_schema_version": { "const": "pgworkbench.benchmark-protocol/v2" },
+		  "cache_regime": { "const": "postgres-shared-buffer-warm" }
+		},
+		"required": ["protocol_schema_version", "cache_regime"]
+	  },
+	  "then": { "required": ["cache_target_relations", "cache_min_resident_pct"] },
+	  "else": {
+		"if": { "properties": { "protocol_schema_version": { "const": "pgworkbench.benchmark-protocol/v2" } }, "required": ["protocol_schema_version"] },
+		"then": { "not": { "anyOf": [{ "required": ["cache_target_relations"] }, { "required": ["cache_min_resident_pct"] }] } }
+	  }
+	},
+	{
+	  "if": {
+		"properties": {
+		  "protocol_schema_version": { "const": "pgworkbench.benchmark-protocol/v2" },
+		  "collector_overhead_mode": { "const": "runner-calibrated-duty-cycle" }
+		},
+		"required": ["protocol_schema_version", "collector_overhead_mode"]
+	  },
+	  "then": { "required": ["collector_overhead_samples", "collector_max_duty_cycle_pct"] },
+	  "else": {
+		"if": { "properties": { "protocol_schema_version": { "const": "pgworkbench.benchmark-protocol/v2" } }, "required": ["protocol_schema_version"] },
+		"then": { "not": { "anyOf": [{ "required": ["collector_overhead_samples"] }, { "required": ["collector_max_duty_cycle_pct"] }] } }
+	  }
+	},
+	{
+	  "if": {
+		"properties": {
+		  "random_seed_semantics": { "const": "phase-split-offset-v1" }
+		}
+	  },
+	  "then": {
+		"required": ["random_seed", "warmup_random_seed", "measure_random_seed"]
+	  },
+	  "else": {
+		"not": {
+		  "anyOf": [
+			{ "required": ["random_seed"] },
+			{ "required": ["warmup_random_seed"] },
+			{ "required": ["measure_random_seed"] }
+		  ]
+		}
+	  }
+	},
+	{
+	  "if": {
+		"properties": {
+		  "connect_per_transaction": { "const": true }
+		}
+	  },
+	  "then": {
+		"properties": {
+		  "primary_metric": { "const": "pgbench.latency_mean_us" },
+		  "direction": { "const": "lower" }
+		}
+	  }
+	},
+	{
+	  "if": {
+		"required": ["max_latency_limit_exceeded_pct"]
+	  },
+	  "then": {
+		"required": ["latency_limit_ms"]
+	  }
+    }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "portablePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$"
+    }
+  }
+}

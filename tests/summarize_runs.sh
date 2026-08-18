@@ -66,8 +66,12 @@ grep -q '| `passed` | `2` |' <<< "$OUT"
 grep -q '| `wal_bytes` | `2` | `150` | `200.000` | `250` | `50.000` |' <<< "$OUT"
 grep -q '| `active_sessions` | `2` | `3` | `3.500` | `4` | `0.500` |' <<< "$OUT"
 
-"$REPO_DIR/scripts/summarize_runs.sh" --output "$SERIES/statistics.md" "$SERIES" >/dev/null
-grep -q '# Run Series Summary' "$SERIES/statistics.md"
+"$REPO_DIR/scripts/summarize_runs.sh" --output "$BASE/statistics.md" "$SERIES" >/dev/null
+grep -q '# Run Series Summary' "$BASE/statistics.md"
+if "$REPO_DIR/scripts/summarize_runs.sh" --output "$SERIES/statistics.md" "$SERIES" >/dev/null 2>&1; then
+  echo 'FAIL: legacy summary writer mutated its immutable series input' >&2
+  exit 1
+fi
 
 GO_OUT="$(cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" go run ./cmd/pgworkbench report summary "$SERIES")"
 grep -q '# Run Series Summary' <<< "$GO_OUT"
@@ -76,7 +80,7 @@ grep -q '| `wal_bytes` | `2` | `150` | `200.000` | `250` | `50.000` |' <<< "$GO_
 grep -q '| `active_sessions` | `2` | `3` | `3.500` | `4` | `0.500` |' <<< "$GO_OUT"
 
 (cd "$REPO_DIR" && GOCACHE="$REPO_DIR/.tmp/go-cache" GOMODCACHE="$REPO_DIR/.tmp/go-mod-cache" \
-  go run ./cmd/pgworkbench report summary --output "$SERIES/statistics-go.md" "$SERIES") >/dev/null
-grep -q '# Run Series Summary' "$SERIES/statistics-go.md"
+  go run ./cmd/pgworkbench report summary --output "$BASE/statistics-go.md" "$SERIES") >/dev/null
+grep -q '# Run Series Summary' "$BASE/statistics-go.md"
 
 echo "PASS: run series summaries"

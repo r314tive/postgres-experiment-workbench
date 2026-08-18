@@ -69,13 +69,15 @@ go run ./cmd/pgworkbench run bundle runs/<run-id> generated/run.tar.gz
 go run ./cmd/pgworkbench run bundle --json runs/<run-id> generated/run.tar.gz
 go run ./cmd/pgworkbench run verify runs/<run-id>
 go run ./cmd/pgworkbench run verify --json runs/<run-id>
+go run ./cmd/pgworkbench run verify --bundle <extracted-run-dir>
+go run ./cmd/pgworkbench run verify --json --bundle <extracted-run-dir>
 go run ./cmd/pgworkbench run write-manifest --run-dir runs/<run-id>
 go run ./cmd/pgworkbench run write-verdict --run-dir runs/<run-id> --status passed --message 'experiment passed'
 go run ./cmd/pgworkbench spec reference all
 go run ./cmd/pgworkbench spec schema all
 go run ./cmd/pgworkbench spec validate
 make pgworkbench
-make release-snapshot
+make release-snapshot VERSION=0.2.0
 ```
 
 The shell scripts remain the compatibility layer for now. `make check` runs the
@@ -85,10 +87,12 @@ Run reporting, comparison, summary, and history now have Go equivalents through
 `pgworkbench report`. Env spec listing, display, and validation are covered by
 `pgworkbench spec`. When a Go command matches shell behavior and is covered by
 tests, Make targets can move to the Go implementation.
-Run manifest and verdict writing now uses Go by default. The explicit
-`EXPERIMENT_STATE_WRITER=shell` mode keeps the shell compatibility path
-available; `auto` remains a compatibility alias for Go.
-Run directory integrity checks are covered by `pgworkbench run verify`.
+Run manifest and verdict writing uses the versioned Go contract. `auto` remains
+a compatibility alias for Go; the former shell writer is rejected for v1
+artifacts because it cannot bind portable identity and evidence digests.
+Live run directory integrity checks are covered by `pgworkbench run verify`;
+extracted bundles require `pgworkbench run verify --bundle` so removal of the
+complete inventory cannot downgrade verification.
 Run artifact discovery and summaries are covered by `pgworkbench run list|show`.
 Run list supports status filtering and output limits for large local archives.
 Run artifact bundles are covered by `pgworkbench run bundle`.

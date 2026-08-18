@@ -1,0 +1,23 @@
+{
+  "schema_version": "pgworkbench.benchmark-import-mapping/v1",
+  "artifact_type": "pgworkbench.benchmark-import-mapping",
+  "driver": "hammerdb",
+  "driver_version_pointer": "/driver_version",
+  "workload_pointer": "/workload",
+  "source_format": "hammerdb6-saved-job-report-json",
+  "primary_metric": {
+    "name": "nopm",
+    "value_pointer": "/result/nopm",
+    "unit": "orders/min",
+    "direction": "higher"
+  },
+  "errors": {
+    "total_pointer": "/errors/total",
+    "messages_pointer": "/errors/messages"
+  },
+  "timing": {
+    "elapsed_seconds_pointer": "/runtime_seconds",
+    "started_at_pointer": "/job/started_at",
+    "finished_at_pointer": "/job/finished_at"
+  }
+}

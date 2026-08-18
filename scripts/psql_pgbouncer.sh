@@ -2,18 +2,21 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=exact_environment.sh
+source "$REPO_DIR/scripts/exact_environment.sh"
+pgworkbench_initialize_exact_environment
 
 PRESERVED_ENV_NAMES=()
 PRESERVED_ENV_VALUES=()
 
-for name in PGBOUNCER_HOST PGBOUNCER_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD ALLOW_NONLOCAL_PG ALLOW_SYSTEM_DB; do
+for name in POSTGRES_HOST POSTGRES_REPLICA_HOST POSTGRES_LOGICAL_SUBSCRIBER_HOST POSTGRES_UPGRADE_OLD_HOST POSTGRES_UPGRADE_NEW_HOST PGBOUNCER_HOST PGBOUNCER_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD ALLOW_NONLOCAL_PG ALLOW_SYSTEM_DB PGWORKBENCH_EXPERIMENT_MODE; do
   if [[ ${!name+x} ]]; then
     PRESERVED_ENV_NAMES+=("$name")
     PRESERVED_ENV_VALUES+=("${!name}")
   fi
 done
 
-if [[ -f "$REPO_DIR/.env" ]]; then
+if [[ -f "$REPO_DIR/.env" ]] && ! pgworkbench_exact_environment_active; then
   set -a
   # shellcheck disable=SC1091
   source "$REPO_DIR/.env"

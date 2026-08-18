@@ -1,0 +1,935 @@
+name: compatibility
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Optional draft or published tag to qualify from downloaded archives.
+        required: false
+        default: ''
+        type: string
+      qualification_mode:
+        description: Evidence label for a release_tag qualification.
+        required: false
+        default: published
+        type: choice
+        options:
+          - published
+          - draft
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Optional release tag to qualify from downloaded archives.
+        required: false
+        default: ''
+        type: string
+      qualification_mode:
+        description: Evidence label for a release_tag qualification (published or draft).
+        required: false
+        default: published
+        type: string
+      version:
+        description: Exact source candidate SemVer; defaults to the built-in pack version.
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  attestations: read
+
+env:
+  QUALIFICATION_MODE: ${{ inputs.release_tag == '' && 'source' || inputs.qualification_mode }}
+  RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+  SOURCE_CANDIDATE_VERSION: ${{ inputs.version }}
+
+jobs:
+  ledger:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Validate qualification mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$QUALIFICATION_MODE" in
+            source)
+              test -z "$RELEASE_TAG_INPUT"
+              if [[ -n "$SOURCE_CANDIDATE_VERSION" ]]; then
+                [[ "$SOURCE_CANDIDATE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+              fi
+              ;;
+            draft|published)
+              [[ "$RELEASE_TAG_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+              ;;
+            *) echo "unsupported qualification mode: $QUALIFICATION_MODE" >&2; exit 2 ;;
+          esac
+
+      - name: Checkout source candidate
+        if: inputs.release_tag == ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go for source candidate
+        if: inputs.release_tag == ''
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Build source candidate
+        if: inputs.release_tag == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$SOURCE_CANDIDATE_VERSION"
+          if [[ -z "$version" ]]; then
+            version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' pgworkbench-pack.json)"
+          fi
+          ./scripts/build_candidate_binary.sh "$version" "$GITHUB_SHA" "$GITHUB_WORKSPACE/.tmp/qualification/pgworkbench"
+          printf 'WORKBENCH_ROOT=%s\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BIN=%s\n' "$GITHUB_WORKSPACE/.tmp/qualification/pgworkbench" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_SHA=%s\n' "$GITHUB_SHA" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Download published Linux archive
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          archive="pgworkbench-${version}-linux-amd64.tar.gz"
+          checksum="pgworkbench-${version}-SHA256SUMS.txt"
+          release_json="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName)"
+          test "$(jq -r .tagName <<<"$release_json")" = "$RELEASE_TAG"
+          case "$QUALIFICATION_MODE" in
+            draft) expected_is_draft=true ;;
+            published) expected_is_draft=false ;;
+            *) echo "release-backed qualification has invalid mode: $QUALIFICATION_MODE" >&2; exit 2 ;;
+          esac
+          test "$(jq -r .isDraft <<<"$release_json")" = "$expected_is_draft"
+          mkdir -p release-download
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$archive" --pattern "$checksum" --dir release-download
+          expected="$(awk -v name="$archive" '$2 == name {print $1}' "release-download/$checksum")"
+          actual="$(sha256sum "release-download/$archive" | awk '{print $1}')"
+          test -n "$expected"
+          test "$actual" = "$expected"
+          candidate_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          gh attestation verify "release-download/$archive" -R "$GITHUB_REPOSITORY" \
+            --source-digest "$candidate_sha" --source-ref "refs/tags/$RELEASE_TAG"
+          tar -C release-download -xzf "release-download/$archive"
+          root="$GITHUB_WORKSPACE/release-download/pgworkbench-${version}-linux-amd64"
+          test -x "$root/pgworkbench"
+          printf 'WORKBENCH_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BIN=%s\n' "$root/pgworkbench" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_SHA=%s\n' "$candidate_sha" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Validate declared compatibility ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORKBENCH_ROOT"
+          binary_identity="$("$PGWORKBENCH_BIN" version)"
+          binary_version="$(sed -n 's/.* version=\([^ ]*\).*/\1/p' <<<"$binary_identity")"
+          binary_commit="$(sed -n 's/.* commit=\([^ ]*\).*/\1/p' <<<"$binary_identity")"
+          [[ "$binary_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          [[ "$binary_version" != *dev* ]]
+          test "$QUALIFIED_CANDIDATE_VERSION" = "$binary_version"
+          test "$QUALIFIED_CANDIDATE_SHA" = "$binary_commit"
+          "$PGWORKBENCH_BIN" compatibility validate
+          "$PGWORKBENCH_BIN" compatibility show > compatibility-ledger.md
+
+      - name: Upload compatibility ledger
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compatibility-ledger-${{ env.QUALIFICATION_MODE }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            compatibility-ledger.md
+            release-download/pgworkbench-*/compatibility-ledger.md
+          if-no-files-found: error
+          retention-days: 90
+
+  docker-pg16:
+    needs: ledger
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cell: docker-linux-amd64-pg16-single
+            topology: single
+            experiment: smoke
+            tuple: 'docker-linux-amd64-pg16-single|docker|single|linux|amd64|16|docker-integration'
+          - cell: docker-linux-amd64-pg16-primary-replica
+            topology: primary-replica
+            experiment: replica-readonly
+            tuple: 'docker-linux-amd64-pg16-primary-replica|docker|primary-replica|linux|amd64|16|docker-integration'
+          - cell: docker-linux-amd64-pg16-logical-replication
+            topology: logical-replication
+            experiment: logical-replication
+            tuple: 'docker-linux-amd64-pg16-logical-replication|docker|logical-replication|linux|amd64|16|docker-integration'
+          - cell: docker-linux-amd64-pg16-pgbouncer
+            topology: pgbouncer
+            experiment: pgbouncer-smoke
+            tuple: 'docker-linux-amd64-pg16-pgbouncer|docker|pgbouncer|linux|amd64|16|docker-integration'
+    env:
+      QUALIFICATION_CELL: ${{ matrix.cell }}
+      QUALIFICATION_TUPLE: ${{ matrix.tuple }}
+      TOPOLOGY: ${{ matrix.topology }}
+      EXPERIMENT_SPEC: ${{ matrix.experiment }}
+      RUN_ID: qualification-${{ matrix.cell }}-${{ inputs.release_tag == '' && 'source' || inputs.qualification_mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+      PGBOUNCER_IMAGE: edoburu/pgbouncer:v1.25.1-p0
+
+    steps:
+      - name: Checkout source candidate
+        if: inputs.release_tag == ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go for source candidate
+        if: inputs.release_tag == ''
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Build source candidate
+        if: inputs.release_tag == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$SOURCE_CANDIDATE_VERSION"
+          if [[ -z "$version" ]]; then
+            version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' pgworkbench-pack.json)"
+          fi
+          ./scripts/build_candidate_binary.sh "$version" "$GITHUB_SHA" "$GITHUB_WORKSPACE/.tmp/qualification/pgworkbench"
+          printf 'WORKBENCH_ROOT=%s\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BIN=%s\n' "$GITHUB_WORKSPACE/.tmp/qualification/pgworkbench" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_SHA=%s\n' "$GITHUB_SHA" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Download published Linux archive
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          archive="pgworkbench-${version}-linux-amd64.tar.gz"
+          checksum="pgworkbench-${version}-SHA256SUMS.txt"
+          release_json="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName)"
+          test "$(jq -r .tagName <<<"$release_json")" = "$RELEASE_TAG"
+          case "$QUALIFICATION_MODE" in
+            draft) expected_is_draft=true ;;
+            published) expected_is_draft=false ;;
+            *) echo "release-backed qualification has invalid mode: $QUALIFICATION_MODE" >&2; exit 2 ;;
+          esac
+          test "$(jq -r .isDraft <<<"$release_json")" = "$expected_is_draft"
+          mkdir -p release-download
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$archive" --pattern "$checksum" --dir release-download
+          expected="$(awk -v name="$archive" '$2 == name {print $1}' "release-download/$checksum")"
+          actual="$(sha256sum "release-download/$archive" | awk '{print $1}')"
+          test -n "$expected"
+          test "$actual" = "$expected"
+          candidate_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          gh attestation verify "release-download/$archive" -R "$GITHUB_REPOSITORY" \
+            --source-digest "$candidate_sha" --source-ref "refs/tags/$RELEASE_TAG"
+          tar -C release-download -xzf "release-download/$archive"
+          root="$GITHUB_WORKSPACE/release-download/pgworkbench-${version}-linux-amd64"
+          test -x "$root/pgworkbench"
+          printf 'WORKBENCH_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BIN=%s\n' "$root/pgworkbench" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_SHA=%s\n' "$candidate_sha" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Assert runner and candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          expected_tuple="$QUALIFICATION_CELL|docker|$TOPOLOGY|linux|amd64|16|docker-integration"
+          test "$QUALIFICATION_TUPLE" = "$expected_tuple"
+          case "$(docker info --format '{{.Architecture}}')" in
+            amd64|x86_64) ;;
+            *) echo 'Docker daemon is not amd64' >&2; exit 1 ;;
+          esac
+          cd "$WORKBENCH_ROOT"
+          evidence_dir="qualification/$QUALIFICATION_CELL"
+          mkdir -p "$evidence_dir"
+          {
+            printf 'cell=%s\n' "$QUALIFICATION_CELL"
+            printf 'mode=%s\n' "$QUALIFICATION_MODE"
+            printf 'candidate_sha=%s\n' "$QUALIFIED_CANDIDATE_SHA"
+            printf 'runtime=docker\n'
+            printf 'topology=%s\n' "$TOPOLOGY"
+            printf 'os=linux\n'
+            printf 'arch=amd64\n'
+            printf 'postgres=16\n'
+            printf 'gate=docker-integration\n'
+            printf 'tuple=%s\n' "$QUALIFICATION_TUPLE"
+            printf 'runner=%s %s\n' "$(uname -s)" "$(uname -m)"
+            printf 'docker_arch=%s\n' "$(docker info --format '{{.Architecture}}')"
+          } > "$evidence_dir/identity.env"
+          "$PGWORKBENCH_BIN" version > "$evidence_dir/version.txt"
+          binary_version="$(sed -n 's/.* version=\([^ ]*\).*/\1/p' "$evidence_dir/version.txt")"
+          binary_commit="$(sed -n 's/.* commit=\([^ ]*\).*/\1/p' "$evidence_dir/version.txt")"
+          [[ "$binary_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          [[ "$binary_version" != *dev* ]]
+          test "$QUALIFIED_CANDIDATE_VERSION" = "$binary_version"
+          test "$QUALIFIED_CANDIDATE_SHA" = "$binary_commit"
+          "$PGWORKBENCH_BIN" pack inspect --json > "$evidence_dir/pack.json"
+
+      - name: Assign isolated runtime ports
+        shell: bash
+        run: cd "$WORKBENCH_ROOT" && ./scripts/assign_test_ports.sh >> "$GITHUB_ENV"
+
+      - name: Run exact topology experiment
+        env:
+          EXPERIMENT_RUNTIME_RESET: '1'
+          EXPERIMENT_METRICS: '0'
+          EXPERIMENT_SNAPSHOT: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORKBENCH_ROOT"
+          "$PGWORKBENCH_BIN" experiment run --runtime docker --run-id "$RUN_ID" "$EXPERIMENT_SPEC"
+          "$PGWORKBENCH_BIN" run verify "runs/$RUN_ID"
+          ./scripts/assert_run_candidate_identity.sh "runs/$RUN_ID/manifest.env" \
+            "$QUALIFIED_CANDIDATE_VERSION" "$QUALIFIED_CANDIDATE_SHA"
+
+      - name: Assert exact PostgreSQL 16 nodes and images
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORKBENCH_ROOT"
+          evidence_dir="qualification/$QUALIFICATION_CELL"
+
+          assert_pg16() {
+            local label="$1"
+            shift
+            local version_num
+            version_num="$("$@" -Atq -c 'SHOW server_version_num')"
+            [[ "$version_num" =~ ^[0-9]+$ ]]
+            (( version_num >= 160000 && version_num < 170000 ))
+            printf '%s\t%s\n' "$label" "$version_num" >> "$evidence_dir/postgres-versions.tsv"
+          }
+
+          assert_image() {
+            local profile="$1" service="$2" expected="$3"
+            local cid actual image_id repo_digests
+            if [[ -n "$profile" ]]; then
+              cid="$(docker compose --env-file .env.example --profile "$profile" ps -q "$service")"
+            else
+              cid="$(docker compose --env-file .env.example ps -q "$service")"
+            fi
+            test -n "$cid"
+            actual="$(docker inspect --format '{{.Config.Image}}' "$cid")"
+            test "$actual" = "$expected"
+            image_id="$(docker inspect --format '{{.Image}}' "$cid")"
+            repo_digests="$(docker image inspect --format '{{json .RepoDigests}}' "$image_id")"
+            test "$repo_digests" != null
+            test "$repo_digests" != '[]'
+            printf '%s\t%s\t%s\t%s\n' "$service" "$actual" "$image_id" "$repo_digests" >> "$evidence_dir/images.tsv"
+          }
+
+          assert_pg16 primary ./scripts/psql.sh
+          assert_image '' postgres postgres:16-alpine
+          case "$TOPOLOGY" in
+            single)
+              ;;
+            primary-replica)
+              assert_pg16 replica ./scripts/psql_replica.sh
+              assert_image replica replica postgres:16-alpine
+              ;;
+            logical-replication)
+              assert_pg16 logical-subscriber ./scripts/psql_logical_subscriber.sh
+              assert_image logical logical-subscriber postgres:16-alpine
+              ;;
+            pgbouncer)
+              assert_pg16 pgbouncer ./scripts/psql_pgbouncer.sh
+              assert_image pgbouncer pgbouncer edoburu/pgbouncer:v1.25.1-p0
+              ;;
+            *)
+              echo "unexpected topology: $TOPOLOGY" >&2
+              exit 1
+              ;;
+          esac
+
+          grep -q '^runtime="docker"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^runtime_os="linux"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^runtime_arch="amd64"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^postgres_server_major="16"$' "runs/$RUN_ID/manifest.env"
+          grep -q "^experiment_topology=\"$TOPOLOGY\"$" "runs/$RUN_ID/manifest.env"
+
+      - name: Capture Docker diagnostics
+        if: always()
+        shell: bash
+        run: |
+          cd "$WORKBENCH_ROOT" || exit 0
+          evidence_dir="qualification/$QUALIFICATION_CELL"
+          mkdir -p "$evidence_dir"
+          docker compose --env-file .env.example --profile replica --profile logical --profile pgbouncer ps -a \
+            > "$evidence_dir/compose-ps.txt" 2>&1 || true
+
+      - name: Stop qualification topology
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: cd "$WORKBENCH_ROOT" && PGWORKBENCH_RUNTIME=docker ./scripts/runtime.sh down "$TOPOLOGY"
+
+      - name: Upload exact-cell evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compatibility-${{ env.QUALIFICATION_MODE }}-${{ matrix.cell }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            qualification/${{ matrix.cell }}/
+            runs/${{ env.RUN_ID }}/
+            release-download/pgworkbench-*/qualification/${{ matrix.cell }}/
+            release-download/pgworkbench-*/runs/${{ env.RUN_ID }}/
+          if-no-files-found: error
+          retention-days: 90
+
+  docker-pg15-to-pg16:
+    needs: ledger
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      QUALIFICATION_CELL: docker-linux-amd64-pg15-to-pg16-multi-version-upgrade
+      QUALIFICATION_TUPLE: 'docker-linux-amd64-pg15-to-pg16-multi-version-upgrade|docker|multi-version-upgrade|linux|amd64|15->16|docker-integration'
+      TOPOLOGY: multi-version-upgrade
+      EXPERIMENT_SPEC: multi-version-upgrade-smoke
+      RUN_ID: qualification-docker-linux-amd64-pg15-to-pg16-${{ inputs.release_tag == '' && 'source' || inputs.qualification_mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+      POSTGRES_UPGRADE_OLD_IMAGE: postgres:15-alpine
+      POSTGRES_UPGRADE_NEW_IMAGE: postgres:16-alpine
+
+    steps:
+      - name: Checkout source candidate
+        if: inputs.release_tag == ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go for source candidate
+        if: inputs.release_tag == ''
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Build source candidate
+        if: inputs.release_tag == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$SOURCE_CANDIDATE_VERSION"
+          if [[ -z "$version" ]]; then
+            version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' pgworkbench-pack.json)"
+          fi
+          ./scripts/build_candidate_binary.sh "$version" "$GITHUB_SHA" "$GITHUB_WORKSPACE/.tmp/qualification/pgworkbench"
+          printf 'WORKBENCH_ROOT=%s\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BIN=%s\n' "$GITHUB_WORKSPACE/.tmp/qualification/pgworkbench" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_SHA=%s\n' "$GITHUB_SHA" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Download published Linux archive
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          archive="pgworkbench-${version}-linux-amd64.tar.gz"
+          checksum="pgworkbench-${version}-SHA256SUMS.txt"
+          release_json="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName)"
+          test "$(jq -r .tagName <<<"$release_json")" = "$RELEASE_TAG"
+          case "$QUALIFICATION_MODE" in
+            draft) expected_is_draft=true ;;
+            published) expected_is_draft=false ;;
+            *) echo "release-backed qualification has invalid mode: $QUALIFICATION_MODE" >&2; exit 2 ;;
+          esac
+          test "$(jq -r .isDraft <<<"$release_json")" = "$expected_is_draft"
+          mkdir -p release-download
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$archive" --pattern "$checksum" --dir release-download
+          expected="$(awk -v name="$archive" '$2 == name {print $1}' "release-download/$checksum")"
+          actual="$(sha256sum "release-download/$archive" | awk '{print $1}')"
+          test -n "$expected"
+          test "$actual" = "$expected"
+          candidate_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          gh attestation verify "release-download/$archive" -R "$GITHUB_REPOSITORY" \
+            --source-digest "$candidate_sha" --source-ref "refs/tags/$RELEASE_TAG"
+          tar -C release-download -xzf "release-download/$archive"
+          root="$GITHUB_WORKSPACE/release-download/pgworkbench-${version}-linux-amd64"
+          test -x "$root/pgworkbench"
+          printf 'WORKBENCH_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BIN=%s\n' "$root/pgworkbench" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_SHA=%s\n' "$candidate_sha" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Assert runner and candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          test "$QUALIFICATION_TUPLE" = "$QUALIFICATION_CELL|docker|multi-version-upgrade|linux|amd64|15->16|docker-integration"
+          case "$(docker info --format '{{.Architecture}}')" in amd64|x86_64) ;; *) exit 1 ;; esac
+          cd "$WORKBENCH_ROOT"
+          evidence_dir="qualification/$QUALIFICATION_CELL"
+          mkdir -p "$evidence_dir"
+          {
+            printf 'cell=%s\n' "$QUALIFICATION_CELL"
+            printf 'mode=%s\n' "$QUALIFICATION_MODE"
+            printf 'candidate_sha=%s\n' "$QUALIFIED_CANDIDATE_SHA"
+            printf 'runtime=docker\n'
+            printf 'topology=multi-version-upgrade\n'
+            printf 'os=linux\n'
+            printf 'arch=amd64\n'
+            printf 'postgres=15->16\n'
+            printf 'gate=docker-integration\n'
+            printf 'tuple=%s\n' "$QUALIFICATION_TUPLE"
+          } > "$evidence_dir/identity.env"
+          "$PGWORKBENCH_BIN" version > "$evidence_dir/version.txt"
+          binary_version="$(sed -n 's/.* version=\([^ ]*\).*/\1/p' "$evidence_dir/version.txt")"
+          binary_commit="$(sed -n 's/.* commit=\([^ ]*\).*/\1/p' "$evidence_dir/version.txt")"
+          [[ "$binary_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          [[ "$binary_version" != *dev* ]]
+          test "$QUALIFIED_CANDIDATE_VERSION" = "$binary_version"
+          test "$QUALIFIED_CANDIDATE_SHA" = "$binary_commit"
+          "$PGWORKBENCH_BIN" pack inspect --json > "$evidence_dir/pack.json"
+
+      - name: Assign isolated runtime ports
+        shell: bash
+        run: cd "$WORKBENCH_ROOT" && ./scripts/assign_test_ports.sh >> "$GITHUB_ENV"
+
+      - name: Run exact PG15 to PG16 experiment
+        env:
+          EXPERIMENT_RUNTIME_RESET: '1'
+          EXPERIMENT_METRICS: '0'
+          EXPERIMENT_SNAPSHOT: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORKBENCH_ROOT"
+          "$PGWORKBENCH_BIN" experiment run --runtime docker --run-id "$RUN_ID" "$EXPERIMENT_SPEC"
+          "$PGWORKBENCH_BIN" run verify "runs/$RUN_ID"
+          ./scripts/assert_run_candidate_identity.sh "runs/$RUN_ID/manifest.env" \
+            "$QUALIFIED_CANDIDATE_VERSION" "$QUALIFIED_CANDIDATE_SHA"
+
+      - name: Assert exact PG15 and PG16 nodes and images
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORKBENCH_ROOT"
+          evidence_dir="qualification/$QUALIFICATION_CELL"
+          old_num="$(./scripts/psql_upgrade_old.sh -Atq -c 'SHOW server_version_num')"
+          new_num="$(./scripts/psql_upgrade_new.sh -Atq -c 'SHOW server_version_num')"
+          [[ "$old_num" =~ ^[0-9]+$ && "$new_num" =~ ^[0-9]+$ ]]
+          (( old_num >= 150000 && old_num < 160000 ))
+          (( new_num >= 160000 && new_num < 170000 ))
+          printf 'upgrade-old\t%s\nupgrade-new\t%s\n' "$old_num" "$new_num" > "$evidence_dir/postgres-versions.tsv"
+
+          for tuple in 'upgrade:postgres-old:postgres:15-alpine' 'upgrade:postgres-new:postgres:16-alpine'; do
+            IFS=: read -r profile service image_repo image_tag <<< "$tuple"
+            expected="$image_repo:$image_tag"
+            cid="$(docker compose --env-file .env.example --profile "$profile" ps -q "$service")"
+            test -n "$cid"
+            actual="$(docker inspect --format '{{.Config.Image}}' "$cid")"
+            test "$actual" = "$expected"
+            image_id="$(docker inspect --format '{{.Image}}' "$cid")"
+            repo_digests="$(docker image inspect --format '{{json .RepoDigests}}' "$image_id")"
+            test "$repo_digests" != null
+            test "$repo_digests" != '[]'
+            printf '%s\t%s\t%s\t%s\n' "$service" "$actual" "$image_id" "$repo_digests" >> "$evidence_dir/images.tsv"
+          done
+
+          grep -q '^runtime="docker"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^runtime_os="linux"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^runtime_arch="amd64"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^runtime_fingerprint_target="upgrade-new"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^postgres_server_major="16"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^experiment_topology="multi-version-upgrade"$' "runs/$RUN_ID/manifest.env"
+
+      - name: Capture Docker diagnostics
+        if: always()
+        shell: bash
+        run: |
+          cd "$WORKBENCH_ROOT" || exit 0
+          evidence_dir="qualification/$QUALIFICATION_CELL"
+          mkdir -p "$evidence_dir"
+          docker compose --env-file .env.example --profile upgrade ps -a > "$evidence_dir/compose-ps.txt" 2>&1 || true
+
+      - name: Stop qualification topology
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: cd "$WORKBENCH_ROOT" && PGWORKBENCH_RUNTIME=docker ./scripts/runtime.sh down "$TOPOLOGY"
+
+      - name: Upload exact-cell evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compatibility-${{ env.QUALIFICATION_MODE }}-docker-linux-amd64-pg15-to-pg16-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            qualification/${{ env.QUALIFICATION_CELL }}/
+            runs/${{ env.RUN_ID }}/
+            release-download/pgworkbench-*/qualification/${{ env.QUALIFICATION_CELL }}/
+            release-download/pgworkbench-*/runs/${{ env.RUN_ID }}/
+          if-no-files-found: error
+          retention-days: 90
+
+  native-linux-pg16:
+    needs: ledger
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      QUALIFICATION_CELL: native-linux-amd64-pg16-single
+      QUALIFICATION_TUPLE: 'native-linux-amd64-pg16-single|native|single|linux|amd64|16|native-integration'
+      RUN_ID: qualification-native-linux-amd64-pg16-single-${{ inputs.release_tag == '' && 'source' || inputs.qualification_mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Checkout source candidate
+        if: inputs.release_tag == ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go for source candidate
+        if: inputs.release_tag == ''
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Build source candidate
+        if: inputs.release_tag == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$SOURCE_CANDIDATE_VERSION"
+          if [[ -z "$version" ]]; then
+            version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' pgworkbench-pack.json)"
+          fi
+          ./scripts/build_candidate_binary.sh "$version" "$GITHUB_SHA" "$GITHUB_WORKSPACE/.tmp/qualification/pgworkbench"
+          printf 'WORKBENCH_ROOT=%s\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BIN=%s\n' "$GITHUB_WORKSPACE/.tmp/qualification/pgworkbench" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_SHA=%s\n' "$GITHUB_SHA" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Download published Linux archive
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          archive="pgworkbench-${version}-linux-amd64.tar.gz"
+          checksum="pgworkbench-${version}-SHA256SUMS.txt"
+          release_json="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName)"
+          test "$(jq -r .tagName <<<"$release_json")" = "$RELEASE_TAG"
+          case "$QUALIFICATION_MODE" in
+            draft) expected_is_draft=true ;;
+            published) expected_is_draft=false ;;
+            *) echo "release-backed qualification has invalid mode: $QUALIFICATION_MODE" >&2; exit 2 ;;
+          esac
+          test "$(jq -r .isDraft <<<"$release_json")" = "$expected_is_draft"
+          mkdir -p release-download
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$archive" --pattern "$checksum" --dir release-download
+          expected="$(awk -v name="$archive" '$2 == name {print $1}' "release-download/$checksum")"
+          actual="$(sha256sum "release-download/$archive" | awk '{print $1}')"
+          test -n "$expected"
+          test "$actual" = "$expected"
+          candidate_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          gh attestation verify "release-download/$archive" -R "$GITHUB_REPOSITORY" \
+            --source-digest "$candidate_sha" --source-ref "refs/tags/$RELEASE_TAG"
+          tar -C release-download -xzf "release-download/$archive"
+          root="$GITHUB_WORKSPACE/release-download/pgworkbench-${version}-linux-amd64"
+          test -x "$root/pgworkbench"
+          printf 'WORKBENCH_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BIN=%s\n' "$root/pgworkbench" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_SHA=%s\n' "$candidate_sha" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Install exact native PostgreSQL 16 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16
+          bindir=/usr/lib/postgresql/16/bin
+          "$bindir/postgres" --version | grep -Eq 'PostgreSQL\) 16([.[:space:]]|$)'
+          printf 'PGWORKBENCH_NATIVE_BINDIR=%s\n' "$bindir" >> "$GITHUB_ENV"
+
+      - name: Assert runner and candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Linux
+          test "$(uname -m)" = x86_64
+          test "$QUALIFICATION_TUPLE" = "$QUALIFICATION_CELL|native|single|linux|amd64|16|native-integration"
+          cd "$WORKBENCH_ROOT"
+          evidence_dir="qualification/$QUALIFICATION_CELL"
+          mkdir -p "$evidence_dir"
+          {
+            printf 'cell=%s\n' "$QUALIFICATION_CELL"
+            printf 'mode=%s\n' "$QUALIFICATION_MODE"
+            printf 'candidate_sha=%s\n' "$QUALIFIED_CANDIDATE_SHA"
+            printf 'runtime=native\n'
+            printf 'topology=single\n'
+            printf 'os=linux\n'
+            printf 'arch=amd64\n'
+            printf 'postgres=16\n'
+            printf 'gate=native-integration\n'
+            printf 'tuple=%s\n' "$QUALIFICATION_TUPLE"
+            printf 'postgres_binary=%s\n' "$("$PGWORKBENCH_NATIVE_BINDIR/postgres" --version)"
+          } > "$evidence_dir/identity.env"
+          "$PGWORKBENCH_BIN" version > "$evidence_dir/version.txt"
+          binary_version="$(sed -n 's/.* version=\([^ ]*\).*/\1/p' "$evidence_dir/version.txt")"
+          binary_commit="$(sed -n 's/.* commit=\([^ ]*\).*/\1/p' "$evidence_dir/version.txt")"
+          [[ "$binary_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          [[ "$binary_version" != *dev* ]]
+          test "$QUALIFIED_CANDIDATE_VERSION" = "$binary_version"
+          test "$QUALIFIED_CANDIDATE_SHA" = "$binary_commit"
+          "$PGWORKBENCH_BIN" pack inspect --json > "$evidence_dir/pack.json"
+
+      - name: Run source native integration suite
+        if: inputs.release_tag == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORKBENCH_ROOT"
+          make native-test PGWORKBENCH_CLI="$PGWORKBENCH_BIN"
+          while IFS= read -r -d '' manifest; do
+            ./scripts/assert_run_candidate_identity.sh \
+              "$manifest" "$QUALIFIED_CANDIDATE_VERSION" "$QUALIFIED_CANDIDATE_SHA"
+          done < <(find runs -type f -name manifest.env -print0)
+
+      - name: Assign isolated runtime ports
+        shell: bash
+        run: cd "$WORKBENCH_ROOT" && ./scripts/assign_test_ports.sh >> "$GITHUB_ENV"
+
+      - name: Run exact native smoke from candidate binary
+        env:
+          EXPERIMENT_RUNTIME_RESET: '1'
+          EXPERIMENT_METRICS: '0'
+          EXPERIMENT_SNAPSHOT: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORKBENCH_ROOT"
+          "$PGWORKBENCH_BIN" doctor --runtime native
+          "$PGWORKBENCH_BIN" experiment run --runtime native --run-id "$RUN_ID" smoke
+          "$PGWORKBENCH_BIN" run verify "runs/$RUN_ID"
+          ./scripts/assert_run_candidate_identity.sh "runs/$RUN_ID/manifest.env" \
+            "$QUALIFIED_CANDIDATE_VERSION" "$QUALIFIED_CANDIDATE_SHA"
+          grep -q '^runtime="native"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^runtime_os="linux"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^runtime_arch="amd64"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^postgres_server_major="16"$' "runs/$RUN_ID/manifest.env"
+
+      - name: Stop native runtime
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: cd "$WORKBENCH_ROOT" && PGWORKBENCH_RUNTIME=native ./scripts/runtime.sh down single
+
+      - name: Upload exact-cell evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compatibility-${{ env.QUALIFICATION_MODE }}-native-linux-amd64-pg16-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            qualification/${{ env.QUALIFICATION_CELL }}/
+            runs/${{ env.RUN_ID }}/
+            runs/native-*/
+            release-download/pgworkbench-*/qualification/${{ env.QUALIFICATION_CELL }}/
+            release-download/pgworkbench-*/runs/${{ env.RUN_ID }}/
+          if-no-files-found: error
+          retention-days: 90
+
+  native-darwin-arm64-pg16:
+    needs: ledger
+    runs-on: macos-15
+    timeout-minutes: 40
+    env:
+      QUALIFICATION_CELL: native-darwin-arm64-pg16-single
+      QUALIFICATION_TUPLE: 'native-darwin-arm64-pg16-single|native|single|darwin|arm64|16|native-integration'
+      RUN_ID: qualification-native-darwin-arm64-pg16-single-${{ inputs.release_tag == '' && 'source' || inputs.qualification_mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+
+    steps:
+      - name: Checkout source candidate
+        if: inputs.release_tag == ''
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Go for source candidate
+        if: inputs.release_tag == ''
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+
+      - name: Build source candidate
+        if: inputs.release_tag == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$SOURCE_CANDIDATE_VERSION"
+          if [[ -z "$version" ]]; then
+            version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' pgworkbench-pack.json)"
+          fi
+          ./scripts/build_candidate_binary.sh "$version" "$GITHUB_SHA" "$GITHUB_WORKSPACE/.tmp/qualification/pgworkbench"
+          printf 'WORKBENCH_ROOT=%s\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BIN=%s\n' "$GITHUB_WORKSPACE/.tmp/qualification/pgworkbench" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_SHA=%s\n' "$GITHUB_SHA" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Download published Darwin arm64 archive
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          archive="pgworkbench-${version}-darwin-arm64.tar.gz"
+          checksum="pgworkbench-${version}-SHA256SUMS.txt"
+          release_json="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName)"
+          test "$(jq -r .tagName <<<"$release_json")" = "$RELEASE_TAG"
+          case "$QUALIFICATION_MODE" in
+            draft) expected_is_draft=true ;;
+            published) expected_is_draft=false ;;
+            *) echo "release-backed qualification has invalid mode: $QUALIFICATION_MODE" >&2; exit 2 ;;
+          esac
+          test "$(jq -r .isDraft <<<"$release_json")" = "$expected_is_draft"
+          mkdir -p release-download
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern "$archive" --pattern "$checksum" --dir release-download
+          expected="$(awk -v name="$archive" '$2 == name {print $1}' "release-download/$checksum")"
+          actual="$(shasum -a 256 "release-download/$archive" | awk '{print $1}')"
+          test -n "$expected"
+          test "$actual" = "$expected"
+          candidate_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          gh attestation verify "release-download/$archive" -R "$GITHUB_REPOSITORY" \
+            --source-digest "$candidate_sha" --source-ref "refs/tags/$RELEASE_TAG"
+          tar -C release-download -xzf "release-download/$archive"
+          root="$GITHUB_WORKSPACE/release-download/pgworkbench-${version}-darwin-arm64"
+          test -x "$root/pgworkbench"
+          printf 'WORKBENCH_ROOT=%s\n' "$root" >> "$GITHUB_ENV"
+          printf 'PGWORKBENCH_BIN=%s\n' "$root/pgworkbench" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_SHA=%s\n' "$candidate_sha" >> "$GITHUB_ENV"
+          printf 'QUALIFIED_CANDIDATE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+
+      - name: Install Bash and exact native PostgreSQL 16 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install bash postgresql@16
+          bash_prefix="$(brew --prefix bash)"
+          bindir="$(brew --prefix postgresql@16)/bin"
+          "$bindir/postgres" --version | grep -Eq 'PostgreSQL\) 16([.[:space:]]|$)'
+          printf '%s/bin\n' "$bash_prefix" >> "$GITHUB_PATH"
+          printf 'PGWORKBENCH_NATIVE_BINDIR=%s\n' "$bindir" >> "$GITHUB_ENV"
+
+      - name: Assert runner and candidate identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          test "$QUALIFICATION_TUPLE" = "$QUALIFICATION_CELL|native|single|darwin|arm64|16|native-integration"
+          cd "$WORKBENCH_ROOT"
+          evidence_dir="qualification/$QUALIFICATION_CELL"
+          mkdir -p "$evidence_dir"
+          {
+            printf 'cell=%s\n' "$QUALIFICATION_CELL"
+            printf 'mode=%s\n' "$QUALIFICATION_MODE"
+            printf 'candidate_sha=%s\n' "$QUALIFIED_CANDIDATE_SHA"
+            printf 'runtime=native\n'
+            printf 'topology=single\n'
+            printf 'os=darwin\n'
+            printf 'arch=arm64\n'
+            printf 'postgres=16\n'
+            printf 'gate=native-integration\n'
+            printf 'tuple=%s\n' "$QUALIFICATION_TUPLE"
+            printf 'postgres_binary=%s\n' "$("$PGWORKBENCH_NATIVE_BINDIR/postgres" --version)"
+          } > "$evidence_dir/identity.env"
+          "$PGWORKBENCH_BIN" version > "$evidence_dir/version.txt"
+          binary_version="$(sed -n 's/.* version=\([^ ]*\).*/\1/p' "$evidence_dir/version.txt")"
+          binary_commit="$(sed -n 's/.* commit=\([^ ]*\).*/\1/p' "$evidence_dir/version.txt")"
+          [[ "$binary_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+          [[ "$binary_version" != *dev* ]]
+          test "$QUALIFIED_CANDIDATE_VERSION" = "$binary_version"
+          test "$QUALIFIED_CANDIDATE_SHA" = "$binary_commit"
+          "$PGWORKBENCH_BIN" pack inspect --json > "$evidence_dir/pack.json"
+
+      - name: Run source native integration suite
+        if: inputs.release_tag == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORKBENCH_ROOT"
+          make native-test PGWORKBENCH_CLI="$PGWORKBENCH_BIN"
+          while IFS= read -r -d '' manifest; do
+            ./scripts/assert_run_candidate_identity.sh \
+              "$manifest" "$QUALIFIED_CANDIDATE_VERSION" "$QUALIFIED_CANDIDATE_SHA"
+          done < <(find runs -type f -name manifest.env -print0)
+
+      - name: Assign isolated runtime ports
+        shell: bash
+        run: cd "$WORKBENCH_ROOT" && ./scripts/assign_test_ports.sh >> "$GITHUB_ENV"
+
+      - name: Run exact native smoke from candidate binary
+        env:
+          EXPERIMENT_RUNTIME_RESET: '1'
+          EXPERIMENT_METRICS: '0'
+          EXPERIMENT_SNAPSHOT: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORKBENCH_ROOT"
+          "$PGWORKBENCH_BIN" doctor --runtime native
+          "$PGWORKBENCH_BIN" experiment run --runtime native --run-id "$RUN_ID" smoke
+          "$PGWORKBENCH_BIN" run verify "runs/$RUN_ID"
+          ./scripts/assert_run_candidate_identity.sh "runs/$RUN_ID/manifest.env" \
+            "$QUALIFIED_CANDIDATE_VERSION" "$QUALIFIED_CANDIDATE_SHA"
+          grep -q '^runtime="native"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^runtime_os="darwin"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^runtime_arch="arm64"$' "runs/$RUN_ID/manifest.env"
+          grep -q '^postgres_server_major="16"$' "runs/$RUN_ID/manifest.env"
+
+      - name: Stop native runtime
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: cd "$WORKBENCH_ROOT" && PGWORKBENCH_RUNTIME=native ./scripts/runtime.sh down single
+
+      - name: Upload exact-cell evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compatibility-${{ env.QUALIFICATION_MODE }}-native-darwin-arm64-pg16-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            qualification/${{ env.QUALIFICATION_CELL }}/
+            runs/${{ env.RUN_ID }}/
+            runs/native-*/
+            release-download/pgworkbench-*/qualification/${{ env.QUALIFICATION_CELL }}/
+            release-download/pgworkbench-*/runs/${{ env.RUN_ID }}/
+          if-no-files-found: error
+          retention-days: 90

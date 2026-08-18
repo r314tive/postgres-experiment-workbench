@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-pgbench-result.schema.json",
+  "title": "pgworkbench normalized pgbench result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "parser_version",
+    "pgbench_version",
+    "server_version",
+    "transaction_type",
+    "scale_factor",
+    "query_mode",
+    "mode",
+    "clients",
+    "threads",
+    "maximum_tries",
+    "duration_seconds",
+    "transactions_per_client",
+    "transactions_expected",
+    "transactions_processed",
+    "transactions_failed",
+    "serialization_failures",
+    "deadlock_failures",
+    "other_failures",
+    "transactions_skipped",
+    "transactions_retried",
+    "total_retries",
+    "latency_limit_ms",
+    "transactions_above_latency_limit",
+    "latency_limit_total",
+    "latency_mean_ms",
+    "latency_stddev_ms",
+    "schedule_lag_average_ms",
+    "schedule_lag_max_ms",
+    "initial_connection_time_ms",
+    "average_connection_time_ms",
+    "tps_including_connections",
+    "tps_excluding_connections"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "pgworkbench.pgbench-result/v1"
+    },
+    "parser_version": {
+      "const": "1.2.0"
+    },
+    "pgbench_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "server_version": {
+      "type": "string"
+    },
+    "transaction_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scale_factor": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "query_mode": {
+      "enum": ["simple", "extended", "prepared"]
+    },
+    "mode": {
+      "enum": ["time", "transactions"]
+    },
+    "clients": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "threads": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "maximum_tries": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "duration_seconds": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0
+    },
+    "transactions_per_client": {
+      "type": ["integer", "null"],
+      "minimum": 1
+    },
+    "transactions_expected": {
+      "type": ["integer", "null"],
+      "minimum": 1
+    },
+    "transactions_processed": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "transactions_failed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "serialization_failures": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "deadlock_failures": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "other_failures": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "transactions_skipped": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "transactions_retried": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "total_retries": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "latency_limit_ms": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "transactions_above_latency_limit": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "latency_limit_total": {
+      "type": ["integer", "null"],
+      "minimum": 1
+    },
+    "latency_mean_ms": {
+      "type": "number",
+      "minimum": 0
+    },
+    "latency_stddev_ms": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "schedule_lag_average_ms": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "schedule_lag_max_ms": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "initial_connection_time_ms": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "average_connection_time_ms": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "tps_including_connections": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "tps_excluding_connections": {
+      "type": ["number", "null"],
+      "minimum": 0
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "time"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "duration_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "transactions_per_client": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "transactions"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "duration_seconds": {
+            "type": "null"
+          },
+          "transactions_per_client": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "transactions_expected": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "anyOf": [
+        {
+          "properties": {
+            "tps_including_connections": {
+              "type": "number"
+            }
+          }
+        },
+        {
+          "properties": {
+            "tps_excluding_connections": {
+              "type": "number"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

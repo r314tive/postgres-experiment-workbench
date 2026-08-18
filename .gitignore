@@ -4,6 +4,10 @@ notes/
 logs/
 runs/
 generated/
+qualification/
 postgres-data/
 *.log
+# pgbench parser fixtures are source inputs, not runtime logs. They must stay
+# tracked because the source-containing scenario pack inventories testdata.
+!internal/pgbenchlog/testdata/*.log
 .DS_Store

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-collector-overhead.schema.json",
+  "title": "pgworkbench benchmark collector overhead v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "run_id", "protocol_digest", "trial", "captured_at", "assurance", "collector", "timing_source", "calibration_window", "raw_source", "mode", "interval_ns", "required_samples", "samples", "observed_mean_duty_pct", "observed_max_duty_pct", "status", "reasons", "digest"],
+  "properties": {
+    "schema_version": { "const": "pgworkbench.benchmark-collector-overhead/v1" },
+    "artifact_type": { "const": "pgworkbench.benchmark-collector-overhead" },
+    "run_id": { "$ref": "#/$defs/runID" },
+    "protocol_digest": { "$ref": "#/$defs/digest" },
+    "trial": { "type": "integer", "minimum": 1 },
+    "captured_at": { "$ref": "#/$defs/timestamp" },
+    "assurance": { "$ref": "#/$defs/assurance" },
+    "collector": { "const": "postgresql-sampler-v2" },
+    "timing_source": { "const": "runner-monotonic-clock/v1" },
+    "calibration_window": { "$ref": "#/$defs/window" },
+    "raw_source": { "$ref": "#/$defs/source" },
+    "mode": { "enum": ["included-unquantified", "runner-calibrated-duty-cycle"] },
+    "interval_ns": { "type": "integer", "minimum": 1 },
+    "required_samples": { "type": "integer", "minimum": 0, "maximum": 10000 },
+    "max_duty_cycle_pct": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 },
+    "samples": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sequence", "scheduled_at", "started_at", "finished_at", "duration_ns", "status"],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 1 },
+          "scheduled_at": { "$ref": "#/$defs/timestamp" },
+          "started_at": { "$ref": "#/$defs/timestamp" },
+          "finished_at": { "$ref": "#/$defs/timestamp" },
+          "duration_ns": { "type": "integer", "minimum": 0 },
+          "status": { "enum": ["succeeded", "failed"] }
+        }
+      }
+    },
+    "observed_mean_duty_pct": { "type": "number", "minimum": 0 },
+    "observed_max_duty_pct": { "type": "number", "minimum": 0 },
+    "status": { "enum": ["included-unquantified", "within-budget", "exceeded-budget", "invalid-samples"] },
+    "reasons": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+    "digest": { "$ref": "#/$defs/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "mode": { "const": "included-unquantified" } } },
+      "then": {
+        "properties": { "required_samples": { "const": 0 }, "samples": { "maxItems": 0 }, "observed_mean_duty_pct": { "const": 0 }, "observed_max_duty_pct": { "const": 0 }, "status": { "const": "included-unquantified" } },
+        "not": { "required": ["max_duty_cycle_pct"] }
+      },
+      "else": { "required": ["max_duty_cycle_pct"], "properties": { "required_samples": { "minimum": 1 }, "status": { "enum": ["within-budget", "exceeded-budget", "invalid-samples"] } } }
+    }
+  ],
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "runID": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "timestamp": { "type": "string", "format": "date-time", "pattern": "Z$" },
+    "window": {
+      "type": "object", "additionalProperties": false, "required": ["started_at", "finished_at"],
+      "properties": { "started_at": { "$ref": "#/$defs/timestamp" }, "finished_at": { "$ref": "#/$defs/timestamp" } }
+    },
+    "source": {
+      "type": "object", "additionalProperties": false, "required": ["path", "digest", "size_bytes"],
+      "properties": { "path": { "const": "collector-overhead.tsv" }, "digest": { "$ref": "#/$defs/digest" }, "size_bytes": { "type": "integer", "minimum": 1, "maximum": 2097152 } }
+    },
+    "assurance": {
+      "type": "object", "additionalProperties": false, "required": ["evidence_origin", "signed", "digest_purpose", "verification_scope"],
+      "properties": {
+        "evidence_origin": { "const": "runner-recorded" }, "signed": { "const": false }, "digest_purpose": { "const": "content-integrity-only" },
+        "verification_scope": { "const": "structure-digest-raw-source-and-runner-monotonic-duty-cycle-derivation-only" }
+      }
+    }
+  }
+}

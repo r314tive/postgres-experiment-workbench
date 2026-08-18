@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/experiment-run-result.schema.json",
+  "title": "pgworkbench experiment run result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "experiment_spec", "experiment_name", "spec_path", "spec_sha256",
+    "runtime", "topology", "run_id", "run_dir", "engine_version", "engine_commit",
+    "command", "started_at", "finished_at",
+    "duration_ms", "exit_code", "execution_timeout_ms", "cleanup_grace_ms", "timed_out", "status"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.experiment-run-result/v1"},
+    "experiment_spec": {"type": "string"},
+    "experiment_name": {"type": "string"},
+    "spec_path": {"type": "string"},
+    "spec_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "runtime": {"enum": ["docker", "native"]},
+    "topology": {"type": "string"},
+    "run_id": {"type": "string"},
+    "run_dir": {"type": "string"},
+    "pack_id": {"type": "string"},
+    "pack_version": {"type": "string"},
+    "pack_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "engine_version": {
+      "anyOf": [
+        {"const": "unverified"},
+        {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$"}
+      ]
+    },
+    "engine_commit": {
+      "anyOf": [
+        {"const": "unverified"},
+        {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"}
+      ]
+    },
+    "command": {"type": "array", "items": {"type": "string"}},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "duration_ms": {"type": "integer", "minimum": 0},
+    "exit_code": {"type": "integer"},
+    "execution_timeout_ms": {"type": "integer", "minimum": 1},
+    "cleanup_grace_ms": {"type": "integer", "minimum": 1},
+    "timed_out": {"type": "boolean"},
+    "termination_signal": {"enum": ["SIGTERM", "SIGKILL"]},
+    "containment_status": {"enum": ["confirmed", "unconfirmed"]},
+    "status": {"enum": ["passed", "failed"]}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"timed_out": {"const": true}}, "required": ["timed_out"]},
+      "then": {
+        "required": ["termination_signal"],
+        "properties": {"exit_code": {"const": 124}, "status": {"const": "failed"}}
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "passed"}}, "required": ["status"]},
+      "then": {"properties": {"exit_code": {"const": 0}, "timed_out": {"const": false}}}
+    },
+    {
+      "if": {"required": ["termination_signal"]},
+      "then": {
+        "required": ["containment_status"],
+        "properties": {"status": {"const": "failed"}}
+      }
+    },
+    {
+      "if": {"required": ["containment_status"]},
+      "then": {"required": ["termination_signal"]}
+    }
+  ]
+}

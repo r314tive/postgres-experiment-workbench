@@ -1,0 +1,22 @@
+{
+  "metadata": {
+    "driver_version": "2026.08",
+    "benchmark": "tpcc",
+    "workload": "tpcc/postgresql",
+    "results_directory": "results/benchbase-tpcc"
+  },
+  "throughput": {
+    "requests_per_second": 4321.5
+  },
+  "histograms": [
+    {
+      "transaction": "NewOrder",
+      "p95_ms": 18.4
+    }
+  ],
+  "elapsed_seconds": 300,
+  "errors": {
+    "total": 0,
+    "messages": []
+  }
+}

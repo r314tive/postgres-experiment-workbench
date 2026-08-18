@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/benchmark-phase-timeline.schema.json",
+  "title": "pgworkbench benchmark phase timeline v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_type", "run_id", "trial", "started_at", "finished_at", "duration_ns", "duration_ms", "status", "events", "digest"],
+  "properties": {
+    "schema_version": { "const": "pgworkbench.benchmark-phase-timeline/v3" },
+    "artifact_type": { "const": "pgworkbench.benchmark-phase-timeline" },
+    "run_id": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "trial": { "type": "integer", "minimum": 1 },
+    "started_at": { "$ref": "#/$defs/timestamp" },
+    "finished_at": { "$ref": "#/$defs/timestamp" },
+    "duration_ns": { "type": "integer", "minimum": 0 },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "status": { "enum": ["passed", "failed"] },
+    "events": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "prefixItems": [
+        { "$ref": "#/$defs/preflightEvent" },
+        { "$ref": "#/$defs/prepareEvent" },
+        { "$ref": "#/$defs/stabilizeEvent" },
+        { "$ref": "#/$defs/pre-warmup-controlEvent" },
+        { "$ref": "#/$defs/warmupEvent" },
+        { "$ref": "#/$defs/pre-measure-controlEvent" },
+        { "$ref": "#/$defs/measureEvent" },
+        { "$ref": "#/$defs/cooldownEvent" },
+        { "$ref": "#/$defs/validateEvent" },
+        { "$ref": "#/$defs/collectEvent" },
+        { "$ref": "#/$defs/cleanupEvent" }
+      ],
+      "items": false
+    },
+    "digest": { "$ref": "#/$defs/digest" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "passed" } } },
+      "then": { "properties": { "events": { "not": { "contains": { "$ref": "#/$defs/failedStatus" } } } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "failed" } } },
+      "then": { "properties": { "events": { "contains": { "$ref": "#/$defs/failedStatus" }, "minContains": 1 } } }
+    },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/failedAt1" } } }, "then": { "properties": { "events": { "$ref": "#/$defs/afterFailedAt1" } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/failedAt2" } } }, "then": { "properties": { "events": { "$ref": "#/$defs/afterFailedAt2" } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/failedAt3" } } }, "then": { "properties": { "events": { "$ref": "#/$defs/afterFailedAt3" } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/failedAt4" } } }, "then": { "properties": { "events": { "$ref": "#/$defs/afterFailedAt4" } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/failedAt5" } } }, "then": { "properties": { "events": { "$ref": "#/$defs/afterFailedAt5" } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/failedAt6" } } }, "then": { "properties": { "events": { "$ref": "#/$defs/afterFailedAt6" } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/failedAt7" } } }, "then": { "properties": { "events": { "$ref": "#/$defs/afterFailedAt7" } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/failedAt8" } } }, "then": { "properties": { "events": { "$ref": "#/$defs/afterFailedAt8" } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/failedAt9" } } }, "then": { "properties": { "events": { "$ref": "#/$defs/afterFailedAt9" } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/skippedAt2" } } }, "then": { "properties": { "events": { "$ref": "#/$defs/failedAt1" } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/skippedAt7" } } }, "then": { "properties": { "events": { "anyOf": [{ "$ref": "#/$defs/failedAt1" }, { "$ref": "#/$defs/failedAt2" }, { "$ref": "#/$defs/failedAt3" }, { "$ref": "#/$defs/failedAt4" }, { "$ref": "#/$defs/failedAt5" }, { "$ref": "#/$defs/failedAt6" }] } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/skippedAt9" } } }, "then": { "properties": { "events": { "anyOf": [{ "$ref": "#/$defs/failedAt1" }, { "$ref": "#/$defs/failedAt2" }, { "$ref": "#/$defs/failedAt3" }, { "$ref": "#/$defs/failedAt4" }, { "$ref": "#/$defs/failedAt5" }, { "$ref": "#/$defs/failedAt6" }, { "$ref": "#/$defs/failedAt7" }, { "$ref": "#/$defs/failedAt8" }] } } } },
+    { "if": { "properties": { "events": { "$ref": "#/$defs/skippedAt10" } } }, "then": { "properties": { "events": { "anyOf": [{ "$ref": "#/$defs/failedAt1" }, { "$ref": "#/$defs/failedAt2" }, { "$ref": "#/$defs/failedAt3" }, { "$ref": "#/$defs/failedAt4" }, { "$ref": "#/$defs/failedAt5" }, { "$ref": "#/$defs/failedAt6" }, { "$ref": "#/$defs/failedAt7" }, { "$ref": "#/$defs/failedAt8" }, { "$ref": "#/$defs/failedAt9" }] } } } }
+  ],
+  "$defs": {
+    "timestamp": { "type": "string", "format": "date-time", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "failedStatus": { "type": "object", "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+    "skippedStatus": { "type": "object", "properties": { "status": { "const": "skipped" } }, "required": ["status"] },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "name", "status", "started_at", "finished_at", "duration_ns", "duration_ms"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 11 },
+        "name": { "enum": ["preflight", "prepare", "stabilize", "pre-warmup-control", "warmup", "pre-measure-control", "measure", "cooldown", "validate", "collect", "cleanup"] },
+        "status": { "enum": ["passed", "failed", "skipped"] },
+        "started_at": { "$ref": "#/$defs/timestamp" },
+        "finished_at": { "$ref": "#/$defs/timestamp" },
+        "duration_ns": { "type": "integer", "minimum": 0 },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "reason": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [{ "if": { "properties": { "status": { "enum": ["failed", "skipped"] } }, "required": ["status"] }, "then": { "required": ["reason"] } }]
+    },
+    "preflightEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 1 }, "name": { "const": "preflight" }, "status": { "enum": ["passed", "failed"] } } }] },
+    "prepareEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 2 }, "name": { "const": "prepare" } } }] },
+    "stabilizeEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 3 }, "name": { "const": "stabilize" } } }] },
+    "pre-warmup-controlEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 4 }, "name": { "const": "pre-warmup-control" } } }] },
+    "warmupEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 5 }, "name": { "const": "warmup" } } }] },
+    "pre-measure-controlEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 6 }, "name": { "const": "pre-measure-control" } } }] },
+    "measureEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 7 }, "name": { "const": "measure" } } }, { "if": { "properties": { "status": { "const": "passed" } }, "required": ["status"] }, "then": { "properties": { "duration_ns": { "minimum": 1 } } } }] },
+    "cooldownEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 8 }, "name": { "const": "cooldown" } } }] },
+    "validateEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 9 }, "name": { "const": "validate" } } }] },
+    "collectEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 10 }, "name": { "const": "collect" } } }] },
+    "cleanupEvent": { "allOf": [{ "$ref": "#/$defs/event" }, { "properties": { "sequence": { "const": 11 }, "name": { "const": "cleanup" }, "status": { "enum": ["passed", "failed"] } } }] },
+
+    "failedAt1": { "prefixItems": [{ "$ref": "#/$defs/failedStatus" }] },
+    "failedAt2": { "prefixItems": [{}, { "$ref": "#/$defs/failedStatus" }] },
+    "failedAt3": { "prefixItems": [{}, {}, { "$ref": "#/$defs/failedStatus" }] },
+    "failedAt4": { "prefixItems": [{}, {}, {}, { "$ref": "#/$defs/failedStatus" }] },
+    "failedAt5": { "prefixItems": [{}, {}, {}, {}, { "$ref": "#/$defs/failedStatus" }] },
+    "failedAt6": { "prefixItems": [{}, {}, {}, {}, {}, { "$ref": "#/$defs/failedStatus" }] },
+    "failedAt7": { "prefixItems": [{}, {}, {}, {}, {}, {}, { "$ref": "#/$defs/failedStatus" }] },
+    "failedAt8": { "prefixItems": [{}, {}, {}, {}, {}, {}, {}, { "$ref": "#/$defs/failedStatus" }] },
+    "failedAt9": { "prefixItems": [{}, {}, {}, {}, {}, {}, {}, {}, { "$ref": "#/$defs/failedStatus" }] },
+
+    "afterFailedAt1": { "prefixItems": [{}, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }] },
+    "afterFailedAt2": { "prefixItems": [{}, {}, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }] },
+    "afterFailedAt3": { "prefixItems": [{}, {}, {}, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }] },
+    "afterFailedAt4": { "prefixItems": [{}, {}, {}, {}, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }] },
+    "afterFailedAt5": { "prefixItems": [{}, {}, {}, {}, {}, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }] },
+    "afterFailedAt6": { "prefixItems": [{}, {}, {}, {}, {}, {}, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }] },
+    "afterFailedAt7": { "prefixItems": [{}, {}, {}, {}, {}, {}, {}, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }] },
+    "afterFailedAt8": { "prefixItems": [{}, {}, {}, {}, {}, {}, {}, {}, { "$ref": "#/$defs/skippedStatus" }, { "$ref": "#/$defs/skippedStatus" }] },
+    "afterFailedAt9": { "prefixItems": [{}, {}, {}, {}, {}, {}, {}, {}, {}, { "$ref": "#/$defs/skippedStatus" }] },
+
+    "skippedAt2": { "prefixItems": [{}, { "$ref": "#/$defs/skippedStatus" }] },
+    "skippedAt7": { "prefixItems": [{}, {}, {}, {}, {}, {}, { "$ref": "#/$defs/skippedStatus" }] },
+    "skippedAt9": { "prefixItems": [{}, {}, {}, {}, {}, {}, {}, {}, { "$ref": "#/$defs/skippedStatus" }] },
+    "skippedAt10": { "prefixItems": [{}, {}, {}, {}, {}, {}, {}, {}, {}, { "$ref": "#/$defs/skippedStatus" }] }
+  }
+}
