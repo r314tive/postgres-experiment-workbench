@@ -112,7 +112,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-16
           bindir=/usr/lib/postgresql/16/bin
-          "$bindir/postgres" --version | grep -Eq 'PostgreSQL 16([.[:space:]]|$)'
+          "$bindir/postgres" --version | grep -Eq 'PostgreSQL\) 16([.[:space:]]|$)'
           printf 'PGWORKBENCH_NATIVE_BINDIR=%s\n' "$bindir" >> "$GITHUB_ENV"
 
       - name: Require release changelog entry for tag
