@@ -137,14 +137,29 @@ grep -q 'does not match GITHUB_SHA' "$TMP_DIR/build-github-sha.out"
 
 COMPATIBILITY_WORKFLOW="$REPO_DIR/.github/workflows/compatibility.yml"
 AGGREGATE_WORKFLOW="$REPO_DIR/.github/workflows/aggregate-gate.yml"
-test "$(grep -Fc './scripts/build_candidate_binary.sh' "$COMPATIBILITY_WORKFLOW")" = 5
-test "$(grep -Fc './scripts/assert_run_candidate_identity.sh' "$COMPATIBILITY_WORKFLOW")" = 6
+require_count() {
+  local needle="$1" file="$2" expected="$3" actual
+  actual="$(grep -Fc -- "$needle" "$file")"
+  if [[ "$actual" != "$expected" ]]; then
+    echo "FAIL: expected $expected occurrences of $needle in $file, got $actual" >&2
+    exit 1
+  fi
+}
+require_text() {
+  local needle="$1" file="$2"
+  if ! grep -Fq -- "$needle" "$file"; then
+    echo "FAIL: expected $needle in $file" >&2
+    exit 1
+  fi
+}
+require_count './scripts/build_candidate_binary.sh' "$COMPATIBILITY_WORKFLOW" 5
+require_count './scripts/assert_run_candidate_identity.sh' "$COMPATIBILITY_WORKFLOW" 6
 if grep -Fq 'go build -trimpath -o .tmp/qualification/pgworkbench' "$COMPATIBILITY_WORKFLOW"; then
   echo 'FAIL: compatibility source candidate bypasses the identity-bound builder' >&2
   exit 1
 fi
-grep -Fq 'BUILD_COMMIT="$GITHUB_SHA"' "$AGGREGATE_WORKFLOW"
-grep -Fq 'PGWORKBENCH_CLI="$PGWORKBENCH_BIN"' "$AGGREGATE_WORKFLOW"
-grep -Fq './scripts/assert_run_candidate_identity.sh' "$AGGREGATE_WORKFLOW"
+require_text 'BUILD_COMMIT="$GITHUB_SHA"' "$AGGREGATE_WORKFLOW"
+require_text 'PGWORKBENCH_CLI="$PGWORKBENCH_BIN"' "$AGGREGATE_WORKFLOW"
+require_text './scripts/assert_run_candidate_identity.sh' "$AGGREGATE_WORKFLOW"
 
 printf 'PASS: immutable candidate and run-manifest identity guards\n'
