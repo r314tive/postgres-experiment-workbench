@@ -85,8 +85,12 @@ if BUILD_COMMIT="$HEAD_COMMIT" PGWORKBENCH_GO="$PREFLIGHT/fake-go" \
   echo 'FAIL: candidate preflight accepted an ignored file in the scenario pack' >&2
   exit 1
 fi
-grep -q 'scenario pack contains files that are not bound to the candidate commit' \
-  "$TMP_DIR/ignored-pack.out"
+if ! grep -q 'scenario pack contains files that are not bound to the candidate commit' \
+  "$TMP_DIR/ignored-pack.out"; then
+  echo 'FAIL: ignored scenario-pack file was rejected for an unexpected reason:' >&2
+  cat "$TMP_DIR/ignored-pack.out" >&2
+  exit 1
+fi
 
 if BUILD_COMMIT="$HEAD_COMMIT" PGWORKBENCH_GO="$PREFLIGHT/fake-go" \
   FAKE_GO_VERSION=go1.26.4 \
