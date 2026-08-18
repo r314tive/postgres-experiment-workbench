@@ -29,6 +29,12 @@ jobs:
           docker --version
           docker compose version
 
+      - name: Install static-check tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y ripgrep
+
       - name: Static checks
         run: make check
 
