@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'status=$?; echo "FAIL: candidate identity guard failed at line $LINENO (status $status)" >&2; exit "$status"' ERR
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pgworkbench-candidate-identity.XXXXXX")"
