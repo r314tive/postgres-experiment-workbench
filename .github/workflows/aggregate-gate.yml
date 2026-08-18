@@ -55,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y postgresql-16
+          sudo apt-get install -y postgresql-16 ripgrep
           bindir=/usr/lib/postgresql/16/bin
           test -x "$bindir/initdb"
           "$bindir/postgres" --version | grep -Eq 'PostgreSQL\) 16([.[:space:]]|$)'
