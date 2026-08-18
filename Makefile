@@ -1484,10 +1484,9 @@ native-test:
 		EXPERIMENT_METRICS_INTERVAL=invalid EXPERIMENT_METRICS_SAMPLES=1 EXPERIMENT_SNAPSHOT=0 \
 		GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \
 			$(PGWORKBENCH_CLI) experiment run --runtime native --run-id "$$metrics_fail_id" smoke; then \
-			echo 'FAIL: metrics child failure produced a passing experiment' >&2; exit 1; \
+			echo 'FAIL: invalid metrics configuration unexpectedly started an experiment' >&2; exit 1; \
 		fi; \
-		grep -q '"status": "failed"' "runs/$$metrics_fail_id/verdict.json"; \
-		grep -Eq '^workload_exit="?[1-9][0-9]*"?$$' "runs/$$metrics_fail_id/verdict.env"; \
+		test ! -e "runs/$$metrics_fail_id"; \
 		if POSTGRES_PORT="$$port" PGWORKBENCH_NATIVE_BINDIR="$$bindir" EXPERIMENT_PG_CONFIG=default \
 		EXPERIMENT_BACKGROUND_SPECS=missing/background EXPERIMENT_BACKGROUND_WAIT=1 \
 		EXPERIMENT_METRICS=0 EXPERIMENT_SNAPSHOT=0 GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \

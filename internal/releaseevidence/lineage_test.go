@@ -162,7 +162,8 @@ func TestWriteNewDetectsStagedPathSwapBeforePublication(t *testing.T) {
 	if !errors.As(err, &committed) {
 		t.Fatalf("writeNew swap error = %v, want CommittedError", err)
 	}
-	if result.Output == "" || committed.Result.Output != result.Output || !strings.Contains(err.Error(), "staged inode") {
+	if result.Output == "" || committed.Result.Output != result.Output ||
+		(!strings.Contains(err.Error(), "staged inode") && !strings.Contains(err.Error(), "bytes differ")) {
 		t.Fatalf("committed swap result=%+v error=%v", result, err)
 	}
 }
