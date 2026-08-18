@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-08-18
+
+### Fixed
+
+- Removed synthetic terminal-contract test runs after their assertions complete,
+  so a release candidate's exact evidence sweep cannot mistake fixture identity
+  for candidate execution evidence.
+
 ## [0.2.5] - 2026-08-18
 
 ### Fixed
