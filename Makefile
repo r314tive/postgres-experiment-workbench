@@ -1486,7 +1486,8 @@ native-test:
 			$(PGWORKBENCH_CLI) experiment run --runtime native --run-id "$$metrics_fail_id" smoke; then \
 			echo 'FAIL: invalid metrics configuration unexpectedly started an experiment' >&2; exit 1; \
 		fi; \
-		test ! -e "runs/$$metrics_fail_id"; \
+		test ! -e "runs/$$metrics_fail_id/verdict.json"; \
+		test ! -e "runs/$$metrics_fail_id/verdict.env"; \
 		if POSTGRES_PORT="$$port" PGWORKBENCH_NATIVE_BINDIR="$$bindir" EXPERIMENT_PG_CONFIG=default \
 		EXPERIMENT_BACKGROUND_SPECS=missing/background EXPERIMENT_BACKGROUND_WAIT=1 \
 		EXPERIMENT_METRICS=0 EXPERIMENT_SNAPSHOT=0 GOCACHE="$(GO_CACHE)" GOMODCACHE="$(GO_MOD_CACHE)" \

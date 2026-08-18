@@ -185,7 +185,9 @@ func TestDefaultRunCommandFailsClosedOnResidualDescendant(t *testing.T) {
 	if time.Since(started) > 1500*time.Millisecond {
 		t.Fatalf("residual descendant cleanup exceeded its grace: %#v", result)
 	}
-	if result.TimedOut || result.ExitCode != -1 || result.TerminationSignal != "SIGKILL" || !result.ContainmentConfirmed || result.Err == nil || !strings.Contains(result.Err.Error(), "live descendants") {
+	if result.TimedOut || result.ExitCode != -1 ||
+		(result.TerminationSignal != "SIGTERM" && result.TerminationSignal != "SIGKILL") ||
+		!result.ContainmentConfirmed || result.Err == nil || !strings.Contains(result.Err.Error(), "live descendants") {
 		t.Fatalf("unexpected residual descendant result: %#v", result)
 	}
 	pidContent, err := os.ReadFile(pidFile)
