@@ -11,7 +11,7 @@ benchmark_phase_now() {
     seconds="${BASH_REMATCH[1]}"
     fraction="${BASH_REMATCH[2]}"
     LC_ALL=C TZ=UTC0 printf '%(%Y-%m-%dT%H:%M:%S)T.%sZ\n' "$seconds" "$fraction"
-    return
+    return 0
   fi
 
   # GNU date is a fallback for Bash 4 environments. BSD date prints a literal
@@ -19,7 +19,7 @@ benchmark_phase_now() {
   generated="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)" || return
   if [[ "$generated" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{1,9}Z$ ]]; then
     printf '%s\n' "$generated"
-    return
+    return 0
   fi
   echo "A high-resolution UTC clock is required for benchmark phase evidence" >&2
   return 2
@@ -85,7 +85,10 @@ benchmark_phase_append() {
     if [[ -n "$mirror" ]]; then
       printf '%s' "$row" >> "$mirror"
     fi
-    return
+    # Do not inherit an incidental conditional status here.  In particular,
+    # Bash 5 running with errexit can treat a bare return after the mirror
+    # branch as non-zero and abort the terminal backfill after its first row.
+    return 0
   fi
   echo "Invalid benchmark phase journal event: $sequence/$name/$status" >&2
   return 2
@@ -207,4 +210,6 @@ benchmark_phase_complete_before_cleanup() {
     first_reason="not reached after earlier benchmark phase failure"
     next=$((next + 1))
   done
+  # The terminating false loop predicate is not a lifecycle error.
+  return 0
 }

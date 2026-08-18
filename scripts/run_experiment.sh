@@ -1325,11 +1325,17 @@ terminal_cleanup() {
       exit_code=1
     fi
     cleanup_started="$(benchmark_phase_now)"
-    cleanup || {
-      cleanup_exit="$?"
+    # EXIT traps inherit errexit.  Cleanup must nevertheless reach its
+    # terminal journal event even when an individual owned-child action has
+    # nothing to stop or reports a failure.
+    set +e
+    cleanup
+    cleanup_exit="$?"
+    set -e
+    if [[ "$cleanup_exit" != "0" ]]; then
       cleanup_status="failed"
       cleanup_reason="cleanup exited $cleanup_exit"
-    }
+    fi
     cleanup_finished="$(benchmark_phase_now)"
     if ! benchmark_phase_append 11 cleanup "$cleanup_status" "$cleanup_started" "$cleanup_finished" "$cleanup_reason"; then
       cleanup_status=failed
