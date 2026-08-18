@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-18
+
+### Fixed
+
+- Isolated the native runtime fixture from qualification-injected ports so the
+  aggregate release gate remains reproducible under its exact CI environment.
+
 ## [0.2.0] - 2026-08-13
 
 - Added an exact-candidate matrix verifier that requires a predeclared row
