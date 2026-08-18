@@ -1,7 +1,7 @@
 {
   "schema_version": "pgworkbench.scenario-pack/v1",
   "id": "postgres-experiment-workbench-builtin",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "engine_constraint": ">=0.2.0",
   "description": "Built-in disposable PostgreSQL engineering scenarios.",
   "assets": [

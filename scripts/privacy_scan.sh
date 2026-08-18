@@ -32,6 +32,7 @@ rg --hidden --no-ignore -n -i "$PATTERN" "${SCAN_ROOTS[@]}" \
   -g '!logs/**' \
   -g '!runs/**' \
   -g '!generated/**' \
+  -g '!qualification/aggregate-*/pack.json' \
   -g '!.tmp/**' \
   -g '!.git' \
   -g '!.git/**' \
@@ -39,6 +40,7 @@ rg --hidden --no-ignore -n -i "$PATTERN" "${SCAN_ROOTS[@]}" \
   -g '!**/logs/**' \
   -g '!**/runs/**' \
   -g '!**/generated/**' \
+  -g '!**/qualification/aggregate-*/pack.json' \
   -g '!**/.tmp/**' \
   -g '!**/.git' \
   -g '!**/.git/**' >"$TMP_FILE" 2>&1

@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-08-18
+
+### Fixed
+
+- Kept the privacy source scan strict while excluding only the generated
+  aggregate pack-inspection record, whose evidence contract deliberately
+  retains the local capture root.
+
 ## [0.2.4] - 2026-08-18
 
 ### Fixed
