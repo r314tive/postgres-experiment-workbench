@@ -256,6 +256,200 @@ func TestRunEvidenceGateAttachCreatesStandaloneTypedRevision(t *testing.T) {
 	}
 }
 
+func TestRunEvidenceControlsAttachCreatesAtomicTypedRevision(t *testing.T) {
+	directory := t.TempDir()
+	candidate := releaseevidence.Candidate{
+		Version:   "0.3.0",
+		Tag:       "v0.3.0",
+		GitCommit: strings.Repeat("3", 40),
+		ScenarioPack: releaseevidence.ScenarioPack{
+			ID: "builtin", Version: "0.3.0", Digest: "sha256:" + strings.Repeat("a", 64),
+		},
+	}
+	inventory := controlsAttachCLIInventory(t, candidate)
+	candidate.AssetFingerprint = inventory.AssetFingerprint
+	index, err := releaseevidence.NewIndex(candidate, "2026-08-14T12:34:56Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexPath := filepath.Join(directory, "index-r0.json")
+	if _, err := releaseevidence.WriteNew(indexPath, index); err != nil {
+		t.Fatal(err)
+	}
+
+	manifestDigest := ""
+	for _, asset := range inventory.Assets {
+		if asset.Name == "pgworkbench-0.3.0-release-manifest.json" {
+			manifestDigest = asset.Digest
+			break
+		}
+	}
+	if manifestDigest == "" {
+		t.Fatal("controls CLI inventory has no release manifest")
+	}
+	falseValue, trueValue := false, true
+	draftRun := releaseevidence.ReleaseVerificationWorkflowRun{
+		ID: "123456789", Attempt: 2, HeadSHA: candidate.GitCommit,
+		Repository: "r314tive/postgres-experiment-workbench", Workflow: "release-snapshot",
+		Job: "draft-verify", Ref: "refs/tags/" + candidate.Tag,
+	}
+	draft := releaseevidence.ReleaseAssetVerification{
+		SchemaVersion:     releaseevidence.ReleaseAssetVerificationSchema,
+		ArtifactType:      releaseevidence.ReleaseAssetVerificationType,
+		QualificationMode: "draft", Candidate: candidate, CapturedAt: "2026-08-14T12:35:00Z",
+		WorkflowRun: draftRun, Inventory: inventory,
+		ProviderObservation: releaseevidence.ReleaseAssetProviderObservation{
+			Tag: candidate.Tag, TagTargetSHA: candidate.GitCommit, ReleaseState: "draft",
+			IsDraft: &trueValue, AssetCount: 16, AssetFingerprint: candidate.AssetFingerprint,
+		},
+		Source: releaseevidence.ReleaseAssetVerificationSource{
+			AssetInventoryDigest: "sha256:" + strings.Repeat("b", 64), ReleaseManifestDigest: manifestDigest,
+		},
+		Checks: releaseevidence.ReleaseAssetVerificationChecks{
+			TagTarget: "verified", ClosedAssetSet: "verified", DownloadedAssetBytes: "verified",
+			ArchiveChecksums: "verified", MetadataChecksums: "verified", ReleaseManifest: "verified",
+			CandidateBinaryIdentity: "verified", ProvenanceAttestations: "verified",
+			SBOMAttestations: "verified", SBOMContents: "verified",
+			ImmutableRelease: "not-applicable", ReleaseAttestation: "not-applicable",
+		},
+		Assurance: releaseevidence.ReleaseAssetVerificationAssurance{
+			Purpose: "release-asset-authenticity-and-integrity", VerificationScope: "workflow-local-provider-and-content",
+			ActionsArtifactDurable: &falseValue, CandidateIdentityReverified: &trueValue,
+			ProviderAssetSetRecomputed: &trueValue, AllDownloadedBytesVerified: &trueValue,
+			PerformanceClaim: &falseValue, BenchmarkComparabilityClaim: &falseValue,
+			RecoveryClaim: &falseValue, ProductionDecisionEligible: &falseValue,
+		},
+	}
+	controlsRun := draftRun
+	controlsRun.Job = releaseevidence.PreventiveControlsSealJob
+	record := releaseevidence.PreventiveControlsVerification{
+		SchemaVersion: releaseevidence.PreventiveControlsVerificationSchema,
+		ArtifactType:  releaseevidence.PreventiveControlsVerificationType,
+		Candidate:     candidate, CapturedAt: "2026-08-14T12:36:00Z", WorkflowRun: controlsRun,
+		DraftAssetVerification: draft,
+		Source: releaseevidence.PreventiveControlsVerificationSource{
+			ControlsArtifact: releaseevidence.QualificationArtifact{
+				ID: "246813579", Name: "release-controls-" + candidate.Tag + "-" + candidate.GitCommit + "-2",
+				Digest: "sha256:" + strings.Repeat("c", 64),
+			},
+			RepositoryControlsDigest:   "sha256:" + strings.Repeat("d", 64),
+			TagRulesetAPIDigest:        "sha256:" + strings.Repeat("e", 64),
+			ImmutableReleasesAPIDigest: "sha256:" + strings.Repeat("f", 64),
+		},
+		TagRuleset: releaseevidence.PreventiveControlsTagRuleset{
+			ID: 42, UpdatedAt: "2026-08-14T12:35:10Z", Target: "tag", Enforcement: "active",
+			IncludePattern: "refs/tags/v*", Excludes: []string{}, CreationRestricted: &trueValue,
+			UpdateProhibited: &trueValue, DeletionProhibited: &trueValue,
+		},
+		BypassReview: releaseevidence.PreventiveControlsBypassReview{
+			Reviewer: "release-admin@example.test", ReviewedAt: "2026-08-14T12:35:20Z",
+			RulesetID: 42, RulesetUpdatedAt: "2026-08-14T12:35:10Z",
+			EvidenceRef:    "urn:pgworkbench:release-controls:bypass-review:v0.3.0",
+			EvidenceDigest: "sha256:" + strings.Repeat("1", 64),
+		},
+		ImmutableReleases: releaseevidence.PreventiveControlsImmutableReleases{
+			Enabled: &trueValue, EnforcedByOwner: &falseValue,
+		},
+		Assurance: releaseevidence.PreventiveControlsVerificationAssurance{
+			Purpose:                "prepublication-preventive-controls-observation",
+			VerificationScope:      "workflow-local-github-api-and-source-binding",
+			ActionsArtifactDurable: &falseValue, CandidateIdentityReverified: &trueValue,
+			BypassReviewRemoteObjectFetched: &falseValue, BypassReviewSignatureVerified: &falseValue,
+			PerformanceClaim: &falseValue, BenchmarkComparabilityClaim: &falseValue,
+			RecoveryClaim: &falseValue, ProductionDecisionEligible: &falseValue,
+		},
+	}
+	recordContent, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordPath := filepath.Join(directory, "preventive-controls.json")
+	if err := os.WriteFile(recordPath, append(recordContent, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	output := filepath.Join(directory, "index-r1.json")
+	var rendered bytes.Buffer
+	if err := runEvidenceTo(&rendered, []string{
+		"controls", "attach",
+		"--index", indexPath,
+		"--evidence-file", recordPath,
+		"--evidence-ref", "urn:pgworkbench:evidence:preventive-controls-cli",
+		"--output", output,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"ATTACHED:",
+		"controls=preventive_controls.tag_ruleset,preventive_controls.tag_ruleset.bypass_review,preventive_controls.immutable_releases",
+		"revision=1", "unqualified=3", "assurance=operator-attested-not-verified",
+		"authorization_eligible=false", "release_status=open", "decision=no-go",
+	} {
+		if !strings.Contains(rendered.String(), want) {
+			t.Fatalf("controls attach output missing %q: %s", want, rendered.String())
+		}
+	}
+	attached, err := releaseevidence.LoadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attached.Lineage == nil || attached.Lineage.Revision != 1 ||
+		attached.PreventiveControls.TagRuleset.Status != releaseevidence.ControlStatusVerified ||
+		attached.PreventiveControls.TagRuleset.BypassReview.Status != releaseevidence.ReviewStatusAdminReviewed ||
+		attached.PreventiveControls.ImmutableReleases.Status != releaseevidence.ControlStatusVerified ||
+		attached.PreventiveControls.ImmutableReleases.Enabled == nil || !*attached.PreventiveControls.ImmutableReleases.Enabled {
+		t.Fatalf("persisted preventive controls = %+v, lineage = %+v", attached.PreventiveControls, attached.Lineage)
+	}
+	verification, err := releaseevidence.VerifyFile(output)
+	wantControls := []string{
+		"preventive_controls.immutable_releases",
+		"preventive_controls.tag_ruleset",
+		"preventive_controls.tag_ruleset.bypass_review",
+	}
+	if err != nil || !verification.Valid || verification.Status != releaseevidence.StatusOpen ||
+		verification.Decision != releaseevidence.DecisionNoGo || verification.AuthorizationEligible ||
+		!reflect.DeepEqual(verification.PassedGates, wantControls) ||
+		!reflect.DeepEqual(verification.UnqualifiedEvidence, wantControls) {
+		t.Fatalf("standalone preventive-controls index = %+v, %v", verification, err)
+	}
+}
+
+func controlsAttachCLIInventory(t *testing.T, candidate releaseevidence.Candidate) releaseassets.Inventory {
+	t.Helper()
+	names := make([]string, 0, 16)
+	for _, platform := range []string{"darwin-amd64", "darwin-arm64", "linux-amd64", "linux-arm64"} {
+		prefix := "pgworkbench-" + candidate.Version + "-" + platform
+		names = append(names, prefix+".tar.gz", prefix+".spdx.json", prefix+"-sbom.sigstore.json")
+	}
+	names = append(names,
+		"pgworkbench-"+candidate.Version+"-SHA256SUMS.txt",
+		"pgworkbench-"+candidate.Version+"-METADATA-SHA256SUMS.txt",
+		"pgworkbench-"+candidate.Version+"-release-manifest.json",
+		"pgworkbench-"+candidate.Version+"-provenance.sigstore.json",
+	)
+	sort.Strings(names)
+	assets := make([]releaseassets.Asset, len(names))
+	for index, name := range names {
+		id, err := releaseassets.NewIntegerAssetID(uint64(index + 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		assets[index] = releaseassets.Asset{
+			ID: id, Name: name, Size: int64(index + 1), Digest: "sha256:" + strings.Repeat("9", 64),
+		}
+	}
+	fingerprint, err := releaseassets.ComputeFingerprint(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return releaseassets.Inventory{
+		SchemaVersion: releaseassets.SchemaVersion, ArtifactType: releaseassets.ArtifactType,
+		ReleaseState: releaseassets.ReleaseStateDraft, Tag: candidate.Tag, GitCommit: candidate.GitCommit,
+		CapturedAt: "2026-08-14T12:34:58Z", FingerprintAlgorithm: releaseassets.FingerprintAlgorithm,
+		AssetFingerprint: fingerprint, Assets: assets,
+	}
+}
+
 func TestRenderGateAttachResultJSONIncludesEvidenceTrustBoundaries(t *testing.T) {
 	result := releaseevidence.GateAttachResult{
 		Output:               "/tmp/evidence/index-r1.json",
@@ -292,6 +486,105 @@ func TestRunEvidenceGateAttachRejectsAmbiguousArguments(t *testing.T) {
 	} {
 		if err := runEvidenceTo(io.Discard, test.args); err == nil || !strings.Contains(err.Error(), test.want) {
 			t.Fatalf("runEvidenceTo(%q) error = %v, want %q", test.args, err, test.want)
+		}
+	}
+}
+
+func TestRunEvidenceControlsAttachRejectsAmbiguousArguments(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"controls", "attach"}, want: "--index is required"},
+		{args: []string{"controls", "attach", "--index", "index.json"}, want: "--evidence-file is required"},
+		{args: []string{"controls", "attach", "--index", "index.json", "--evidence-file", "controls.json"}, want: "--evidence-ref is required"},
+		{args: []string{"controls", "attach", "--index", "index.json", "--evidence-file", "controls.json", "--evidence-ref", "urn:controls"}, want: "--output is required"},
+		{args: []string{"controls", "attach", "--gate", "tag_ruleset"}, want: "unknown option"},
+		{args: []string{"controls", "attach", "--json", "--json"}, want: "duplicate option"},
+		{args: []string{"controls", "attach", "--index", "one.json", "--index", "two.json"}, want: "duplicate option"},
+		{args: []string{"controls", "attach", "--output"}, want: "requires a value"},
+		{args: []string{"controls", "unknown"}, want: "usage:"},
+	} {
+		if err := runEvidenceTo(io.Discard, test.args); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("runEvidenceTo(%q) error = %v, want %q", test.args, err, test.want)
+		}
+	}
+}
+
+func TestRenderControlsAttachResultPreservesAtomicTrustBoundary(t *testing.T) {
+	result := releaseevidence.ControlsAttachResult{
+		Output:   "/tmp/evidence/index-r1.json",
+		Digest:   "sha256:" + strings.Repeat("a", 64),
+		Revision: 1,
+		Controls: []string{
+			"preventive_controls.tag_ruleset",
+			"preventive_controls.tag_ruleset.bypass_review",
+			"preventive_controls.immutable_releases",
+		},
+		EvidenceDigest:       "sha256:" + strings.Repeat("b", 64),
+		EvidenceDurability:   releaseevidence.EvidenceDurabilityAsserted,
+		EvidenceAuthenticity: releaseevidence.EvidenceAuthenticityUnverified,
+		IndexVerification: releaseevidence.Verification{
+			Status: releaseevidence.StatusOpen, Decision: releaseevidence.DecisionNoGo,
+			AssuranceStatus: releaseevidence.AssuranceOperatorAttested,
+			UnqualifiedEvidence: []string{
+				"preventive_controls.immutable_releases",
+				"preventive_controls.tag_ruleset",
+				"preventive_controls.tag_ruleset.bypass_review",
+			},
+		},
+	}
+	var plain bytes.Buffer
+	if err := renderControlsAttachResult(&plain, false, result, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"ATTACHED:",
+		"controls=preventive_controls.tag_ruleset,preventive_controls.tag_ruleset.bypass_review,preventive_controls.immutable_releases",
+		"unqualified=3",
+		"assurance=operator-attested-not-verified",
+		"authorization_eligible=false",
+		"release_status=open",
+		"decision=no-go",
+	} {
+		if !strings.Contains(plain.String(), want) {
+			t.Fatalf("controls attach output missing %q: %s", want, plain.String())
+		}
+	}
+
+	var machine bytes.Buffer
+	if err := renderControlsAttachResult(&machine, true, result, nil); err != nil {
+		t.Fatal(err)
+	}
+	var decoded releaseevidence.ControlsAttachResult
+	if err := json.Unmarshal(machine.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decoded.Controls, result.Controls) || decoded.EvidenceDigest != result.EvidenceDigest || decoded.EvidenceDurability != releaseevidence.EvidenceDurabilityAsserted || decoded.EvidenceAuthenticity != releaseevidence.EvidenceAuthenticityUnverified {
+		t.Fatalf("machine-readable atomic controls result = %+v", decoded)
+	}
+}
+
+func TestControlsAttachRendererPropagatesWriterErrors(t *testing.T) {
+	result := releaseevidence.ControlsAttachResult{
+		Output: "/tmp/evidence/index-r1.json",
+		Digest: "sha256:" + strings.Repeat("a", 64),
+	}
+	writer := evidenceBundleFailingWriter{}
+	for _, jsonOutput := range []bool{false, true} {
+		if err := renderControlsAttachResult(writer, jsonOutput, result, nil); err == nil || !strings.Contains(err.Error(), "injected writer failure") {
+			t.Fatalf("success renderer json=%t writer error = %v", jsonOutput, err)
+		}
+	}
+	sentinel := errors.New("injected directory sync failure")
+	committed := &releaseevidence.CommittedError{
+		Result: releaseevidence.WriteResult{Output: result.Output, Digest: result.Digest},
+		Err:    sentinel,
+	}
+	for _, jsonOutput := range []bool{false, true} {
+		err := renderControlsAttachResult(writer, jsonOutput, result, committed)
+		if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "injected writer failure") {
+			t.Fatalf("committed renderer json=%t error = %v", jsonOutput, err)
 		}
 	}
 }
@@ -524,6 +817,39 @@ func TestGateAttachCommittedErrorHasMachineReadableNonRetryableOutcome(t *testin
 		t.Fatalf("unexpected committed outcome: %+v", decoded)
 	}
 	if decoded.Result.Output != result.Output || decoded.Result.Digest != result.Digest || !strings.Contains(decoded.Error, sentinel.Error()) {
+		t.Fatalf("committed outcome lost identity: %+v", decoded)
+	}
+}
+
+func TestControlsAttachCommittedErrorHasMachineReadableNonRetryableOutcome(t *testing.T) {
+	sentinel := errors.New("injected directory sync failure")
+	result := releaseevidence.ControlsAttachResult{
+		Output:   "/tmp/evidence/index-r1.json",
+		Digest:   "sha256:" + strings.Repeat("a", 64),
+		Revision: 1,
+		Controls: []string{
+			"preventive_controls.tag_ruleset",
+			"preventive_controls.tag_ruleset.bypass_review",
+			"preventive_controls.immutable_releases",
+		},
+	}
+	committed := &releaseevidence.CommittedError{
+		Result: releaseevidence.WriteResult{Output: result.Output, Digest: result.Digest},
+		Err:    sentinel,
+	}
+	var rendered bytes.Buffer
+	err := renderControlsAttachResult(&rendered, true, result, committed)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("render error = %v, want committed sentinel", err)
+	}
+	var decoded controlsAttachCommittedOutput
+	if decodeErr := json.Unmarshal(rendered.Bytes(), &decoded); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if decoded.Status != "committed-unconfirmed" || !decoded.Committed || decoded.Confirmed || decoded.RetrySafe {
+		t.Fatalf("unexpected committed outcome: %+v", decoded)
+	}
+	if decoded.Result.Output != result.Output || decoded.Result.Digest != result.Digest || !reflect.DeepEqual(decoded.Result.Controls, result.Controls) || !strings.Contains(decoded.Error, sentinel.Error()) {
 		t.Fatalf("committed outcome lost identity: %+v", decoded)
 	}
 }

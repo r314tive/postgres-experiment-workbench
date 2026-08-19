@@ -666,9 +666,15 @@ go run ./cmd/pgworkbench evidence gate attach \
   --evidence-file downloaded/verification.json \
   --evidence-ref 's3://release-evidence/v0.2.0/external-drivers.json?versionId=...' \
   --output evidence/index-r1.json
+# Attach one post-draft controls observation to all three preventive paths:
+go run ./cmd/pgworkbench evidence controls attach \
+  --index evidence/index-r1.json \
+  --evidence-file downloaded/preventive-controls-verification.json \
+  --evidence-ref 's3://release-evidence/v0.2.0/preventive-controls.json?versionId=...' \
+  --output evidence/index-r2.json
 # Preserve the exact contiguous revision chain in a deterministic archive:
 go run ./cmd/pgworkbench evidence bundle create --json \
-  evidence/index-r1.json generated/release-evidence.tar.gz
+  evidence/index-r2.json generated/release-evidence.tar.gz
 # After extraction, verify the closed chain from any new parent directory:
 mkdir -p extracted && tar -xpzf generated/release-evidence.tar.gz -C extracted
 go run ./cmd/pgworkbench evidence bundle verify --json \
@@ -681,6 +687,14 @@ durable URI remains in `unqualified_evidence` and cannot authorize release
 `GO`. V3 intentionally has no verified override; a proof-backed class will be
 introduced only with a typed verifier that authenticates the remote object and
 producer.
+
+`evidence controls attach` accepts no individual control names or statuses. It
+derives the tag-ruleset, bypass-review, and immutable-release states together
+from one strict candidate-bound record and rejects partial or superseding
+updates. Its three path-specific evidence entries still share the same record
+digest and operator-attested trust boundary, so they remain an effective
+`NO-GO` until remote durability and review authenticity are independently
+verified.
 
 The closed evidence bundle retains only the exact project-authored index
 revision bytes and `release-evidence-bundle.json`; it does not copy or fetch the

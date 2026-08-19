@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +98,32 @@ func TestBundleAcceptsConsistentFailedNoGoHead(t *testing.T) {
 	}
 	if !verification.Valid || verification.IndexVerification.Status != StatusFailed || verification.IndexVerification.Decision != DecisionNoGo || result.IndexVerification.Status != StatusFailed {
 		t.Fatalf("failed no-go chain was not preserved: create=%+v verify=%+v", result.IndexVerification, verification)
+	}
+}
+
+func TestBundleAcceptsRegisteredPreventiveControlsTransitionAsUnqualifiedNoGo(t *testing.T) {
+	chain := t.TempDir()
+	head := createBundleControlsTestChain(t, chain)
+	output := filepath.Join(t.TempDir(), "controls.tar.gz")
+	result, err := CreateBundle(head, output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := extractBundleForTest(t, output, t.TempDir())
+	verification, err := VerifyBundle(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.Valid || !result.IndexVerification.Valid || verification.IndexVerification.Decision != DecisionNoGo || verification.IndexVerification.AuthorizationEligible {
+		t.Fatalf("registered controls transition was not preserved as valid NO-GO: create=%+v verify=%+v", result.IndexVerification, verification)
+	}
+	want := []string{
+		"preventive_controls.immutable_releases",
+		"preventive_controls.tag_ruleset",
+		"preventive_controls.tag_ruleset.bypass_review",
+	}
+	if !reflect.DeepEqual(verification.IndexVerification.UnqualifiedEvidence, want) {
+		t.Fatalf("unqualified control evidence = %v, want %v", verification.IndexVerification.UnqualifiedEvidence, want)
 	}
 }
 
@@ -775,7 +802,7 @@ func TestVerifyBundleRejectsTamperMatrix(t *testing.T) {
 		},
 		{
 			name:  "unregistered preventive controls transition",
-			issue: "preventive control transitions are not registered",
+			issue: "registered preventive controls attachment must retain",
 			edit: func(t *testing.T, root string) {
 				path := filepath.Join(root, "index-r1.json")
 				index := readBundleTestIndex(t, path)
@@ -1123,6 +1150,96 @@ func createBundleTestChain(t *testing.T, directory, gateStatus string) string {
 		t.Fatal(err)
 	}
 	return r1
+}
+
+func createBundleControlsTestChain(t *testing.T, directory string) string {
+	t.Helper()
+	candidate := Candidate{
+		Version:          "0.2.6",
+		Tag:              "v0.2.6",
+		GitCommit:        strings.Repeat("a", 40),
+		AssetFingerprint: strings.Repeat("b", 64),
+		ScenarioPack: ScenarioPack{
+			ID:      "builtin",
+			Version: "0.2.6",
+			Digest:  "sha256:" + strings.Repeat("c", 64),
+		},
+	}
+	index, err := NewIndex(candidate, "2026-08-18T12:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r0 := filepath.Join(directory, "index-r0.json")
+	written, err := WriteNew(r0, index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index.Lineage = &Lineage{Revision: 1, PreviousIndexDigest: &written.Digest}
+	index.SchemaVersion = SchemaVersionV3
+	index.PreventiveControls = typedPreventiveControlsBundleEvidence()
+	if err := finalizeDerivedDecision(&index, "2026-08-18T12:00:01Z"); err != nil {
+		t.Fatal(err)
+	}
+	r1 := filepath.Join(directory, "index-r1.json")
+	if _, err := WriteNew(r1, index); err != nil {
+		t.Fatal(err)
+	}
+	return r1
+}
+
+func typedPreventiveControlsBundleEvidence() PreventiveControls {
+	runID := "987654321"
+	runAttempt := int64(1)
+	base := Evidence{
+		Ref:        "urn:pgworkbench:evidence:bundle-controls-test",
+		Digest:     "sha256:" + strings.Repeat("d", 64),
+		CapturedAt: "2026-08-18T12:00:01Z",
+		RunID:      &runID,
+		RunAttempt: &runAttempt,
+		Assurance: &EvidenceAssurance{
+			Durability:   EvidenceDurabilityAsserted,
+			Authenticity: EvidenceAuthenticityUnverified,
+		},
+	}
+	withAdapter := func(adapter string) *Evidence {
+		result := base
+		result.Record = &EvidenceRecord{
+			SchemaVersion: PreventiveControlsVerificationSchema,
+			ArtifactType:  PreventiveControlsVerificationType,
+			Adapter:       adapter,
+		}
+		return &result
+	}
+	reviewer := "release-admin"
+	reviewedAt := "2026-08-18T12:00:00Z"
+	updatedAt := "2026-08-18T11:00:00Z"
+	rulesetID := int64(42)
+	return PreventiveControls{
+		TagRuleset: TagRuleset{
+			Status:             ControlStatusVerified,
+			Target:             "tag",
+			Enforcement:        "active",
+			IncludePattern:     "refs/tags/v*",
+			Excludes:           []string{},
+			CreationRestricted: boolPointer(true),
+			UpdateProhibited:   boolPointer(true),
+			DeletionProhibited: boolPointer(true),
+			APIEvidence:        withAdapter(PreventiveControlsTagRulesetAdapter),
+			BypassReview: AdminReview{
+				Status:           ReviewStatusAdminReviewed,
+				Reviewer:         &reviewer,
+				ReviewedAt:       &reviewedAt,
+				RulesetID:        &rulesetID,
+				RulesetUpdatedAt: &updatedAt,
+				Evidence:         withAdapter(PreventiveControlsBypassReviewAdapter),
+			},
+		},
+		ImmutableReleases: ImmutableReleases{
+			Status:      ControlStatusVerified,
+			Enabled:     boolPointer(true),
+			APIEvidence: withAdapter(PreventiveControlsImmutableReleasesAdapter),
+		},
+	}
 }
 
 func typedCompatibilityBundleEvidence() *Evidence {

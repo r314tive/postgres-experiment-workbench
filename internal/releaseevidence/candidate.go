@@ -165,37 +165,41 @@ func CandidateFromArtifacts(manifest releasemanifest.Manifest, inventory release
 // It is intentionally active/no-go; candidate initialization closes no gate.
 func NewIndex(candidate Candidate, createdAt string) (Index, error) {
 	index := Index{
-		SchemaVersion: SchemaVersionV3,
-		ArtifactType:  ArtifactType,
-		Lineage:       &Lineage{Revision: 0},
-		RecordStatus:  RecordStatusActive,
-		CreatedAt:     createdAt,
-		Candidate:     candidate,
-		PreventiveControls: PreventiveControls{
-			TagRuleset: TagRuleset{
-				Status:             ControlStatusOpen,
-				Target:             "tag",
-				Enforcement:        "active",
-				IncludePattern:     "refs/tags/v*",
-				Excludes:           []string{},
-				CreationRestricted: boolPointer(true),
-				UpdateProhibited:   boolPointer(true),
-				DeletionProhibited: boolPointer(true),
-				BypassReview:       AdminReview{Status: ReviewStatusOpen},
-			},
-			ImmutableReleases: ImmutableReleases{
-				Status:  ControlStatusOpen,
-				Enabled: boolPointer(false),
-			},
-		},
-		Gates:    openGates(),
-		Decision: Decision{Scope: DecisionScope, Status: DecisionNoGo, RecordedAt: createdAt, Reasons: []string{"Readiness requirements remain open."}},
+		SchemaVersion:      SchemaVersionV3,
+		ArtifactType:       ArtifactType,
+		Lineage:            &Lineage{Revision: 0},
+		RecordStatus:       RecordStatusActive,
+		CreatedAt:          createdAt,
+		Candidate:          candidate,
+		PreventiveControls: canonicalOpenPreventiveControls(),
+		Gates:              openGates(),
+		Decision:           Decision{Scope: DecisionScope, Status: DecisionNoGo, RecordedAt: createdAt, Reasons: []string{"Readiness requirements remain open."}},
 	}
 	verification := Verify(index)
 	if !verification.Valid {
 		return Index{}, fmt.Errorf("derive release evidence index: %s", joinIssues(verification.Issues))
 	}
 	return index, nil
+}
+
+func canonicalOpenPreventiveControls() PreventiveControls {
+	return PreventiveControls{
+		TagRuleset: TagRuleset{
+			Status:             ControlStatusOpen,
+			Target:             "tag",
+			Enforcement:        "active",
+			IncludePattern:     "refs/tags/v*",
+			Excludes:           []string{},
+			CreationRestricted: boolPointer(true),
+			UpdateProhibited:   boolPointer(true),
+			DeletionProhibited: boolPointer(true),
+			BypassReview:       AdminReview{Status: ReviewStatusOpen},
+		},
+		ImmutableReleases: ImmutableReleases{
+			Status:  ControlStatusOpen,
+			Enabled: boolPointer(false),
+		},
+	}
 }
 
 func openGates() Gates {

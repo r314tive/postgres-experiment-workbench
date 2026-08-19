@@ -851,13 +851,11 @@ func verifyBundleTransition(previous, current Index, name string) []string {
 		}
 	}
 	controlsChanged := !reflect.DeepEqual(previous.PreventiveControls, current.PreventiveControls)
-	if controlsChanged {
-		issues = append(issues, name+": preventive control transitions are not registered for closed bundle lineage")
-	}
 	switch {
 	case controlsChanged && changedGates != 0:
 		issues = append(issues, name+": one revision cannot mutate both preventive controls and a readiness gate")
 	case controlsChanged:
+		issues = append(issues, verifyBundleControlsTransition(previous, current, name)...)
 	case changedGates != 1:
 		issues = append(issues, fmt.Sprintf("%s must close exactly one previously open readiness gate", name))
 	default:
@@ -894,6 +892,98 @@ func verifyBundleTransition(previous, current Index, name string) []string {
 		}
 	}
 	return issues
+}
+
+func verifyBundleControlsTransition(previous, current Index, name string) []string {
+	issues := make([]string, 0)
+	if !reflect.DeepEqual(previous.PreventiveControls, canonicalOpenPreventiveControls()) {
+		return append(issues, name+": preventive controls attachment requires the exact canonical open predecessor state")
+	}
+	tagEvidence := current.PreventiveControls.TagRuleset.APIEvidence
+	reviewEvidence := current.PreventiveControls.TagRuleset.BypassReview.Evidence
+	immutableEvidence := current.PreventiveControls.ImmutableReleases.APIEvidence
+	if current.PreventiveControls.TagRuleset.Status != ControlStatusVerified ||
+		current.PreventiveControls.TagRuleset.BypassReview.Status != ReviewStatusAdminReviewed ||
+		current.PreventiveControls.ImmutableReleases.Status != ControlStatusVerified ||
+		tagEvidence == nil || reviewEvidence == nil || immutableEvidence == nil {
+		return append(issues, name+": preventive controls attachment must close the exact three registered controls atomically")
+	}
+	if metadataIssue := bundleControlsAttachmentMetadataIssue(previous, current.PreventiveControls); metadataIssue != "" {
+		return append(issues, name+": "+metadataIssue)
+	}
+
+	expected := previous
+	expected.PreventiveControls.TagRuleset.Status = ControlStatusVerified
+	expected.PreventiveControls.TagRuleset.APIEvidence = tagEvidence
+	expected.PreventiveControls.TagRuleset.BypassReview = AdminReview{
+		Status:           ReviewStatusAdminReviewed,
+		Reviewer:         current.PreventiveControls.TagRuleset.BypassReview.Reviewer,
+		ReviewedAt:       current.PreventiveControls.TagRuleset.BypassReview.ReviewedAt,
+		RulesetID:        current.PreventiveControls.TagRuleset.BypassReview.RulesetID,
+		RulesetUpdatedAt: current.PreventiveControls.TagRuleset.BypassReview.RulesetUpdatedAt,
+		Evidence:         reviewEvidence,
+	}
+	expected.PreventiveControls.ImmutableReleases = ImmutableReleases{
+		Status:      ControlStatusVerified,
+		Enabled:     boolPointer(true),
+		APIEvidence: immutableEvidence,
+	}
+	expected.SchemaVersion = SchemaVersionV3
+	expected.Lineage = current.Lineage
+	if err := finalizeDerivedDecision(&expected, tagEvidence.CapturedAt); err != nil {
+		return append(issues, name+": cannot reconstruct registered preventive controls attachment: "+err.Error())
+	}
+	if !reflect.DeepEqual(expected, current) {
+		issues = append(issues, name+": successor is not the exact registered preventive controls attachment transition")
+	}
+	return issues
+}
+
+func bundleControlsAttachmentMetadataIssue(previous Index, controls PreventiveControls) string {
+	evidence := []*Evidence{
+		controls.TagRuleset.APIEvidence,
+		controls.TagRuleset.BypassReview.Evidence,
+		controls.ImmutableReleases.APIEvidence,
+	}
+	for _, item := range evidence {
+		if item == nil || item.Record == nil || item.Assurance == nil ||
+			!canonicalTimestampPattern.MatchString(item.CapturedAt) ||
+			item.RunID == nil || !validUnsignedDecimal(*item.RunID) ||
+			item.RunAttempt == nil || *item.RunAttempt < 1 || *item.RunAttempt > maxJSONSafeInteger {
+			return "registered preventive controls attachment must retain typed workflow record, assurance, and canonical run identity"
+		}
+	}
+	wantAdapters := []string{
+		PreventiveControlsTagRulesetAdapter,
+		PreventiveControlsBypassReviewAdapter,
+		PreventiveControlsImmutableReleasesAdapter,
+	}
+	for index, item := range evidence {
+		if item.Record.Adapter != wantAdapters[index] {
+			return "registered preventive controls attachment must retain all three path-specific adapter identities"
+		}
+		if !reflect.DeepEqual(normalizedPreventiveControlEvidence(*evidence[0]), normalizedPreventiveControlEvidence(*item)) {
+			return "registered preventive controls attachment paths must share one exact record identity and assurance"
+		}
+	}
+	createdAt, createdOK := parseDateTime(previous.CreatedAt)
+	capturedAt, capturedOK := parseDateTime(evidence[0].CapturedAt)
+	if !createdOK || !capturedOK || capturedAt.Before(createdAt) {
+		return "preventive controls evidence captured_at precedes candidate initialization"
+	}
+	review := controls.TagRuleset.BypassReview
+	if review.Reviewer == nil || !preventiveControlsReviewerPattern.MatchString(*review.Reviewer) ||
+		review.ReviewedAt == nil || review.RulesetUpdatedAt == nil ||
+		!canonicalTimestampPattern.MatchString(*review.ReviewedAt) ||
+		!canonicalTimestampPattern.MatchString(*review.RulesetUpdatedAt) {
+		return "preventive controls review must retain its canonical reviewer and UTC timestamps"
+	}
+	reviewedAt, reviewedOK := parseDateTime(*review.ReviewedAt)
+	updatedAt, updatedOK := parseDateTime(*review.RulesetUpdatedAt)
+	if !reviewedOK || !updatedOK || capturedAt.Before(reviewedAt) || capturedAt.Before(updatedAt) {
+		return "preventive controls review and ruleset timestamps must not follow evidence captured_at"
+	}
+	return ""
 }
 
 func bundleGateStatusAllowed(gate, status string) bool {

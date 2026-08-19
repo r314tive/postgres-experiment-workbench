@@ -3,6 +3,7 @@ package releaseevidence
 import (
 	"fmt"
 	"net/url"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -436,7 +437,80 @@ func validatePreventiveControls(add func(string, ...any), controls PreventiveCon
 	if !immutableValid {
 		valid = false
 	}
+	if !validatePreventiveControlsEvidenceSet(add, controls) {
+		valid = false
+	}
 	return states, qualifications, valid
+}
+
+func validatePreventiveControlsEvidenceSet(add func(string, ...any), controls PreventiveControls) bool {
+	evidence := []*Evidence{
+		controls.TagRuleset.APIEvidence,
+		controls.TagRuleset.BypassReview.Evidence,
+		controls.ImmutableReleases.APIEvidence,
+	}
+	hasTypedRecord := false
+	for _, item := range evidence {
+		if item != nil && item.Record != nil {
+			hasTypedRecord = true
+			break
+		}
+	}
+	// Legacy v1/v2 control observations can have no persisted record metadata.
+	// Once one path names the typed controls adapter, all three paths must be
+	// the one atomic observation emitted by AttachControls.
+	if !hasTypedRecord {
+		return true
+	}
+	if controls.TagRuleset.Status != ControlStatusVerified ||
+		controls.TagRuleset.BypassReview.Status != ReviewStatusAdminReviewed ||
+		controls.ImmutableReleases.Status != ControlStatusVerified {
+		add("typed preventive-control evidence must close tag ruleset, bypass review, and immutable releases atomically")
+		return false
+	}
+	for _, item := range evidence {
+		if item == nil || item.Record == nil || item.Assurance == nil {
+			add("typed preventive-control evidence must be present on all three control paths")
+			return false
+		}
+		if !canonicalTimestampPattern.MatchString(item.CapturedAt) ||
+			item.RunID == nil || !validUnsignedDecimal(*item.RunID) ||
+			item.RunAttempt == nil || *item.RunAttempt < 1 || *item.RunAttempt > maxJSONSafeInteger {
+			add("typed preventive-control evidence must retain canonical workflow capture and run identity")
+			return false
+		}
+	}
+	review := controls.TagRuleset.BypassReview
+	if review.Reviewer == nil || !preventiveControlsReviewerPattern.MatchString(*review.Reviewer) ||
+		review.ReviewedAt == nil || !canonicalTimestampPattern.MatchString(*review.ReviewedAt) ||
+		review.RulesetUpdatedAt == nil || !canonicalTimestampPattern.MatchString(*review.RulesetUpdatedAt) {
+		add("typed preventive-control review must retain its canonical reviewer and UTC timestamps")
+		return false
+	}
+	capturedAt, capturedOK := parseDateTime(evidence[0].CapturedAt)
+	reviewedAt, reviewedOK := parseDateTime(*review.ReviewedAt)
+	updatedAt, updatedOK := parseDateTime(*review.RulesetUpdatedAt)
+	if !capturedOK || !reviewedOK || !updatedOK || capturedAt.Before(reviewedAt) || capturedAt.Before(updatedAt) {
+		add("typed preventive-control review and ruleset timestamps must not follow evidence captured_at")
+		return false
+	}
+	want := normalizedPreventiveControlEvidence(*evidence[0])
+	for _, item := range evidence[1:] {
+		if !reflect.DeepEqual(want, normalizedPreventiveControlEvidence(*item)) {
+			add("typed preventive-control evidence paths must retain one exact record identity and assurance")
+			return false
+		}
+	}
+	return true
+}
+
+func normalizedPreventiveControlEvidence(evidence Evidence) Evidence {
+	if evidence.Record != nil {
+		record := *evidence.Record
+		record.Adapter = ""
+		evidence.Record = &record
+	}
+	return evidence
 }
 
 func validateTagRuleset(add func(string, ...any), control TagRuleset) (string, string, bool) {
@@ -649,6 +723,15 @@ func validateEvidenceRecord(add func(string, ...any), recordPath, evidencePath s
 	adapterRequired := false
 	subjectRequired := false
 	switch evidencePath {
+	case "preventive_controls.tag_ruleset.api_evidence":
+		wantSchema, wantType, wantAdapter = PreventiveControlsVerificationSchema, PreventiveControlsVerificationType, PreventiveControlsTagRulesetAdapter
+		adapterRequired = true
+	case "preventive_controls.tag_ruleset.bypass_review.evidence":
+		wantSchema, wantType, wantAdapter = PreventiveControlsVerificationSchema, PreventiveControlsVerificationType, PreventiveControlsBypassReviewAdapter
+		adapterRequired = true
+	case "preventive_controls.immutable_releases.api_evidence":
+		wantSchema, wantType, wantAdapter = PreventiveControlsVerificationSchema, PreventiveControlsVerificationType, PreventiveControlsImmutableReleasesAdapter
+		adapterRequired = true
 	case "gates.source_compatibility.evidence":
 		wantSchema, wantType, wantAdapter = CompatibilityVerificationSchema, CompatibilityVerificationType, CompatibilitySourceAdapter
 		adapterRequired = true

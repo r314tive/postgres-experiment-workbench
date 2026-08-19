@@ -55,22 +55,23 @@ and repeating every release gate.
 | M8 | Portable trusted execution | Signed job/result capsules run on a single-use worker before any scheduler or Kubernetes control plane |
 | M9 | v1 product gate | Published immutable candidate plus independent adoption and zero open critical integrity findings |
 
-Current execution state on `next/v0.3`:
+Current implementation state:
 
 - M1.1 is implemented and committed: strict semantic status/verification works
   outside a checkout and derives `GO`/`NO-GO` independently.
 - Candidate initialization is implemented and committed: exact 16-asset
   snapshot, manifest/inventory cross-binding, revision zero, copy-on-write
   publication, and typed ambiguous-commit handling.
-- The typed attachment framework and four pass-only mappings are implemented.
-  External-driver, draft/public asset, and post-publication records close only
-  their adapter-owned gates; the caller cannot supply an outcome. The persisted
-  adapter discriminator keeps draft and published uses of the shared asset
-  record type distinct during later semantic verification.
-- M1.2 remains open until the remaining workflow producers emit equally strict
-  candidate-bound records and preventive controls have a separate atomic
-  attachment adapter. Unsupported records stay open rather than being inferred
-  from artifact presence.
+- The typed attachment framework covers all declared workflow gate mappings.
+  External-driver, draft/public asset, publication, compatibility, and aggregate
+  records close only their adapter-owned gates; the caller cannot supply an
+  outcome. Persisted adapter discriminators prevent cross-path transplantation.
+- M1.2 control-plane code now includes the remaining preventive-controls
+  vertical slice: a post-draft typed producer, strict standalone schema, atomic
+  three-control attachment, independent verification, and the one exact bundle
+  transition. This completes the adapter surface, not live release readiness:
+  no durable authenticated control record has been attached, and current
+  operator-attested assurance remains `NO-GO`.
 - M1.3 readers are implemented for signed critical-finding reviews and
   completed external pilot records. They preserve participant identity across
   pilot attachments, reject duplicate pilots, and require independently
@@ -151,6 +152,8 @@ pgworkbench evidence candidate init --release-manifest ... \
   --asset-inventory ... --output index-r0.json
 pgworkbench evidence gate attach --index index-r0.json --gate ... \
   --evidence-file ... --evidence-ref ... --output index-r1.json
+pgworkbench evidence controls attach --index index-rN.json \
+  --evidence-file ... --evidence-ref ... --output index-rN+1.json
 ```
 
 Candidate identity is derived from verified release artifacts. Version, commit,
@@ -495,12 +498,15 @@ The current M1.2b tranche establishes the attachment substrate:
    records are sealed post-draft over exact provider artifact identities; the
    second aggregate record hash-binds the first. All remain operator-attested
    and non-authorizing;
-7. next: preventive controls require a separate atomic three-control adapter
-   over a final live recheck. Current raw directories, workflow success,
-   pre-draft control snapshots, or asset inventories alone are not positive
-   evidence;
-8. exit: finish the remaining adapters, full fault/race/standalone matrix, and
-   only then mark M1.2 complete.
+7. completed: preventive controls have a separate candidate-bound record and
+   atomic three-control adapter over a fresh post-draft live observation. The
+   final publisher consumes the exact sealed artifact and rechecks live state;
+   raw directories, workflow success, and pre-draft snapshots alone remain
+   insufficient;
+8. completed: the verifier and closed bundle accept only the exact registered
+   atomic transition, with standalone, tamper, no-clobber, and publication-fault
+   coverage. M1.2 is code-complete while real durable evidence and a
+   proof-backed authorization class remain later live gates.
 
 M1.3 typed pilot/critical-review readers and M1.4 relocated closed bundles then
 complete the control plane. M2.1 A/A calibration starts only after the M1 exit

@@ -201,6 +201,7 @@ func usage() {
 	pgworkbench evidence release status [--json] <release-evidence-index.json>
 	pgworkbench evidence candidate init --release-manifest file --asset-inventory file --output index.json [--json]
 	pgworkbench evidence gate attach --index index-rN.json --gate name --evidence-file record.json --evidence-ref uri --output index-rN+1.json [--json]
+	pgworkbench evidence controls attach --index index-rN.json --evidence-file record.json --evidence-ref uri --output index-rN+1.json [--json]
 	pgworkbench evidence bundle create [--json] <index-rN.json> <bundle.tar.gz>
 	pgworkbench evidence bundle verify [--json] <extracted-root>
 	pgworkbench bridge pgdrill export [--json] [--bundle] [--reviewed-predicate-file file] <run-or-bundle> <output.json>
@@ -548,6 +549,9 @@ func runEvidenceTo(writer io.Writer, args []string) error {
 	if len(args) >= 2 && args[0] == "gate" && args[1] == "attach" {
 		return runEvidenceGateAttach(writer, args[2:])
 	}
+	if len(args) >= 2 && args[0] == "controls" && args[1] == "attach" {
+		return runEvidenceControlsAttach(writer, args[2:])
+	}
 	if len(args) >= 2 && args[0] == "bundle" {
 		switch args[1] {
 		case "create":
@@ -557,7 +561,7 @@ func runEvidenceTo(writer io.Writer, args []string) error {
 		}
 	}
 	if len(args) < 2 || args[0] != "release" || (args[1] != "verify" && args[1] != "status") {
-		return fmt.Errorf("usage: pgworkbench evidence <release <verify|status>|candidate init|gate attach|bundle <create|verify>> [options]")
+		return fmt.Errorf("usage: pgworkbench evidence <release <verify|status>|candidate init|gate attach|controls attach|bundle <create|verify>> [options]")
 	}
 	action := args[1]
 	jsonOutput, inputs, err := parseJSONOptionArgs(args[2:])
@@ -799,6 +803,101 @@ func renderGateAttachResult(writer io.Writer, jsonOutput bool, result releaseevi
 		result.IndexVerification.Decision,
 	)
 	return nil
+}
+
+func runEvidenceControlsAttach(writer io.Writer, args []string) error {
+	values := make(map[string]string)
+	jsonOutput := false
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--json":
+			if jsonOutput {
+				return fmt.Errorf("duplicate option: --json")
+			}
+			jsonOutput = true
+		case "--index", "--evidence-file", "--evidence-ref", "--output":
+			if index+1 >= len(args) {
+				return fmt.Errorf("%s requires a value", args[index])
+			}
+			key := strings.TrimPrefix(args[index], "--")
+			if _, exists := values[key]; exists {
+				return fmt.Errorf("duplicate option: %s", args[index])
+			}
+			values[key] = args[index+1]
+			index++
+		default:
+			return fmt.Errorf("unknown option: %s", args[index])
+		}
+	}
+	for _, required := range []string{"index", "evidence-file", "evidence-ref", "output"} {
+		if values[required] == "" {
+			return fmt.Errorf("--%s is required", required)
+		}
+	}
+	result, err := releaseevidence.AttachControls(releaseevidence.ControlsAttachOptions{
+		IndexPath:    values["index"],
+		EvidenceFile: values["evidence-file"],
+		EvidenceRef:  values["evidence-ref"],
+		Output:       values["output"],
+	})
+	return renderControlsAttachResult(writer, jsonOutput, result, err)
+}
+
+type controlsAttachCommittedOutput struct {
+	Status    string                               `json:"status"`
+	Committed bool                                 `json:"committed"`
+	Confirmed bool                                 `json:"confirmed"`
+	RetrySafe bool                                 `json:"retry_safe"`
+	Error     string                               `json:"error"`
+	Result    releaseevidence.ControlsAttachResult `json:"result"`
+}
+
+func renderControlsAttachResult(writer io.Writer, jsonOutput bool, result releaseevidence.ControlsAttachResult, attachErr error) error {
+	if attachErr != nil {
+		var committed *releaseevidence.CommittedError
+		if !errors.As(attachErr, &committed) {
+			return attachErr
+		}
+		if jsonOutput {
+			encoder := json.NewEncoder(writer)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(controlsAttachCommittedOutput{
+				Status:    "committed-unconfirmed",
+				Committed: true,
+				Confirmed: false,
+				RetrySafe: false,
+				Error:     attachErr.Error(),
+				Result:    result,
+			}); err != nil {
+				return errors.Join(attachErr, err)
+			}
+		} else if _, err := fmt.Fprintf(writer, "COMMITTED-UNCONFIRMED: preventive-controls attachment output=%s digest=%s retry-safe=false\n", result.Output, result.Digest); err != nil {
+			return errors.Join(attachErr, err)
+		}
+		return attachErr
+	}
+	if jsonOutput {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+	_, err := fmt.Fprintf(
+		writer,
+		"ATTACHED: controls=%s revision=%d output=%s digest=%s evidence_digest=%s durability=%s authenticity=%s unqualified=%d assurance=%s authorization_eligible=%t release_status=%s decision=%s\n",
+		strings.Join(result.Controls, ","),
+		result.Revision,
+		result.Output,
+		result.Digest,
+		result.EvidenceDigest,
+		result.EvidenceDurability,
+		result.EvidenceAuthenticity,
+		len(result.IndexVerification.UnqualifiedEvidence),
+		result.IndexVerification.AssuranceStatus,
+		result.IndexVerification.AuthorizationEligible,
+		result.IndexVerification.Status,
+		result.IndexVerification.Decision,
+	)
+	return err
 }
 
 func runEvidenceBundleCreate(writer io.Writer, args []string) error {
