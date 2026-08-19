@@ -14,6 +14,11 @@ three tracked templates are:
   validated by
   [`critical-finding-review.schema.json`](../schemas/critical-finding-review.schema.json).
 
+The generated `release-evidence-bundle.json` closed inventory is validated by
+[`release-evidence-bundle-inventory.schema.json`](../schemas/release-evidence-bundle-inventory.schema.json).
+It is generated from an existing immutable revision chain and therefore has no
+tracked template.
+
 The release workflow additionally emits a typed
 [`release-asset-inventory`](../schemas/release-asset-inventory.schema.json)
 record alongside draft/public verification evidence. It is deliberately not a
@@ -323,3 +328,53 @@ GitHub Actions run/artifact URLs are rejected because their retention is
 transport-only. Move the exact summary bytes to a versioned or
 content-addressed durable location first. A successful attachment can still
 report `release_status=open decision=no-go`; it is not release authorization.
+
+## Closed evidence bundle contract
+
+M1.4 defines a deterministic, relocatable archive around one complete index
+revision chain:
+
+```bash
+pgworkbench evidence bundle create --json \
+  evidence/index-r7.json generated/release-evidence-r7.tar.gz
+
+# Preserve the archived 0644 modes even under a restrictive umask, then verify:
+mkdir -p extracted
+tar -xpzf generated/release-evidence-r7.tar.gz -C extracted
+pgworkbench evidence bundle verify --json \
+  extracted/pgworkbench-release-evidence
+```
+
+The schema, command surface, and full relocation/tamper/fault/race matrix now
+complete the bounded M1.4 packaging gate. They do not complete M1, authenticate
+external evidence, or authorize a release. The archive root contains exactly
+`release-evidence-bundle.json` and the canonical
+contiguous `index-r0.json` through `index-r<N>.json` chain. Index bytes are
+copied verbatim: durable `evidence.ref` values are neither rewritten to local
+paths nor replaced by bundled copies of the referenced objects.
+
+`index-r<N>.json` selects an explicit immutable prefix. Adjacent later
+revisions are not imported and do not invalidate that prefix; the bundle makes
+no claim that `N` is a globally current or unique head.
+
+The inventory binds the full candidate identity, canonical head name/revision,
+exact head digest, independently recomputed outcome, file count, total size,
+sorted path/revision/size/digest/mode rows, and a deterministic tree digest.
+Index files have normalized mode `0644`; the inventory permits at most 256
+revisions and uses JSON-safe integer bounds. Extraction must preserve archived
+modes (`tar -xpzf`, not an umask-dependent extraction). Verification must
+reject a gap, wrong predecessor digest, different candidate, missing or extra
+path, duplicate or unsorted row, symlink or non-regular entry, changed bytes,
+size or mode, and an index transplanted from a different chain. A well-formed
+bundle whose head derives `NO-GO` remains valid evidence of `NO-GO`; packaging
+never promotes it to `GO`.
+
+The bundle deliberately contains no downloaded gate-record bytes, GitHub
+Actions logs, provider artifacts, or other externally authored evidence. It
+therefore proves only the relocated chain's internal byte, mode, lineage,
+candidate, and outcome consistency. It does not verify remote retention,
+authenticate a durable URI or producer, validate a signature, or authorize a
+release. Because the inventory is unsigned and self-describing, an attacker
+who rewrites the complete chain and inventory can create a different internally
+consistent bundle; publisher trust still requires an independently trusted
+archive digest, signature, or release provenance.

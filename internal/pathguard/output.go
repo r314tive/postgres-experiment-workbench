@@ -264,5 +264,32 @@ func resolveProspectiveDirectory(path string) (string, error) {
 
 func within(root, candidate string) bool {
 	relative, err := filepath.Rel(root, candidate)
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+	if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return true
+	}
+
+	// filepath.Rel is lexical and therefore cannot recognize alternate case on
+	// a case-insensitive filesystem. Walk every existing candidate ancestor and
+	// compare filesystem identities so /CaseChain and /casechain cannot bypass
+	// immutable-source containment. Unexpected inspection failures reject the
+	// candidate conservatively.
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return true
+	}
+	for cursor := filepath.Clean(candidate); ; cursor = filepath.Dir(cursor) {
+		info, statErr := os.Stat(cursor)
+		if statErr == nil {
+			if os.SameFile(rootInfo, info) {
+				return true
+			}
+		} else if !os.IsNotExist(statErr) {
+			return true
+		}
+		parent := filepath.Dir(cursor)
+		if parent == cursor {
+			break
+		}
+	}
+	return false
 }

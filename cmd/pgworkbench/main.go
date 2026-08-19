@@ -201,6 +201,8 @@ func usage() {
 	pgworkbench evidence release status [--json] <release-evidence-index.json>
 	pgworkbench evidence candidate init --release-manifest file --asset-inventory file --output index.json [--json]
 	pgworkbench evidence gate attach --index index-rN.json --gate name --evidence-file record.json --evidence-ref uri --output index-rN+1.json [--json]
+	pgworkbench evidence bundle create [--json] <index-rN.json> <bundle.tar.gz>
+	pgworkbench evidence bundle verify [--json] <extracted-root>
 	pgworkbench bridge pgdrill export [--json] [--bundle] [--reviewed-predicate-file file] <run-or-bundle> <output.json>
 	pgworkbench bridge pgdrill verify [--json] [--source run-or-bundle] <baseline.json>
   pgworkbench dataset list [--raw]
@@ -546,8 +548,16 @@ func runEvidenceTo(writer io.Writer, args []string) error {
 	if len(args) >= 2 && args[0] == "gate" && args[1] == "attach" {
 		return runEvidenceGateAttach(writer, args[2:])
 	}
+	if len(args) >= 2 && args[0] == "bundle" {
+		switch args[1] {
+		case "create":
+			return runEvidenceBundleCreate(writer, args[2:])
+		case "verify":
+			return runEvidenceBundleVerify(writer, args[2:])
+		}
+	}
 	if len(args) < 2 || args[0] != "release" || (args[1] != "verify" && args[1] != "status") {
-		return fmt.Errorf("usage: pgworkbench evidence <release <verify|status>|candidate init|gate attach> [options]")
+		return fmt.Errorf("usage: pgworkbench evidence <release <verify|status>|candidate init|gate attach|bundle <create|verify>> [options]")
 	}
 	action := args[1]
 	jsonOutput, inputs, err := parseJSONOptionArgs(args[2:])
@@ -789,6 +799,150 @@ func renderGateAttachResult(writer io.Writer, jsonOutput bool, result releaseevi
 		result.IndexVerification.Decision,
 	)
 	return nil
+}
+
+func runEvidenceBundleCreate(writer io.Writer, args []string) error {
+	jsonOutput, inputs, err := parseEvidenceBundleArgs(args)
+	if err != nil {
+		return err
+	}
+	if len(inputs) != 2 {
+		return fmt.Errorf("usage: pgworkbench evidence bundle create [--json] <index-rN.json> <bundle.tar.gz>")
+	}
+	result, err := releaseevidence.CreateBundle(inputs[0], inputs[1])
+	return renderEvidenceBundleCreateResult(writer, jsonOutput, result, err)
+}
+
+type evidenceBundleCommittedOutput struct {
+	Status    string                             `json:"status"`
+	Committed bool                               `json:"committed"`
+	Confirmed bool                               `json:"confirmed"`
+	RetrySafe bool                               `json:"retry_safe"`
+	Error     string                             `json:"error"`
+	Result    releaseevidence.BundleCreateResult `json:"result"`
+}
+
+func renderEvidenceBundleCreateResult(writer io.Writer, jsonOutput bool, result releaseevidence.BundleCreateResult, createErr error) error {
+	if createErr != nil {
+		var committed *releaseevidence.BundleCommittedError
+		if !errors.As(createErr, &committed) {
+			return createErr
+		}
+		if jsonOutput {
+			encoder := json.NewEncoder(writer)
+			encoder.SetIndent("", "  ")
+			if err := encoder.Encode(evidenceBundleCommittedOutput{
+				Status:    "committed-unconfirmed",
+				Committed: true,
+				Confirmed: false,
+				RetrySafe: false,
+				Error:     createErr.Error(),
+				Result:    result,
+			}); err != nil {
+				return errors.Join(createErr, err)
+			}
+		} else if _, err := fmt.Fprintf(writer, "COMMITTED-UNCONFIRMED: release evidence bundle output=%s digest=%s retry-safe=false\n", result.Output, result.Digest); err != nil {
+			return errors.Join(createErr, err)
+		}
+		return createErr
+	}
+	if jsonOutput {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
+	_, err := fmt.Fprintf(
+		writer,
+		"CREATED: release evidence bundle output=%s digest=%s candidate=%s revision=%d head=%s head_digest=%s records=%d bytes=%d status=%s decision=%s assurance=%s authorization_eligible=%t\n",
+		result.Output,
+		result.Digest,
+		result.Candidate.Tag,
+		result.HeadRevision,
+		result.HeadIndex,
+		result.HeadDigest,
+		result.Records,
+		result.EvidenceBytes,
+		result.IndexVerification.Status,
+		result.IndexVerification.Decision,
+		result.IndexVerification.AssuranceStatus,
+		result.IndexVerification.AuthorizationEligible,
+	)
+	return err
+}
+
+func runEvidenceBundleVerify(writer io.Writer, args []string) error {
+	jsonOutput, inputs, err := parseEvidenceBundleArgs(args)
+	if err != nil {
+		return err
+	}
+	if len(inputs) != 1 {
+		return fmt.Errorf("usage: pgworkbench evidence bundle verify [--json] <extracted-root>")
+	}
+	verification, err := releaseevidence.VerifyBundle(inputs[0])
+	if err != nil {
+		return err
+	}
+	if jsonOutput {
+		encoder := json.NewEncoder(writer)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(verification); err != nil {
+			return err
+		}
+	} else if verification.Valid {
+		if _, err := fmt.Fprintf(
+			writer,
+			"VALID: release evidence bundle root=%s candidate=%s revision=%d head=%s head_digest=%s records=%d bytes=%d status=%s decision=%s assurance=%s authorization_eligible=%t\n",
+			verification.Root,
+			verification.Candidate.Tag,
+			verification.HeadRevision,
+			verification.HeadIndex,
+			verification.HeadDigest,
+			verification.Records,
+			verification.EvidenceBytes,
+			verification.IndexVerification.Status,
+			verification.IndexVerification.Decision,
+			verification.IndexVerification.AssuranceStatus,
+			verification.IndexVerification.AuthorizationEligible,
+		); err != nil {
+			return err
+		}
+	} else {
+		if _, err := fmt.Fprintf(writer, "INVALID: release evidence bundle root=%s issues=%d\n", verification.Root, len(verification.Issues)); err != nil {
+			return err
+		}
+		for _, issue := range verification.Issues {
+			if _, err := fmt.Fprintf(writer, "- %s\n", issue); err != nil {
+				return err
+			}
+		}
+	}
+	if !verification.Valid {
+		return fmt.Errorf("release evidence bundle verification failed: %s", strings.Join(verification.Issues, "; "))
+	}
+	return nil
+}
+
+func parseEvidenceBundleArgs(args []string) (bool, []string, error) {
+	jsonOutput := false
+	inputs := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "--json":
+			if jsonOutput {
+				return false, nil, fmt.Errorf("duplicate option: --json")
+			}
+			jsonOutput = true
+		case "--":
+			inputs = append(inputs, args[index+1:]...)
+			return jsonOutput, inputs, nil
+		default:
+			if strings.HasPrefix(args[index], "-") {
+				return false, nil, fmt.Errorf("unknown option: %s", args[index])
+			}
+			inputs = append(inputs, args[index])
+		}
+	}
+	return jsonOutput, inputs, nil
 }
 
 func runPGDrillBridge(root string, args []string) error {

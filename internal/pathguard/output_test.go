@@ -99,6 +99,30 @@ func TestPrepareNewOutputOutsideRejectsAliasBeforeCreatingParent(t *testing.T) {
 	}
 }
 
+func TestOutputContainmentRejectsAlternateCaseOnCaseInsensitiveFilesystem(t *testing.T) {
+	container := t.TempDir()
+	source := filepath.Join(container, "CaseChain")
+	if err := os.Mkdir(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alternate := filepath.Join(container, "casechain")
+	sourceInfo, sourceErr := os.Stat(source)
+	alternateInfo, alternateErr := os.Stat(alternate)
+	if sourceErr != nil || alternateErr != nil || !os.SameFile(sourceInfo, alternateInfo) {
+		t.Skip("test filesystem is case-sensitive")
+	}
+	output := filepath.Join(alternate, "newsub", "bundle.tar.gz")
+	if _, err := ResolveOutputOutside(source, output); !errors.Is(err, ErrOutputWithinSource) {
+		t.Fatalf("ResolveOutputOutside mixed-case error = %v, want ErrOutputWithinSource", err)
+	}
+	if _, err := PrepareNewOutputOutside(source, output, 0o755); !errors.Is(err, ErrOutputWithinSource) {
+		t.Fatalf("PrepareNewOutputOutside mixed-case error = %v, want ErrOutputWithinSource", err)
+	}
+	if _, err := os.Lstat(filepath.Join(source, "newsub")); !os.IsNotExist(err) {
+		t.Fatalf("mixed-case containment check created a source child: %v", err)
+	}
+}
+
 func TestPublishFileExclusivePublishesWithoutReplacingExistingPath(t *testing.T) {
 	dir := t.TempDir()
 	destination, err := PrepareNewOutput(filepath.Join(dir, "artifact.json"), 0o755)

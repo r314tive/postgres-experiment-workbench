@@ -159,6 +159,7 @@ the table makes that storage boundary explicit.
 | `pgworkbench.sysbench-native-run-config/v1` | [`benchmark-driver-sysbench-config.schema.json`](../schemas/benchmark-driver-sysbench-config.schema.json) | closed non-secret sysbench PostgreSQL target and workload-control input used to reconstruct fixed argv |
 | `pgworkbench.hammerdb-v6-native-run-config/v1` | [`benchmark-driver-hammerdb-config.schema.json`](../schemas/benchmark-driver-hammerdb-config.schema.json) | closed non-secret HammerDB v6.0 PostgreSQL TPROC-C/TPROC-H execute-only input used to reconstruct adapter-generated Tcl |
 | `pgworkbench.benchmark-import-bundle/v1` | [`benchmark-import-bundle-inventory.schema.json`](../schemas/benchmark-import-bundle-inventory.schema.json) | `benchmark-import-bundle.json` at the extracted import bundle root |
+| `pgworkbench.release-evidence-bundle/v1` | [`release-evidence-bundle-inventory.schema.json`](../schemas/release-evidence-bundle-inventory.schema.json) | generated `release-evidence-bundle.json` at the extracted flat release-evidence chain root; unsigned internal-consistency inventory, not remote evidence authentication or release authorization |
 
 External-driver execution v2 adds
 `execution.json.inputs.driver_runtime`. It records the adapter strategy,

@@ -78,6 +78,12 @@ Current execution state on `next/v0.3`:
   No real external pilot or proof-backed remote record is checked into this
   repository, so adoption remains open and the effective decision remains
   `NO-GO`.
+- M1.4 now has a strict closed-inventory schema, implemented create/verify
+  commands, and a passing relocation/tamper/fault/race matrix: one exact
+  `index-r0.json` through `index-r<N>.json` chain, normalized modes, bounded
+  sorted entries, full candidate/head/outcome binding, and unchanged durable
+  references. This completes the bounded M1.4 packaging gate; it does not mark
+  M1 or adoption complete and does not authenticate the external evidence refs.
 
 ## M0 — publish the frozen v0.2.0 candidate
 
@@ -194,9 +200,17 @@ pgworkbench evidence bundle verify <extracted-root>
 ```
 
 The deterministic bundle contains only project-authored evidence records and a
-closed inventory. It never rewrites durable references into local paths. The
-verifier rejects missing, extra, transplanted, duplicate, symlinked, mode-
-drifted, or digest-changed records after relocation.
+[`release-evidence-bundle.json`](../schemas/release-evidence-bundle-inventory.schema.json)
+closed inventory. The flat archive preserves the exact contiguous
+`index-r0.json` through `index-r<N>.json` bytes and never rewrites durable
+references into local paths or imports the externally referenced evidence
+objects. `N` selects an explicit immutable prefix rather than claiming a
+globally current head. The verifier rejects missing, extra, transplanted,
+duplicate, symlinked, mode-drifted, or digest-changed records after relocation.
+The schema and implementation are present, and the exit matrix below passes on
+the supported native and cross-build paths. M1.4 is complete for this bounded
+internal-closure claim; M1 remains open until its other evidence and adoption
+gates close.
 
 Exit gate:
 

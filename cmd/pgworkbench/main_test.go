@@ -1,7 +1,9 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -292,6 +294,210 @@ func TestRunEvidenceGateAttachRejectsAmbiguousArguments(t *testing.T) {
 			t.Fatalf("runEvidenceTo(%q) error = %v, want %q", test.args, err, test.want)
 		}
 	}
+}
+
+func TestRunEvidenceBundleCreateAndVerifyStandaloneNoGo(t *testing.T) {
+	chain := t.TempDir()
+	candidate := releaseevidence.Candidate{
+		Version:          "0.2.6",
+		Tag:              "v0.2.6",
+		GitCommit:        strings.Repeat("a", 40),
+		AssetFingerprint: strings.Repeat("b", 64),
+		ScenarioPack: releaseevidence.ScenarioPack{
+			ID:      "builtin",
+			Version: "0.2.6",
+			Digest:  "sha256:" + strings.Repeat("c", 64),
+		},
+	}
+	index, err := releaseevidence.NewIndex(candidate, "2026-08-18T12:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := filepath.Join(chain, "index-r0.json")
+	if _, err := releaseevidence.WriteNew(head, index); err != nil {
+		t.Fatal(err)
+	}
+
+	archive := filepath.Join(t.TempDir(), "evidence.tar.gz")
+	var createOutput bytes.Buffer
+	if err := runEvidenceTo(&createOutput, []string{"bundle", "create", head, archive}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"CREATED:", "candidate=v0.2.6", "revision=0", "records=1", "status=open", "decision=no-go", "authorization_eligible=false"} {
+		if !strings.Contains(createOutput.String(), want) {
+			t.Fatalf("bundle create output missing %q: %s", want, createOutput.String())
+		}
+	}
+
+	extracted := extractEvidenceBundleCLI(t, archive, t.TempDir())
+	var verifyOutput bytes.Buffer
+	if err := runEvidenceTo(&verifyOutput, []string{"bundle", "verify", extracted}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"VALID:", "candidate=v0.2.6", "status=open", "decision=no-go", "authorization_eligible=false"} {
+		if !strings.Contains(verifyOutput.String(), want) {
+			t.Fatalf("bundle verify output missing %q: %s", want, verifyOutput.String())
+		}
+	}
+
+	jsonArchive := filepath.Join(t.TempDir(), "evidence-json.tar.gz")
+	var jsonCreate bytes.Buffer
+	if err := runEvidenceTo(&jsonCreate, []string{"bundle", "create", "--json", head, jsonArchive}); err != nil {
+		t.Fatal(err)
+	}
+	var created releaseevidence.BundleCreateResult
+	if err := json.Unmarshal(jsonCreate.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.HeadRevision != 0 || created.IndexVerification.Decision != releaseevidence.DecisionNoGo || created.IndexVerification.AuthorizationEligible {
+		t.Fatalf("unexpected JSON create result: %+v", created)
+	}
+
+	var jsonVerify bytes.Buffer
+	if err := runEvidenceTo(&jsonVerify, []string{"bundle", "verify", "--json", extracted}); err != nil {
+		t.Fatal(err)
+	}
+	var verified releaseevidence.BundleVerification
+	if err := json.Unmarshal(jsonVerify.Bytes(), &verified); err != nil {
+		t.Fatal(err)
+	}
+	if !verified.Valid || verified.IndexVerification.Decision != releaseevidence.DecisionNoGo || verified.IndexVerification.AuthorizationEligible || verified.Issues == nil {
+		t.Fatalf("unexpected JSON verification: %+v", verified)
+	}
+
+	if err := os.WriteFile(filepath.Join(extracted, "extra.json"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var invalidJSON bytes.Buffer
+	err = runEvidenceTo(&invalidJSON, []string{"bundle", "verify", "--json", extracted})
+	if err == nil {
+		t.Fatal("tampered bundle verification succeeded")
+	}
+	var invalid releaseevidence.BundleVerification
+	if decodeErr := json.Unmarshal(invalidJSON.Bytes(), &invalid); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if invalid.Valid || len(invalid.Issues) == 0 {
+		t.Fatalf("invalid JSON result lost issues: %+v", invalid)
+	}
+}
+
+func TestRunEvidenceBundleRejectsAmbiguousArguments(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"bundle"}, want: "usage:"},
+		{args: []string{"bundle", "unknown"}, want: "usage:"},
+		{args: []string{"bundle", "create"}, want: "usage:"},
+		{args: []string{"bundle", "create", "index-r0.json"}, want: "usage:"},
+		{args: []string{"bundle", "create", "one", "two", "three"}, want: "usage:"},
+		{args: []string{"bundle", "verify"}, want: "usage:"},
+		{args: []string{"bundle", "verify", "one", "two"}, want: "usage:"},
+		{args: []string{"bundle", "verify", "--unknown", "root"}, want: "unknown option"},
+		{args: []string{"bundle", "verify", "--json", "--json", "root"}, want: "duplicate option"},
+	} {
+		if err := runEvidenceTo(io.Discard, test.args); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("runEvidenceTo(%q) error = %v, want %q", test.args, err, test.want)
+		}
+	}
+}
+
+func TestRenderEvidenceBundleCreateCommittedErrorIsMachineReadableAndNonRetryable(t *testing.T) {
+	result := releaseevidence.BundleCreateResult{
+		Output: "/tmp/evidence.tar.gz",
+		Digest: "sha256:" + strings.Repeat("a", 64),
+	}
+	committed := &releaseevidence.BundleCommittedError{Result: result, Err: errors.New("injected directory sync failure")}
+	var output bytes.Buffer
+	err := renderEvidenceBundleCreateResult(&output, true, result, committed)
+	if !errors.Is(err, committed) {
+		t.Fatalf("render error = %v, want committed error", err)
+	}
+	var decoded evidenceBundleCommittedOutput
+	if decodeErr := json.Unmarshal(output.Bytes(), &decoded); decodeErr != nil {
+		t.Fatal(decodeErr)
+	}
+	if decoded.Status != "committed-unconfirmed" || !decoded.Committed || decoded.Confirmed || decoded.RetrySafe || decoded.Result.Digest != result.Digest {
+		t.Fatalf("committed bundle output lost publication state: %+v", decoded)
+	}
+}
+
+func TestEvidenceBundlePlainRenderingPropagatesWriterFailure(t *testing.T) {
+	writer := evidenceBundleFailingWriter{}
+	result := releaseevidence.BundleCreateResult{
+		Candidate:         releaseevidence.Candidate{Tag: "v0.2.6"},
+		Digest:            "sha256:" + strings.Repeat("a", 64),
+		IndexVerification: releaseevidence.Verification{Status: releaseevidence.StatusOpen, Decision: releaseevidence.DecisionNoGo},
+	}
+	if err := renderEvidenceBundleCreateResult(writer, false, result, nil); err == nil || !strings.Contains(err.Error(), "injected writer failure") {
+		t.Fatalf("plain create writer failure = %v", err)
+	}
+}
+
+type evidenceBundleFailingWriter struct{}
+
+func (evidenceBundleFailingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("injected writer failure")
+}
+
+func extractEvidenceBundleCLI(t *testing.T, archivePath, destination string) string {
+	t.Helper()
+	input, err := os.Open(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	gzipReader, err := gzip.NewReader(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gzipReader.Close()
+	tarReader := tar.NewReader(gzipReader)
+	root := ""
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		clean := filepath.Clean(filepath.FromSlash(header.Name))
+		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			t.Fatalf("unsafe archive entry: %s", header.Name)
+		}
+		parts := strings.Split(filepath.ToSlash(clean), "/")
+		if root == "" {
+			root = parts[0]
+		}
+		target := filepath.Join(destination, clean)
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if err := os.MkdirAll(target, os.FileMode(header.Mode)); err != nil {
+				t.Fatal(err)
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, os.FileMode(header.Mode))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, copyErr := io.Copy(file, tarReader)
+			closeErr := file.Close()
+			if copyErr != nil || closeErr != nil {
+				t.Fatal(errors.Join(copyErr, closeErr))
+			}
+			if err := os.Chmod(target, os.FileMode(header.Mode)); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			t.Fatalf("unsupported archive entry type %d", header.Typeflag)
+		}
+	}
+	return filepath.Join(destination, root)
 }
 
 func TestGateAttachCommittedErrorHasMachineReadableNonRetryableOutcome(t *testing.T) {
