@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/run-manifest.schema.json",
-  "title": "pgworkbench run manifest v1 logical fields",
+  "title": "pgworkbench run manifest v1/v2 logical fields",
   "description": "JSON Schema mirror of the closed field set serialized as manifest.env.",
   "type": "object",
   "additionalProperties": false,
@@ -18,7 +18,7 @@
     "background_specs", "metrics_enabled", "metrics_samples", "artifact_root", "run_dir"
   ],
   "properties": {
-    "schema_version": {"const": "pgworkbench.run-manifest/v1"},
+    "schema_version": {"enum": ["pgworkbench.run-manifest/v1", "pgworkbench.run-manifest/v2"]},
     "artifact_type": {"const": "pgworkbench.run-manifest"},
     "run_id": {"type": "string", "minLength": 1},
     "started_at": {"type": "string", "format": "date-time"},
@@ -31,6 +31,7 @@
     "source_spec_ref": {"type": "string"},
     "source_spec_digest": {"$ref": "#/$defs/optional_digest"},
     "execution_parameters_digest": {"$ref": "#/$defs/digest"},
+    "runtime_ports_digest": {"$ref": "#/$defs/digest"},
     "experiment_identity_digest": {"$ref": "#/$defs/digest"},
     "runtime": {"enum": ["docker", "native"]},
     "engine_version": {"$ref": "#/$defs/engine_version"},
@@ -59,6 +60,14 @@
     "run_dir": {"const": "."}
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {"schema_version": {"const": "pgworkbench.run-manifest/v2"}},
+        "required": ["schema_version"]
+      },
+      "then": {"required": ["runtime_ports_digest"]},
+      "else": {"not": {"required": ["runtime_ports_digest"]}}
+    },
     {
       "if": {
         "properties": {"source_spec_kind": {"const": ""}},

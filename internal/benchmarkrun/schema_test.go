@@ -94,7 +94,7 @@ func TestBenchmarkArtifactSchemasTrackGoContracts(t *testing.T) {
 			file:         "benchmark-series.schema.json",
 			goType:       reflect.TypeOf(benchmarkrun.Series{}),
 			versionField: "schema_version",
-			version:      benchmarkrun.SeriesSchemaVersion,
+			versions:     []string{benchmarkrun.SeriesSchemaVersion, benchmarkrun.SeriesSchemaVersionV2},
 			artifactType: benchmarkrun.SeriesArtifactType,
 			keyRequired:  []string{"benchmark", "target", "target_endpoint_contract", "target_topology", "protocol_digest", "trials"},
 		},

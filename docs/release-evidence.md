@@ -215,8 +215,9 @@ Revision zero is derived from a locally complete downloaded release set and a
 typed provider asset inventory:
 
 ```bash
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 pgworkbench evidence candidate init \
-  --release-manifest downloaded/pgworkbench-0.2.0-release-manifest.json \
+  --release-manifest "downloaded/pgworkbench-${release_version}-release-manifest.json" \
   --asset-inventory draft-verification/asset-inventory.json \
   --output evidence/index-r0.json
 ```
@@ -253,11 +254,12 @@ Every gate mutation consumes a producer-specific fact record. There is no
 generic `--status` or `passed=true` input:
 
 ```bash
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 pgworkbench evidence gate attach \
   --index evidence/index-r0.json \
   --gate draft_external_drivers \
   --evidence-file downloaded/verification.json \
-  --evidence-ref 's3://release-evidence/v0.2.0/external-drivers.json?versionId=...' \
+  --evidence-ref "s3://release-evidence/v${release_version}/external-drivers.json?versionId=..." \
   --output evidence/index-r1.json
 ```
 
@@ -301,10 +303,11 @@ Preventive controls use a separate atomic command because they are one observed
 control set, not three caller-selectable gate outcomes:
 
 ```bash
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 pgworkbench evidence controls attach \
   --index evidence/index-rN.json \
   --evidence-file downloaded/preventive-controls-verification.json \
-  --evidence-ref 's3://release-evidence/v0.2.0/preventive-controls.json?versionId=...' \
+  --evidence-ref "s3://release-evidence/v${release_version}/preventive-controls.json?versionId=..." \
   --output evidence/index-rN+1.json
 ```
 

@@ -176,6 +176,23 @@ func TestIndependentSeriesCheckBindsDeclaredClientPlacement(t *testing.T) {
 	}
 }
 
+func TestIndependentSeriesCheckRejectsMixedSeriesSchemaVersions(t *testing.T) {
+	baselinePlan, candidatePlan := testPlanPairWithConfigs(t)
+	protocol, err := BuildProtocol("ab-series-schema", "native", "baseline", "candidate", baselinePlan, candidatePlan, testOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline := testSeries("ab-series-schema-a", 100, 10)
+	candidate := testSeries("ab-series-schema-b", 101, 10)
+	baseline.SchemaVersion = benchmarkrun.SeriesSchemaVersion
+	candidate.SchemaVersion = benchmarkrun.SeriesSchemaVersionV2
+	verification := VerifyResult{Issues: []string{}}
+	checkSeriesProtocol(&verification, protocol, baseline, candidate, baselinePlan, candidatePlan)
+	if !reasonContains(verification.Issues, "series schema versions differ") {
+		t.Fatalf("mixed benchmark series schema versions were accepted: %v", verification.Issues)
+	}
+}
+
 func TestPGConfigABComparesNativeBytesNotSeriesLocalManifestLocations(t *testing.T) {
 	baselinePlan, candidatePlan := testPlanPairWithConfigs(t)
 	protocol, err := BuildProtocol("ab-native-pgconfig", "native", "baseline", "candidate", baselinePlan, candidatePlan, testOptions())

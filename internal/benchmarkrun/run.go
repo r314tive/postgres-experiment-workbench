@@ -35,6 +35,7 @@ import (
 
 const (
 	SeriesSchemaVersion       = "pgworkbench.benchmark-series/v1"
+	SeriesSchemaVersionV2     = "pgworkbench.benchmark-series/v2"
 	SeriesArtifactType        = "pgworkbench.benchmark-series"
 	TrialSchemaVersion        = "pgworkbench.benchmark-trial/v1"
 	TrialArtifactType         = "pgworkbench.benchmark-trial"
@@ -44,6 +45,7 @@ const (
 	ScenarioPackArtifactType  = "pgworkbench.benchmark-scenario-pack"
 	ScenarioPackInventoryRef  = "protocol/scenario-pack.json"
 	NativeToolchainSeriesRef  = "protocol/native-toolchain/manifest.json"
+	DefaultPgBouncerPort      = 56432
 )
 
 type ExperimentRunner func(root string, catalog speccatalog.Catalog, input string, options experimentrun.Options) (experimentrun.Result, error)
@@ -68,6 +70,7 @@ type Options struct {
 	NativeToolchainManifestRef string
 	PostgresHost               string
 	PostgresPort               int
+	PgBouncerPort              int
 	Stdout                     io.Writer
 	Stderr                     io.Writer
 	Now                        func() time.Time
@@ -186,6 +189,8 @@ type Series struct {
 	EngineBinaryDigest     string                    `json:"engine_binary_digest"`
 	AllowedDifferences     []string                  `json:"allowed_subject_differences"`
 	Runtime                string                    `json:"runtime"`
+	PgBouncerPort          *int                      `json:"pgbouncer_port,omitempty"`
+	PgBouncerPortPresent   bool                      `json:"-"`
 	EvidenceClass          string                    `json:"evidence_class"`
 	PrimaryMetric          string                    `json:"primary_metric"`
 	Direction              string                    `json:"direction"`
@@ -286,6 +291,17 @@ func Start(root string, catalog speccatalog.Catalog, plan benchmarkplan.Plan, op
 		return nil, err
 	}
 	options.PostgresHost, options.PostgresPort = postgresHost, postgresPort
+	pgBouncerPort := DefaultPgBouncerPort
+	if plan.Target == benchmarkplan.TargetPgBouncer {
+		pgBouncerPort, err = resolveOwnedPgBouncerPort(options)
+		if err != nil {
+			return nil, err
+		}
+	}
+	options.PgBouncerPort = pgBouncerPort
+	if plan.Target == benchmarkplan.TargetPgBouncer && options.PostgresPort == options.PgBouncerPort {
+		return nil, fmt.Errorf("benchmark POSTGRES_PORT and PGBOUNCER_PORT must be distinct when the PgBouncer target is active: both resolve to %d", options.PostgresPort)
+	}
 	packInventory, err := inspectConfiguredScenarioPack(root, options)
 	if err != nil {
 		return nil, err
@@ -376,8 +392,15 @@ func Start(root string, catalog speccatalog.Catalog, plan benchmarkplan.Plan, op
 		return nil, fmt.Errorf("benchmark plan spec digest is invalid")
 	}
 	specRef := filepath.ToSlash(filepath.Join("benchmarks", filepath.FromSlash(plan.Spec)+".env"))
+	seriesSchemaVersion := SeriesSchemaVersion
+	var pgBouncerPortClaim *int
+	if plan.Target == benchmarkplan.TargetPgBouncer {
+		seriesSchemaVersion = SeriesSchemaVersionV2
+		value := options.PgBouncerPort
+		pgBouncerPortClaim = &value
+	}
 	series := Series{
-		SchemaVersion:          SeriesSchemaVersion,
+		SchemaVersion:          seriesSchemaVersion,
 		ArtifactType:           SeriesArtifactType,
 		Benchmark:              plan.Spec,
 		Name:                   plan.Name,
@@ -398,6 +421,8 @@ func Start(root string, catalog speccatalog.Catalog, plan benchmarkplan.Plan, op
 		EngineBinaryDigest:     engine.Digest,
 		AllowedDifferences:     append([]string(nil), plan.AllowedSubjectDifferences...),
 		Runtime:                runtimeName,
+		PgBouncerPort:          pgBouncerPortClaim,
+		PgBouncerPortPresent:   pgBouncerPortClaim != nil,
 		EvidenceClass:          evidenceClass(plan.Class),
 		PrimaryMetric:          plan.PrimaryMetric,
 		Direction:              plan.Direction,
@@ -916,7 +941,7 @@ func runTrial(root string, seriesDir string, catalog speccatalog.Catalog, plan b
 		_ = logFile.Close()
 		return trial, fmt.Errorf("resolve benchmark capsule root: %w", err)
 	}
-	env := trialEnvWithToolchain(runDir, plan, series.Runtime, number, options.NativeToolchainDigest)
+	env := trialEnvWithToolchainAndPgBouncerPort(runDir, plan, series.Runtime, number, options.NativeToolchainDigest, options.PgBouncerPort)
 	env = append(env,
 		"ENV_FILE=.env.example",
 		"POSTGRES_HOST="+options.PostgresHost,
@@ -1023,7 +1048,7 @@ func runTrial(root string, seriesDir string, catalog speccatalog.Catalog, plan b
 		trial.Reasons = append(trial.Reasons, "linked benchmark protocol binding failed")
 		return trial, manifestErr
 	}
-	if err := ValidateLinkedRunProtocolWithToolchain(plan, series.Runtime, number, options.NativeToolchainDigest, manifest); err != nil {
+	if err := ValidateLinkedRunProtocolWithToolchainAndPgBouncerPort(plan, series.Runtime, number, options.NativeToolchainDigest, options.PgBouncerPort, manifest); err != nil {
 		trial.Reasons = append(trial.Reasons, "linked benchmark protocol binding failed")
 		return trial, err
 	}
@@ -1325,6 +1350,10 @@ func ValidateTransactionLog(summary pgbenchresult.Result, transactionLog pgbench
 }
 
 func trialParameters(plan benchmarkplan.Plan, runtimeName string, number int) map[string]string {
+	return trialParametersWithPgBouncerPort(plan, runtimeName, number, DefaultPgBouncerPort)
+}
+
+func trialParametersWithPgBouncerPort(plan benchmarkplan.Plan, runtimeName string, number int, pgBouncerPort int) map[string]string {
 	rebuild := plan.ResetPolicy == "rebuild-per-trial" || number == 1
 	init := "0"
 	resetRuntime := "0"
@@ -1398,7 +1427,7 @@ func trialParameters(plan benchmarkplan.Plan, runtimeName string, number int) ma
 		// Shadow it with the same canonical values before manifest creation so
 		// execution identity cannot drift as a side effect of guard activation.
 		"PGBOUNCER_HOST":                      "127.0.0.1",
-		"PGBOUNCER_PORT":                      "56432",
+		"PGBOUNCER_PORT":                      strconv.Itoa(pgBouncerPort),
 		"PGBOUNCER_IMAGE":                     "",
 		"PGBOUNCER_POOL_MODE":                 "",
 		"PGBOUNCER_AUTH_TYPE":                 "",
@@ -1413,7 +1442,7 @@ func trialParameters(plan benchmarkplan.Plan, runtimeName string, number int) ma
 	parameters["EXPERIMENT_TOPOLOGY"] = plan.TargetTopology
 	if plan.Target == benchmarkplan.TargetPgBouncer {
 		parameters["PGBOUNCER_HOST"] = "127.0.0.1"
-		parameters["PGBOUNCER_PORT"] = "56432"
+		parameters["PGBOUNCER_PORT"] = strconv.Itoa(pgBouncerPort)
 		parameters["PGBOUNCER_IMAGE"] = "edoburu/pgbouncer:v1.25.1-p0"
 		parameters["PGBOUNCER_POOL_MODE"] = "transaction"
 		parameters["PGBOUNCER_AUTH_TYPE"] = "plain"
@@ -1464,7 +1493,11 @@ func trialEnv(runDir string, plan benchmarkplan.Plan, runtimeName string, number
 }
 
 func trialEnvWithToolchain(runDir string, plan benchmarkplan.Plan, runtimeName string, number int, toolchainDigest string) []string {
-	parameters := trialParameters(plan, runtimeName, number)
+	return trialEnvWithToolchainAndPgBouncerPort(runDir, plan, runtimeName, number, toolchainDigest, DefaultPgBouncerPort)
+}
+
+func trialEnvWithToolchainAndPgBouncerPort(runDir string, plan benchmarkplan.Plan, runtimeName string, number int, toolchainDigest string, pgBouncerPort int) []string {
+	parameters := trialParametersWithPgBouncerPort(plan, runtimeName, number, pgBouncerPort)
 	parameters["PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST"] = toolchainDigest
 	env := []string{
 		"PGWORKBENCH_SOURCE_SPEC_KIND=benchmark",
@@ -1511,7 +1544,11 @@ func ExpectedExecutionParametersDigest(plan benchmarkplan.Plan, runtimeName stri
 }
 
 func ExpectedExecutionParametersDigestWithToolchain(plan benchmarkplan.Plan, runtimeName string, trialNumber int, toolchainDigest string) string {
-	values := trialParameters(plan, runtimeName, trialNumber)
+	return ExpectedExecutionParametersDigestWithToolchainAndPgBouncerPort(plan, runtimeName, trialNumber, toolchainDigest, DefaultPgBouncerPort)
+}
+
+func ExpectedExecutionParametersDigestWithToolchainAndPgBouncerPort(plan benchmarkplan.Plan, runtimeName string, trialNumber int, toolchainDigest string, pgBouncerPort int) string {
+	values := trialParametersWithPgBouncerPort(plan, runtimeName, trialNumber, pgBouncerPort)
 	values["PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST"] = toolchainDigest
 	return runstate.EffectiveParametersDigest(func(key string) string { return values[key] })
 }
@@ -1525,6 +1562,10 @@ func ValidateLinkedRunProtocol(plan benchmarkplan.Plan, runtimeName string, tria
 }
 
 func ValidateLinkedRunProtocolWithToolchain(plan benchmarkplan.Plan, runtimeName string, trialNumber int, toolchainDigest string, manifest map[string]string) error {
+	return ValidateLinkedRunProtocolWithToolchainAndPgBouncerPort(plan, runtimeName, trialNumber, toolchainDigest, DefaultPgBouncerPort, manifest)
+}
+
+func ValidateLinkedRunProtocolWithToolchainAndPgBouncerPort(plan benchmarkplan.Plan, runtimeName string, trialNumber int, toolchainDigest string, pgBouncerPort int, manifest map[string]string) error {
 	expected := []struct {
 		key, value string
 	}{
@@ -1545,7 +1586,7 @@ func ValidateLinkedRunProtocolWithToolchain(plan benchmarkplan.Plan, runtimeName
 		{"metrics_enabled", "1"},
 		{"metrics_samples", ""},
 		{"runtime", runtimeName},
-		{"execution_parameters_digest", ExpectedExecutionParametersDigestWithToolchain(plan, runtimeName, trialNumber, toolchainDigest)},
+		{"execution_parameters_digest", ExpectedExecutionParametersDigestWithToolchainAndPgBouncerPort(plan, runtimeName, trialNumber, toolchainDigest, pgBouncerPort)},
 	}
 	var issues []string
 	for _, field := range expected {
@@ -1926,6 +1967,29 @@ func resolveOwnedPostgresEndpoint(options Options) (string, int, error) {
 		return "", 0, fmt.Errorf("benchmark POSTGRES_PORT must be between 1024 and 65535, got %d", port)
 	}
 	return host, port, nil
+}
+
+func resolveOwnedPgBouncerPort(options Options) (int, error) {
+	return resolveOwnedRuntimePort("PGBOUNCER_PORT", options.PgBouncerPort, DefaultPgBouncerPort, options.Getenv)
+}
+
+func resolveOwnedRuntimePort(name string, configured int, defaultPort int, getenv func(string) string) (int, error) {
+	port := configured
+	if port == 0 {
+		value := strings.TrimSpace(getenv(name))
+		if value == "" {
+			value = strconv.Itoa(defaultPort)
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil || strconv.Itoa(parsed) != value {
+			return 0, fmt.Errorf("benchmark %s must be a canonical integer, got %q", name, value)
+		}
+		port = parsed
+	}
+	if port < 1024 || port > 65535 {
+		return 0, fmt.Errorf("benchmark %s must be between 1024 and 65535, got %d", name, port)
+	}
+	return port, nil
 }
 
 func nativeToolchainManifestPath(root, reference string) (string, error) {

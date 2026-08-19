@@ -4,6 +4,11 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 COMPOSE_FILE="$REPO_DIR/compose.yaml"
 
+if grep -Eq '^[[:space:]]*container_name[[:space:]]*:' "$COMPOSE_FILE"; then
+  echo "FAIL: Compose services must use project-scoped generated container names" >&2
+  exit 1
+fi
+
 expected=(
   '127.0.0.1:${POSTGRES_PORT:-55433}:5432'
   '127.0.0.1:${POSTGRES_REPLICA_PORT:-55434}:5432'
@@ -41,7 +46,16 @@ for i in "${!expected[@]}"; do
 done
 
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-  rendered="$(docker compose --profile '*' --env-file "$REPO_DIR/.env.example" -f "$COMPOSE_FILE" config --format json)"
+  rendered="$(
+    POSTGRES_PORT=45433 \
+    POSTGRES_REPLICA_PORT=45434 \
+    POSTGRES_LOGICAL_SUBSCRIBER_PORT=45435 \
+    PGBOUNCER_PORT=46432 \
+    POSTGRES_UPGRADE_OLD_PORT=45436 \
+    POSTGRES_UPGRADE_NEW_PORT=45437 \
+      docker compose --profile '*' --env-file "$REPO_DIR/.env.example" \
+        -f "$COMPOSE_FILE" config --format json
+  )"
   if ! jq -e '
     [
       .services[]
@@ -50,10 +64,17 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     ] as $ports
     | ($ports | length) == 6
       and all($ports[]; .host_ip == "127.0.0.1")
+      and (.services.postgres.ports[0].published | tostring) == "45433"
+      and (.services.replica.ports[0].published | tostring) == "45434"
+      and (.services["logical-subscriber"].ports[0].published | tostring) == "45435"
+      and (.services.pgbouncer.ports[0].published | tostring) == "46432"
+      and (.services["postgres-old"].ports[0].published | tostring) == "45436"
+      and (.services["postgres-new"].ports[0].published | tostring) == "45437"
+      and all(.services[]; (.container_name? // "") == "")
   ' <<< "$rendered" >/dev/null; then
-    echo "FAIL: rendered Compose ports are not all bound to 127.0.0.1" >&2
+    echo "FAIL: rendered Compose names or loopback port overrides violate isolation" >&2
     exit 1
   fi
 fi
 
-echo "PASS: Docker Compose published ports are loopback-only"
+echo "PASS: Docker Compose names are project-scoped and published ports are loopback-only overrides"

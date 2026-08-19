@@ -1,6 +1,6 @@
 # Post-v0.2 execution roadmap
 
-This roadmap starts from the immutable `v0.2.0` source candidate. It is an
+This roadmap now tracks the exact `v0.2.7` source candidate. It is an
 execution order, not a feature wishlist. A milestone closes only when its
 artifact, verifier, failure paths, portability checks, and bounded claim all
 exist for one exact candidate.
@@ -21,7 +21,7 @@ and recovery evidence.
 ## Work streams and dependency order
 
 ```text
-M0 release v0.2.0 ---------------------------> M9 v1 evidence/adoption gate
+M0 release v0.2.7 ---------------------------> M9 v1 evidence/adoption gate
           |                                      ^
           v                                      |
 M1 evidence control plane -> M2 A/A + design -> M3 metric/noise controls
@@ -35,16 +35,16 @@ M4 collectors -> M5 source-build subjects -> M6 workloads/topologies
                                              M8 remote execution
 ```
 
-M0 and post-v0.2 development may proceed in parallel, but the frozen release
-candidate must not change. Post-v0.2 commits live on a separate branch and
-cannot be cherry-picked into `release/v0.2.0` without creating a new candidate
-and repeating every release gate.
+M0 and later development may proceed in parallel, but release evidence always
+names one exact full commit. Any commit added or cherry-picked into
+`release/v0.2.7` creates a new candidate and requires every exact-candidate
+gate again; a branch name is never a substitute for that SHA binding.
 
 ## Milestone map
 
 | Milestone | Product outcome | Exit criterion |
 | --- | --- | --- |
-| M0 | Published and independently verified `v0.2.0` | Exact candidate passes every draft/public release gate; adoption gates remain explicitly open |
+| M0 | Published and independently verified `v0.2.7` | Exact candidate passes every draft/public release gate; adoption gates remain explicitly open |
 | M1 | Evidence control plane | One CLI derives `GO`/`NO-GO` from verified candidate-bound records and produces a relocated closed bundle |
 | M2 | Statistically qualified benchmark method | A/A calibration and immutable study design precede any A/B decision |
 | M3 | Measurement-grade metric and noise contract | Warm-up, dataset identity, continuous noise, outcome budgets, and tail metrics verify independently |
@@ -86,9 +86,11 @@ Current implementation state:
   references. This completes the bounded M1.4 packaging gate; it does not mark
   M1 or adoption complete and does not authenticate the external evidence refs.
 
-## M0 — publish the frozen v0.2.0 candidate
+## M0 — publish the exact v0.2.7 candidate
 
-No feature or documentation bytes may change in this milestone.
+Once qualification starts for the selected full SHA, any feature,
+documentation, or generated release-input byte change creates a new candidate
+and restarts every exact-candidate gate.
 
 Deliverables:
 
@@ -97,7 +99,7 @@ Deliverables:
 3. Merge, then pass both workflows again with `headSha` equal to exact `main`.
 4. Run two consecutive aggregate candidate gates for that identity.
 5. Optionally run the untagged exact-SHA release snapshot.
-6. Create `v0.2.0` only after the exact-main gates pass.
+6. Create `v0.2.7` only after the exact-main gates pass.
 7. Build the protected non-public draft, signatures, attestations, checksums,
    SPDX SBOMs, and release manifest.
 8. Independently download and authenticate all draft assets, run all seven

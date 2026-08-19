@@ -6,11 +6,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 )
 
 func decodeStrictBytes(content []byte, value any) error {
 	if err := rejectDuplicateKeys(content); err != nil {
 		return err
+	}
+	if _, ok := value.(*Series); ok {
+		if err := rejectUnexpectedSeriesNulls(content, "$", "$"); err != nil {
+			return err
+		}
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	decoder.DisallowUnknownFields()
@@ -23,6 +29,63 @@ func decodeStrictBytes(content []byte, value any) error {
 			return fmt.Errorf("unexpected trailing JSON value")
 		}
 		return err
+	}
+	if series, ok := value.(*Series); ok {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(content, &fields); err != nil {
+			return err
+		}
+		_, series.RuntimePortsPresent = fields["runtime_ports"]
+		_, series.RuntimePortsDigestPresent = fields["runtime_ports_digest"]
+	}
+	return nil
+}
+
+var nullableOperationSeriesPaths = map[string]struct{}{
+	"$.stats.cv_pct":        {},
+	"$.stats.robust_cv_pct": {},
+}
+
+// rejectUnexpectedSeriesNulls keeps result.json aligned with its JSON Schema.
+// The duplicate-key pass has already validated the same byte snapshot.
+func rejectUnexpectedSeriesNulls(content json.RawMessage, canonicalPath string, displayPath string) error {
+	trimmed := bytes.TrimSpace(content)
+	if bytes.Equal(trimmed, []byte("null")) {
+		if _, allowed := nullableOperationSeriesPaths[canonicalPath]; allowed {
+			return nil
+		}
+		return fmt.Errorf("%s: null is not allowed", displayPath)
+	}
+	if len(trimmed) == 0 {
+		return fmt.Errorf("%s: empty JSON value", displayPath)
+	}
+
+	switch trimmed[0] {
+	case '{':
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &fields); err != nil {
+			return err
+		}
+		names := make([]string, 0, len(fields))
+		for name := range fields {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if err := rejectUnexpectedSeriesNulls(fields[name], canonicalPath+"."+name, displayPath+"."+name); err != nil {
+				return err
+			}
+		}
+	case '[':
+		var values []json.RawMessage
+		if err := json.Unmarshal(trimmed, &values); err != nil {
+			return err
+		}
+		for index, item := range values {
+			if err := rejectUnexpectedSeriesNulls(item, canonicalPath+"[]", fmt.Sprintf("%s[%d]", displayPath, index)); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

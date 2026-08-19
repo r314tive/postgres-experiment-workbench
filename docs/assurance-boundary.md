@@ -42,7 +42,7 @@ byte drift at those boundaries; it is not source/build provenance, dependency
 closure, code signing, or host attestation. The native snapshot is not promised
 to run after relocation.
 
-A passed v1 run also records an observed producer OS/architecture, a named
+A passed versioned run also records an observed producer OS/architecture, a named
 fingerprint target, and that target's live PostgreSQL
 `server_version_num`/derived major. `multi-version-upgrade` names only its
 `upgrade-new` destination here; the field does not claim to identify the old

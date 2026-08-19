@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,12 @@ func Run(root string, input string, options Options) (Series, error) {
 	if !supportsRuntime(spec, runtimeName) {
 		return Series{}, fmt.Errorf("operation benchmark %s does not support runtime %q", spec.ID, runtimeName)
 	}
+	runtimePorts, err := resolveRuntimePorts(options.Getenv)
+	if err != nil {
+		return Series{}, err
+	}
+	runtimePortsDigest := digestRuntimePorts(runtimePorts)
+	runtimePortEnv := append(runtimePorts.environment(), "PGWORKBENCH_RUNTIME_PORTS_DIGEST="+runtimePortsDigest)
 	if !evidence.IsDigest(options.PackDigest) {
 		return Series{}, fmt.Errorf("operation benchmark requires a canonical scenario pack digest")
 	}
@@ -113,37 +120,41 @@ func Run(root string, input string, options Options) (Series, error) {
 		}
 	}()
 	series := Series{
-		SchemaVersion:      SeriesSchemaVersion,
-		ArtifactType:       SeriesArtifactType,
-		Operation:          spec.ID,
-		Name:               spec.Name,
-		Description:        spec.Description,
-		Classification:     Classification,
-		DecisionEligible:   false,
-		Assurance:          spec.Assurance,
-		RunID:              runID,
-		RunDir:             ".",
-		ArtifactDir:        seriesDir,
-		SpecRef:            spec.Path,
-		SpecDigest:         spec.Digest,
-		ExperimentSpec:     spec.ExperimentSpec,
-		ExperimentRef:      filepath.ToSlash(filepath.Join("experiments", filepath.FromSlash(spec.ExperimentSpec)+".env")),
-		ExperimentDigest:   experimentDigest,
-		EngineVersion:      options.EngineVersion,
-		EngineCommit:       options.EngineCommit,
-		EngineBinaryRef:    EngineBinaryRef,
-		EngineBinaryDigest: engine.Digest,
-		PackDigest:         options.PackDigest,
-		InputsDigest:       inputsDigest,
-		Inputs:             append([]InputFile(nil), inputs...),
-		Runtime:            runtimeName,
-		Measurement:        spec.Measurement,
-		TrialsPlanned:      spec.Trials,
-		MaxCVPct:           spec.MaxCVPct,
-		StartedAt:          started.Format(time.RFC3339Nano),
-		Status:             "passed",
-		Reasons:            []string{},
-		Trials:             make([]Trial, 0, spec.Trials),
+		SchemaVersion:             SeriesSchemaVersionV2,
+		ArtifactType:              SeriesArtifactType,
+		Operation:                 spec.ID,
+		Name:                      spec.Name,
+		Description:               spec.Description,
+		Classification:            Classification,
+		DecisionEligible:          false,
+		Assurance:                 spec.Assurance,
+		RunID:                     runID,
+		RunDir:                    ".",
+		ArtifactDir:               seriesDir,
+		SpecRef:                   spec.Path,
+		SpecDigest:                spec.Digest,
+		ExperimentSpec:            spec.ExperimentSpec,
+		ExperimentRef:             filepath.ToSlash(filepath.Join("experiments", filepath.FromSlash(spec.ExperimentSpec)+".env")),
+		ExperimentDigest:          experimentDigest,
+		EngineVersion:             options.EngineVersion,
+		EngineCommit:              options.EngineCommit,
+		EngineBinaryRef:           EngineBinaryRef,
+		EngineBinaryDigest:        engine.Digest,
+		PackDigest:                options.PackDigest,
+		InputsDigest:              inputsDigest,
+		Inputs:                    append([]InputFile(nil), inputs...),
+		Runtime:                   runtimeName,
+		RuntimePorts:              &runtimePorts,
+		RuntimePortsDigest:        runtimePortsDigest,
+		RuntimePortsPresent:       true,
+		RuntimePortsDigestPresent: true,
+		Measurement:               spec.Measurement,
+		TrialsPlanned:             spec.Trials,
+		MaxCVPct:                  spec.MaxCVPct,
+		StartedAt:                 started.Format(time.RFC3339Nano),
+		Status:                    "passed",
+		Reasons:                   []string{},
+		Trials:                    make([]Trial, 0, spec.Trials),
 	}
 	if nativeInstallation != nil {
 		series.NativeToolchainDigest = nativeInstallation.Manifest.Digest
@@ -191,7 +202,7 @@ func Run(root string, input string, options Options) (Series, error) {
 			break
 		}
 		trialRunID := fmt.Sprintf("%s-trial-%03d", runID, number)
-		trialEnv := []string{"ENV_FILE=.env.example"}
+		trialEnv := append([]string{"ENV_FILE=.env.example"}, runtimePortEnv...)
 		if nativeInstallation != nil {
 			trialEnv = append(trialEnv,
 				"PGWORKBENCH_NATIVE_BINDIR="+nativeInstallation.Bindir,
@@ -271,6 +282,85 @@ func Run(root string, input string, options Options) (Series, error) {
 		return series, fmt.Errorf("operation benchmark failed: %s", strings.Join(series.Reasons, "; "))
 	}
 	return series, nil
+}
+
+func resolveRuntimePorts(getenv func(string) string) (RuntimePorts, error) {
+	ports := RuntimePorts{}
+	resolved := []struct {
+		name        string
+		defaultPort int
+		destination *int
+	}{
+		{"POSTGRES_PORT", 55433, &ports.Postgres},
+		{"POSTGRES_REPLICA_PORT", 55434, &ports.Replica},
+		{"POSTGRES_LOGICAL_SUBSCRIBER_PORT", 55435, &ports.LogicalSubscriber},
+		{"PGBOUNCER_PORT", 56432, &ports.PgBouncer},
+		{"POSTGRES_UPGRADE_OLD_PORT", 55436, &ports.UpgradeOld},
+		{"POSTGRES_UPGRADE_NEW_PORT", 55437, &ports.UpgradeNew},
+	}
+	for _, item := range resolved {
+		value := strings.TrimSpace(getenv(item.name))
+		if value == "" {
+			value = strconv.Itoa(item.defaultPort)
+		}
+		port, err := strconv.Atoi(value)
+		if err != nil || strconv.Itoa(port) != value {
+			return RuntimePorts{}, fmt.Errorf("operation benchmark %s must be a canonical integer, got %q", item.name, value)
+		}
+		*item.destination = port
+	}
+	if err := validateRuntimePorts(ports); err != nil {
+		return RuntimePorts{}, err
+	}
+	return ports, nil
+}
+
+func (ports RuntimePorts) values() []struct {
+	name string
+	port int
+} {
+	return []struct {
+		name string
+		port int
+	}{
+		{"POSTGRES_PORT", ports.Postgres},
+		{"POSTGRES_REPLICA_PORT", ports.Replica},
+		{"POSTGRES_LOGICAL_SUBSCRIBER_PORT", ports.LogicalSubscriber},
+		{"PGBOUNCER_PORT", ports.PgBouncer},
+		{"POSTGRES_UPGRADE_OLD_PORT", ports.UpgradeOld},
+		{"POSTGRES_UPGRADE_NEW_PORT", ports.UpgradeNew},
+	}
+}
+
+func (ports RuntimePorts) environment() []string {
+	values := ports.values()
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, value.name+"="+strconv.Itoa(value.port))
+	}
+	return result
+}
+
+func validateRuntimePorts(ports RuntimePorts) error {
+	used := make(map[int]string, 6)
+	for _, value := range ports.values() {
+		if value.port < 1024 || value.port > 65535 {
+			return fmt.Errorf("operation benchmark %s must be between 1024 and 65535, got %d", value.name, value.port)
+		}
+		if previous := used[value.port]; previous != "" {
+			return fmt.Errorf("operation benchmark runtime ports must be distinct: %s and %s both resolve to %d", previous, value.name, value.port)
+		}
+		used[value.port] = value.name
+	}
+	return nil
+}
+
+func digestRuntimePorts(ports RuntimePorts) string {
+	content, err := json.Marshal(ports)
+	if err != nil {
+		panic(err)
+	}
+	return evidence.DigestBytes(content)
 }
 
 func collectTrial(root string, spec Spec, number int, result experimentrun.Result, runErr error, expectedPackDigest string, verifier RunVerifier) (Trial, error) {

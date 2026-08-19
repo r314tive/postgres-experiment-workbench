@@ -120,7 +120,7 @@ func finalizeVerification(result VerifyResult, requireBundle bool, artifactRoot 
 }
 
 func checkSeriesIdentity(result *VerifyResult, series Series, dir string) {
-	if series.SchemaVersion != SeriesSchemaVersion || series.ArtifactType != SeriesArtifactType {
+	if series.SchemaVersion != SeriesSchemaVersion && series.SchemaVersion != SeriesSchemaVersionV2 || series.ArtifactType != SeriesArtifactType {
 		addIssue(result, "unsupported operation benchmark series schema or artifact type")
 	}
 	if series.Classification != Classification || series.DecisionEligible {
@@ -144,6 +144,7 @@ func checkSeriesIdentity(result *VerifyResult, series Series, dir string) {
 	if series.Runtime != "docker" && series.Runtime != "native" {
 		addIssue(result, "series runtime is unsupported")
 	}
+	checkRuntimePorts(result, series)
 	if series.Status != "passed" && series.Status != "failed" && series.Status != "inconclusive" {
 		addIssue(result, "series status is unsupported: %s", series.Status)
 	}
@@ -151,6 +152,29 @@ func checkSeriesIdentity(result *VerifyResult, series Series, dir string) {
 	finished, finishErr := parseCanonicalUTC(series.FinishedAt)
 	if startErr != nil || finishErr != nil || finished.Before(started) {
 		addIssue(result, "series timestamps are not canonical chronological UTC")
+	}
+}
+
+func checkRuntimePorts(result *VerifyResult, series Series) {
+	if series.SchemaVersion == SeriesSchemaVersion {
+		if series.RuntimePortsPresent || series.RuntimePortsDigestPresent || series.RuntimePorts != nil || series.RuntimePortsDigest != "" {
+			addIssue(result, "operation benchmark series v1 must omit runtime port binding fields")
+		}
+		return
+	}
+	if series.SchemaVersion != SeriesSchemaVersionV2 {
+		return
+	}
+	if !series.RuntimePortsPresent || !series.RuntimePortsDigestPresent || series.RuntimePorts == nil || series.RuntimePortsDigest == "" {
+		addIssue(result, "operation benchmark series v2 requires a present runtime port snapshot and digest")
+		return
+	}
+	if err := validateRuntimePorts(*series.RuntimePorts); err != nil {
+		addIssue(result, "series runtime port snapshot is invalid: %v", err)
+		return
+	}
+	if !evidence.IsDigest(series.RuntimePortsDigest) || digestRuntimePorts(*series.RuntimePorts) != series.RuntimePortsDigest {
+		addIssue(result, "series runtime port snapshot digest does not match retained ports")
 	}
 }
 
@@ -290,6 +314,7 @@ func checkTrials(result *VerifyResult, artifactRoot, seriesDir string, series Se
 			if !evidence.IsDigest(trial.ExecutionParametersDigest) || !evidence.IsDigest(trial.ExperimentIdentityDigest) || !evidence.IsDigest(trial.PackDigest) || manifest["execution_parameters_digest"] != trial.ExecutionParametersDigest || manifest["experiment_identity_digest"] != trial.ExperimentIdentityDigest || manifest["pack_digest"] != trial.PackDigest || trial.PackDigest != series.PackDigest {
 				addIssue(result, "trial %d linked execution/experiment identity digest does not match manifest", number)
 			}
+			checkLinkedRuntimePortBinding(result, series, manifest, number)
 		}
 		if runVerification.Verdict == nil || runVerification.Verdict.Status != trial.Status || !trial.ExperimentVerified {
 			addIssue(result, "trial %d verification/status claim does not match linked verdict", number)
@@ -308,6 +333,21 @@ func checkTrials(result *VerifyResult, artifactRoot, seriesDir string, series Se
 			}
 		} else if trial.PrimaryValue != nil {
 			addIssue(result, "failed trial %d must not expose a primary value", number)
+		}
+	}
+}
+
+func checkLinkedRuntimePortBinding(result *VerifyResult, series Series, manifest map[string]string, number int) {
+	manifestSchema := manifest["schema_version"]
+	_, manifestHasRuntimePortsDigest := manifest["runtime_ports_digest"]
+	switch series.SchemaVersion {
+	case SeriesSchemaVersion:
+		if manifestSchema != runstate.ManifestSchemaVersion || manifestHasRuntimePortsDigest {
+			addIssue(result, "trial %d legacy series requires a v1 linked manifest without runtime port binding", number)
+		}
+	case SeriesSchemaVersionV2:
+		if manifestSchema != runstate.ManifestSchemaVersionV2 || !manifestHasRuntimePortsDigest || manifest["runtime_ports_digest"] != series.RuntimePortsDigest {
+			addIssue(result, "trial %d linked v2 runtime ports digest does not match series", number)
 		}
 	}
 }

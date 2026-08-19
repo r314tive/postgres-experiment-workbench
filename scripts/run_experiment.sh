@@ -685,7 +685,7 @@ load_spec() {
 }
 
 write_manifest_shell() {
-	echo "EXPERIMENT_STATE_WRITER=shell is legacy and cannot write the v1 evidence contract; use go" >&2
+	echo "EXPERIMENT_STATE_WRITER=shell is legacy and cannot write the versioned evidence contract; use go" >&2
 	return 2
 }
 
@@ -810,7 +810,7 @@ validate_state_writer() {
       export EXPERIMENT_STATE_WRITER
       ;;
     shell)
-      echo "EXPERIMENT_STATE_WRITER=shell is legacy and cannot write the v1 evidence contract; use go" >&2
+		echo "EXPERIMENT_STATE_WRITER=shell is legacy and cannot write the versioned evidence contract; use go" >&2
       return 2
       ;;
     *)
@@ -1195,7 +1195,7 @@ verify_finalized_manifest() {
 }
 
 write_verdict_shell() {
-	echo "EXPERIMENT_STATE_WRITER=shell is legacy and cannot write the v1 evidence contract; use go" >&2
+	echo "EXPERIMENT_STATE_WRITER=shell is legacy and cannot write the versioned evidence contract; use go" >&2
 	return 2
 }
 

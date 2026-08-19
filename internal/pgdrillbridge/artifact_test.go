@@ -75,6 +75,18 @@ func TestCreateAndVerifyOrdinaryExperimentBaseline(t *testing.T) {
 	}
 }
 
+func TestCreateAcceptsSupportedRunManifestV2(t *testing.T) {
+	root := t.TempDir()
+	runDir := writeBridgeRun(t, root, bridgeRunOptions{RuntimePortsDigest: "sha256:" + strings.Repeat("b", 64)})
+	artifact, err := Create(root, runDir, filepath.Join(root, "exports", DefaultFileName), Options{})
+	if err != nil {
+		t.Fatalf("supported run-manifest v2 source was rejected: %v", err)
+	}
+	if artifact.Run.ID != "bridge-run" {
+		t.Fatalf("unexpected v2 source identity: %#v", artifact.Run)
+	}
+}
+
 func TestCreateBundleBaselineWithReviewedPredicate(t *testing.T) {
 	root := t.TempDir()
 	runDir := writeBridgeRun(t, root, bridgeRunOptions{Bundle: true})
@@ -408,10 +420,11 @@ func TestReviewedPredicateFileDoesNotFollowSymlink(t *testing.T) {
 }
 
 type bridgeRunOptions struct {
-	Bundle     bool
-	Failed     bool
-	NoPack     bool
-	SourceKind string
+	Bundle             bool
+	Failed             bool
+	NoPack             bool
+	SourceKind         string
+	RuntimePortsDigest string
 }
 
 func writeBridgeRun(t *testing.T, root string, options bridgeRunOptions) string {
@@ -441,6 +454,7 @@ func writeBridgeRun(t *testing.T, root string, options bridgeRunOptions) string 
 		PostgresServerMajor:      "17",
 		RuntimeFingerprintAt:     "2026-08-12T08:00:01Z",
 		RunDir:                   runDir,
+		RuntimePortsDigest:       options.RuntimePortsDigest,
 	}
 	if !options.NoPack {
 		manifest.PackID = "fixture-pack"

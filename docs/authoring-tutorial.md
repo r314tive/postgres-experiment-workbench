@@ -7,8 +7,9 @@ PostgreSQL installation.
 ## 1. Extract and inspect the release
 
 ```bash
-tar -xzf pgworkbench-0.2.0-darwin-arm64.tar.gz
-cd pgworkbench-0.2.0-darwin-arm64
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
+tar -xzf "pgworkbench-${release_version}-darwin-arm64.tar.gz"
+cd "pgworkbench-${release_version}-darwin-arm64"
 
 export PGWORKBENCH_BIN="$PWD/pgworkbench"
 "$PGWORKBENCH_BIN" version

@@ -52,6 +52,41 @@ func TestParseStrictJSON(t *testing.T) {
 	}
 }
 
+func TestParseAllowNullPreservesOtherStrictness(t *testing.T) {
+	type nullableFixture struct {
+		Name   string  `json:"name"`
+		Maybe  *string `json:"maybe"`
+		Nested nested  `json:"nested"`
+	}
+	valid := []byte(`{"name":"record","maybe":null,"nested":{"enabled":true}}`)
+	var decoded nullableFixture
+	if err := ParseAllowNull(valid, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Name != "record" || decoded.Maybe != nil || !decoded.Nested.Enabled {
+		t.Fatalf("unexpected nullable fixture: %#v", decoded)
+	}
+
+	for _, test := range []struct {
+		name    string
+		content []byte
+		want    string
+	}{
+		{name: "duplicate", content: []byte(`{"name":"first","name":"second","maybe":null,"nested":{"enabled":true}}`), want: "duplicate property"},
+		{name: "unknown", content: []byte(`{"name":"record","maybe":null,"nested":{"enabled":true},"unknown":true}`), want: "unknown field"},
+		{name: "trailing", content: append(append([]byte(nil), valid...), []byte(` {}`)...), want: "trailing JSON"},
+		{name: "invalid-utf8", content: append([]byte(`{"name":"`), append([]byte{0xff}, []byte(`","maybe":null,"nested":{"enabled":true}}`)...)...), want: "valid UTF-8"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var target nullableFixture
+			err := ParseAllowNull(test.content, &target)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("ParseAllowNull() error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestLoadFileIsBoundedAndRejectsUnsafeInputs(t *testing.T) {
 	directory := t.TempDir()
 	content := []byte(`{"name":"record","nested":{"enabled":true},"values":[]}`)

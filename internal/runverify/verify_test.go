@@ -923,15 +923,53 @@ func TestVerifyRejectsUnknownVersionedSchema(t *testing.T) {
 	runDir := filepath.Join(root, "runs", "run-a")
 	writeValidV1Run(t, runDir, "0")
 	manifestPath := filepath.Join(runDir, "manifest.env")
-	manifest := strings.Replace(readFile(t, manifestPath), `schema_version="`+runstate.ManifestSchemaVersion+`"`, `schema_version="pgworkbench.run-manifest/v2"`, 1)
+	manifest := strings.Replace(readFile(t, manifestPath), `schema_version="`+runstate.ManifestSchemaVersion+`"`, `schema_version="pgworkbench.run-manifest/v3"`, 1)
 	writeFile(t, manifestPath, manifest)
 
 	result, err := Verify(root, "run-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasIssue(result, "manifest.env unsupported schema_version: pgworkbench.run-manifest/v2") {
+	if !hasIssue(result, "manifest.env unsupported schema_version: pgworkbench.run-manifest/v3") {
 		t.Fatalf("unexpected issues: %#v", result.Issues)
+	}
+}
+
+func TestVerifyRejectsRunManifestVersionFieldConfusion(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		mutate    func(string) string
+		wantIssue string
+	}{
+		{
+			name: "v1-with-runtime-port-digest",
+			mutate: func(content string) string {
+				return strings.Replace(content, "execution_parameters_digest=", "runtime_ports_digest=sha256:"+strings.Repeat("c", 64)+"\nexecution_parameters_digest=", 1)
+			},
+			wantIssue: "manifest.env unknown key for schema pgworkbench.run-manifest/v1: runtime_ports_digest",
+		},
+		{
+			name: "v2-missing-runtime-port-digest",
+			mutate: func(content string) string {
+				return strings.Replace(content, `schema_version="`+runstate.ManifestSchemaVersion+`"`, `schema_version="`+runstate.ManifestSchemaVersionV2+`"`, 1)
+			},
+			wantIssue: "manifest.env missing key: runtime_ports_digest",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			runDir := filepath.Join(root, "runs", "run-a")
+			writeValidV1Run(t, runDir, "0")
+			manifestPath := filepath.Join(runDir, "manifest.env")
+			writeFile(t, manifestPath, test.mutate(readFile(t, manifestPath)))
+			result, err := Verify(root, "run-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasIssue(result, test.wantIssue) {
+				t.Fatalf("missing issue %q in %#v", test.wantIssue, result.Issues)
+			}
+		})
 	}
 }
 

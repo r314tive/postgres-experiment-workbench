@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	ManifestSchemaVersion = "pgworkbench.run-manifest/v1"
-	VerdictSchemaVersion  = "pgworkbench.run-verdict/v1"
-	ManifestArtifactType  = "pgworkbench.run-manifest"
-	VerdictArtifactType   = "pgworkbench.run-verdict"
+	ManifestSchemaVersion   = "pgworkbench.run-manifest/v1"
+	ManifestSchemaVersionV2 = "pgworkbench.run-manifest/v2"
+	VerdictSchemaVersion    = "pgworkbench.run-verdict/v1"
+	ManifestArtifactType    = "pgworkbench.run-manifest"
+	VerdictArtifactType     = "pgworkbench.run-verdict"
 
 	RuntimeFingerprintUnavailable = "unavailable"
 	RuntimeFingerprintObserved    = "observed"
@@ -71,6 +72,7 @@ type Manifest struct {
 	SourceSpecRef             string
 	SourceSpecDigest          string
 	ExecutionParametersDigest string
+	RuntimePortsDigest        string
 	ExperimentIdentityDigest  string
 	Runtime                   string
 	EngineVersion             string
@@ -146,13 +148,25 @@ type ExperimentIdentity struct {
 	PostgresServerVersionNum  string `json:"postgres_server_version_num"`
 	PostgresServerMajor       string `json:"postgres_server_major"`
 	ExecutionParametersDigest string `json:"execution_parameters_digest"`
+	RuntimePortsDigest        string `json:"runtime_ports_digest,omitempty"`
 }
 
 func ManifestFromEnv(getenv func(string) string) Manifest {
 	experimentSpecID := getenv("EXPERIMENT_SPEC_ID")
 	experimentSpecDigest := valueOr(getenv("EXPERIMENT_SPEC_DIGEST"), getenv("EXPERIMENT_SPEC_SHA256"))
+	runtimePortsDigestInput := strings.TrimSpace(getenv("PGWORKBENCH_RUNTIME_PORTS_DIGEST"))
+	runtimePortsDigest := canonicalDigest(runtimePortsDigestInput)
+	if runtimePortsDigestInput != "" && runtimePortsDigest == "" {
+		// Preserve invalid input until WriteManifest validates the selected v2
+		// contract instead of silently downgrading it to v1.
+		runtimePortsDigest = runtimePortsDigestInput
+	}
+	manifestSchemaVersion := ManifestSchemaVersion
+	if runtimePortsDigestInput != "" {
+		manifestSchemaVersion = ManifestSchemaVersionV2
+	}
 	manifest := Manifest{
-		SchemaVersion:             ManifestSchemaVersion,
+		SchemaVersion:             manifestSchemaVersion,
 		ArtifactType:              ManifestArtifactType,
 		RunID:                     getenv("RUN_ID"),
 		StartedAt:                 getenv("STARTED_AT"),
@@ -165,6 +179,7 @@ func ManifestFromEnv(getenv func(string) string) Manifest {
 		SourceSpecRef:             getenv("PGWORKBENCH_SOURCE_SPEC_REF"),
 		SourceSpecDigest:          canonicalDigest(getenv("PGWORKBENCH_SOURCE_SPEC_DIGEST")),
 		ExecutionParametersDigest: effectiveParametersDigest(getenv),
+		RuntimePortsDigest:        runtimePortsDigest,
 		ExperimentIdentityDigest:  getenv("EXPERIMENT_IDENTITY_DIGEST"),
 		Runtime:                   valueOr(getenv("PGWORKBENCH_RUNTIME"), "docker"),
 		EngineVersion:             NormalizeEngineVersion(getenv("PGWORKBENCH_ENGINE_VERSION")),
@@ -227,6 +242,18 @@ func WriteManifest(runDir string, manifest Manifest) error {
 	}
 	manifest.RunDir = runDir
 	applyManifestDefaults(&manifest, "")
+	switch manifest.SchemaVersion {
+	case ManifestSchemaVersion:
+		if manifest.RuntimePortsDigest != "" {
+			return fmt.Errorf("run manifest v1 cannot contain runtime_ports_digest")
+		}
+	case ManifestSchemaVersionV2:
+		if !evidence.IsDigest(manifest.RuntimePortsDigest) {
+			return fmt.Errorf("run manifest v2 requires a canonical runtime_ports_digest")
+		}
+	default:
+		return fmt.Errorf("unsupported run manifest schema version %q", manifest.SchemaVersion)
+	}
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return err
 	}
@@ -271,6 +298,12 @@ func WriteManifest(runDir string, manifest Manifest) error {
 		"metrics_samples=" + quoteEnvValue(manifest.MetricsSamples),
 		"artifact_root=" + quoteEnvValue(manifest.ArtifactRoot),
 		"run_dir=" + quoteEnvValue("."),
+	}
+	if manifest.SchemaVersion == ManifestSchemaVersionV2 {
+		insertAt := 13
+		manifestLines = append(manifestLines, "")
+		copy(manifestLines[insertAt+1:], manifestLines[insertAt:])
+		manifestLines[insertAt] = "runtime_ports_digest=" + quoteEnvValue(manifest.RuntimePortsDigest)
 	}
 	content := strings.Join(manifestLines, "\n") + "\n"
 	return writeEnvFileAtomic(path, content)
@@ -424,6 +457,7 @@ func (manifest Manifest) Identity() ExperimentIdentity {
 		PostgresServerVersionNum:  manifest.PostgresServerVersionNum,
 		PostgresServerMajor:       manifest.PostgresServerMajor,
 		ExecutionParametersDigest: manifest.ExecutionParametersDigest,
+		RuntimePortsDigest:        manifest.RuntimePortsDigest,
 	}
 }
 
@@ -438,6 +472,9 @@ func (identity ExperimentIdentity) Digest() string {
 func applyManifestDefaults(manifest *Manifest, repoDir string) {
 	if manifest.SchemaVersion == "" {
 		manifest.SchemaVersion = ManifestSchemaVersion
+		if strings.TrimSpace(manifest.RuntimePortsDigest) != "" {
+			manifest.SchemaVersion = ManifestSchemaVersionV2
+		}
 	}
 	if manifest.ArtifactType == "" {
 		manifest.ArtifactType = ManifestArtifactType
@@ -486,6 +523,7 @@ func applyManifestDefaults(manifest *Manifest, repoDir string) {
 	manifest.SourceSpecDigest = canonicalDigest(manifest.SourceSpecDigest)
 	manifest.PackDigest = canonicalDigest(manifest.PackDigest)
 	manifest.ExecutionParametersDigest = canonicalDigest(manifest.ExecutionParametersDigest)
+	manifest.RuntimePortsDigest = canonicalDigest(manifest.RuntimePortsDigest)
 	if manifest.ExecutionParametersDigest == "" {
 		manifest.ExecutionParametersDigest = evidence.DigestBytes([]byte("{}"))
 	}
@@ -573,10 +611,14 @@ func bindVerdictToManifest(runDir string, verdict *Verdict) error {
 	if verdict.ExperimentIdentityDigest == "" {
 		verdict.ExperimentIdentityDigest = manifest["experiment_identity_digest"]
 	}
-	if verdict.Status == "passed" && manifest["schema_version"] == ManifestSchemaVersion && manifest["runtime_fingerprint_status"] != RuntimeFingerprintObserved {
+	if verdict.Status == "passed" && IsManifestSchemaVersion(manifest["schema_version"]) && manifest["runtime_fingerprint_status"] != RuntimeFingerprintObserved {
 		return fmt.Errorf("passed verdict requires an observed runtime fingerprint")
 	}
 	return nil
+}
+
+func IsManifestSchemaVersion(value string) bool {
+	return value == ManifestSchemaVersion || value == ManifestSchemaVersionV2
 }
 
 func portableSpecRef(specPath string, repoDir string, specID string) string {

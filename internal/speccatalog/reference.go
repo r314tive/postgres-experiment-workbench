@@ -178,7 +178,7 @@ func experimentReference() KindReference {
 			{"EXPERIMENT_SNAPSHOT", "optional", "1", "0, 1", "Capture before/after PostgreSQL snapshots."},
 			{"EXPERIMENT_RUNTIME_RESET", "optional", "0", "0, 1", "Reset the selected disposable runtime before the run."},
 			{"EXPERIMENT_DOCKER_RESET", "legacy alias", "0", "0, 1", "Compatibility alias for `EXPERIMENT_RUNTIME_RESET`."},
-			{"EXPERIMENT_STATE_WRITER", "optional", "go", "auto, go", "State-file writer mode for manifest and verdict artifacts. `auto` is a compatibility alias for `go`; legacy `shell` is rejected for v1 evidence."},
+			{"EXPERIMENT_STATE_WRITER", "optional", "go", "auto, go", "State-file writer mode for manifest and verdict artifacts. `auto` is a compatibility alias for `go`; legacy `shell` is rejected for versioned evidence."},
 			{"EXPERIMENT_TIMEOUT", "optional", "6h", "positive Go duration", "Runner execution deadline; CLI `--timeout` and `PGWORKBENCH_EXECUTION_TIMEOUT` take precedence."},
 			{"EXPERIMENT_SCAN_PATHS", "optional", "run directory", "", "Paths scanned for failure evidence."},
 			{"EXPERIMENT_RUN_ID", "optional", "generated", "", "Explicit run id."},

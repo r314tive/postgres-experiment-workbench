@@ -95,6 +95,9 @@ func TestWriteManifest(t *testing.T) {
 			t.Fatalf("manifest[%q] = %q (present=%v), want present empty field", key, got, ok)
 		}
 	}
+	if _, ok := manifest["runtime_ports_digest"]; ok {
+		t.Fatal("run manifest v1 serialized the v2-only runtime_ports_digest field")
+	}
 }
 
 func TestExecutionParametersDigestIncludesPgbenchProtocol(t *testing.T) {
@@ -123,6 +126,64 @@ func TestExecutionParametersDigestIncludesPgbenchProtocol(t *testing.T) {
 	changed["PGBENCH_CONNECT_PER_TRANSACTION"] = "1"
 	if connected := ManifestFromEnv(mapGetter(changed)).ExecutionParametersDigest; first == connected {
 		t.Fatalf("pgbench connect-per-transaction change did not change execution parameter digest: %s", first)
+	}
+}
+
+func TestRuntimePortsDigestBindsIdentityWithoutChangingLegacyExecutionDigest(t *testing.T) {
+	base := map[string]string{
+		"EXPERIMENT_SPEC_ID":      "bulk",
+		"PGWORKBENCH_RUNTIME":     "docker",
+		"PGWORKBENCH_PACK_DIGEST": "sha256:" + strings.Repeat("a", 64),
+	}
+	legacy := ManifestFromEnv(mapGetter(base))
+	withPorts := make(map[string]string, len(base)+1)
+	for key, value := range base {
+		withPorts[key] = value
+	}
+	withPorts["PGWORKBENCH_RUNTIME_PORTS_DIGEST"] = "sha256:" + strings.Repeat("b", 64)
+	bound := ManifestFromEnv(mapGetter(withPorts))
+	if legacy.SchemaVersion != ManifestSchemaVersion || bound.SchemaVersion != ManifestSchemaVersionV2 {
+		t.Fatalf("manifest schema selection = %q/%q, want v1/v2", legacy.SchemaVersion, bound.SchemaVersion)
+	}
+	if bound.ExecutionParametersDigest != legacy.ExecutionParametersDigest {
+		t.Fatalf("optional runtime port binding changed legacy execution digest: %s != %s", bound.ExecutionParametersDigest, legacy.ExecutionParametersDigest)
+	}
+	if bound.RuntimePortsDigest != withPorts["PGWORKBENCH_RUNTIME_PORTS_DIGEST"] {
+		t.Fatalf("runtime ports digest = %q", bound.RuntimePortsDigest)
+	}
+	if bound.Identity().Digest() == legacy.Identity().Digest() {
+		t.Fatal("runtime port binding did not change experiment identity")
+	}
+	invalid := make(map[string]string, len(base)+1)
+	for key, value := range base {
+		invalid[key] = value
+	}
+	invalid["PGWORKBENCH_RUNTIME_PORTS_DIGEST"] = "hostile-not-a-digest"
+	invalidManifest := ManifestFromEnv(mapGetter(invalid))
+	if invalidManifest.SchemaVersion != ManifestSchemaVersionV2 {
+		t.Fatalf("non-empty invalid runtime port digest silently selected %q", invalidManifest.SchemaVersion)
+	}
+	if err := WriteManifest(t.TempDir(), invalidManifest); err == nil {
+		t.Fatal("non-empty invalid runtime port digest silently downgraded to v1")
+	}
+}
+
+func TestWriteManifestRejectsSchemaAndRuntimePortDigestConfusion(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("c", 64)
+	for _, test := range []struct {
+		name     string
+		manifest Manifest
+	}{
+		{name: "v1-with-v2-field", manifest: Manifest{SchemaVersion: ManifestSchemaVersion, RuntimePortsDigest: digest}},
+		{name: "v2-missing-field", manifest: Manifest{SchemaVersion: ManifestSchemaVersionV2}},
+		{name: "v2-invalid-field", manifest: Manifest{SchemaVersion: ManifestSchemaVersionV2, RuntimePortsDigest: "sha256:not-canonical"}},
+		{name: "unsupported", manifest: Manifest{SchemaVersion: "pgworkbench.run-manifest/v3"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := WriteManifest(t.TempDir(), test.manifest); err == nil {
+				t.Fatal("WriteManifest accepted a confused schema/runtime-port binding")
+			}
+		})
 	}
 }
 

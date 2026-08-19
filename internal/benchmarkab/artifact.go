@@ -286,6 +286,9 @@ func loadSeries(verification *VerifyResult, artifactRoot string, reference Serie
 }
 
 func checkSeriesProtocol(verification *VerifyResult, protocol Protocol, baseline, candidate benchmarkrun.Series, baselinePlan, candidatePlan benchmarkplan.Plan) {
+	if baseline.SchemaVersion != candidate.SchemaVersion {
+		addIssue(verification, "baseline and candidate series schema versions differ")
+	}
 	for _, item := range []struct {
 		role    string
 		subject Subject

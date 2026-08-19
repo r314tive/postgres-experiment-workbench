@@ -77,7 +77,7 @@ go run ./cmd/pgworkbench spec reference all
 go run ./cmd/pgworkbench spec schema all
 go run ./cmd/pgworkbench spec validate
 make pgworkbench
-make release-snapshot VERSION=0.2.0
+make release-snapshot VERSION="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 ```
 
 The shell scripts remain the compatibility layer for now. `make check` runs the

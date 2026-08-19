@@ -58,7 +58,7 @@ for workbench-owned local targets, not production PostgreSQL instances.
 
 The experiment runner writes versioned `manifest.env`, `verdict.env`, and
 `verdict.json` artifacts with the Go state writer. `auto` remains an alias for
-`go`; the legacy shell writer is rejected because it cannot satisfy the v1
+`go`; the legacy shell writer is rejected because it cannot satisfy the versioned
 portable evidence contract.
 
 ## Verification
@@ -75,6 +75,6 @@ make scan-artifacts-go
 Run the Docker-backed suite before release-level changes:
 
 ```bash
-make release-check VERSION=0.2.0
+make release-check VERSION="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 make test
 ```

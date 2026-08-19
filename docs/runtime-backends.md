@@ -23,6 +23,19 @@ Docker Compose is the default and supports all declared topologies: `single`,
 physical and logical replication, PgBouncer, and multi-version upgrade. Existing
 `docker-*` targets remain compatibility aliases for the Docker backend.
 
+Compose generates container names from the project and stable service names;
+the former `POSTGRES_CONTAINER`, `POSTGRES_REPLICA_CONTAINER`,
+`POSTGRES_LOGICAL_SUBSCRIBER_CONTAINER`, `PGBOUNCER_CONTAINER`,
+`POSTGRES_UPGRADE_OLD_CONTAINER`, and `POSTGRES_UPGRADE_NEW_CONTAINER`
+overrides are no longer part of the runtime configuration. Use
+`docker compose ps -q postgres` (or another service name) when a container ID is
+needed. Concurrent checkouts must resolve to distinct Compose project names and
+host ports; different directory basenames can still collide after Compose name
+normalization. Confirm each identity with
+`docker compose --env-file .env.example config --format json | jq -r .name`,
+then export the six assignments returned by `./scripts/assign_test_ports.sh`
+before starting the second runtime.
+
 ## Native
 
 Native mode uses host `initdb`, `pg_ctl`, `createdb`, `pg_isready`, and `psql`.

@@ -15,6 +15,22 @@
   immediately before publication while retaining a non-authorizing,
   operator-attested assurance boundary.
 
+### Fixed
+
+- Removed globally fixed Docker container names so independent checkouts use
+  Compose project-scoped container identities. Concurrent checkouts can run
+  together when they resolve to distinct Compose project identities and use
+  distinct published ports through the existing `POSTGRES_*_PORT` and
+  `PGBOUNCER_PORT` overrides; the release runbook now allocates and validates
+  that isolated environment. Exact benchmark and operation runners now carry
+  their runner-owned port overrides across the scrubbed environment boundary;
+  operation evidence retains one typed six-port snapshot bound to every linked
+  run, and PgBouncer benchmarks reject colliding active endpoints before
+  reserving evidence. v0.2.7 readers retain exact v1 manifest/series support;
+  direct-PostgreSQL benchmark producers stay on v1, while PgBouncer benchmark
+  and operation producers emit v2 evidence that older strict verifiers reject
+  by design.
+
 ## [0.2.6] - 2026-08-18
 
 ### Fixed

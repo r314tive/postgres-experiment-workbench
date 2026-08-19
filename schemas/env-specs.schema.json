@@ -650,7 +650,7 @@
         },
         "EXPERIMENT_STATE_WRITER": {
           "default": "go",
-          "description": "State-file writer mode for manifest and verdict artifacts. `auto` is a compatibility alias for `go`; legacy `shell` is rejected for v1 evidence.",
+          "description": "State-file writer mode for manifest and verdict artifacts. `auto` is a compatibility alias for `go`; legacy `shell` is rejected for versioned evidence.",
           "enum": [
             "auto",
             "go"

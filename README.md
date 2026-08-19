@@ -601,7 +601,7 @@ Compatibility notes live in [docs/compatibility.md](docs/compatibility.md).
 Build ignored local `pgworkbench` release archives:
 
 ```bash
-make release-snapshot VERSION=0.2.0
+make release-snapshot VERSION="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 ```
 
 All four archives receive deterministic package and supply-chain checks.
@@ -655,8 +655,9 @@ go run ./cmd/pgworkbench evidence release verify \
 go run ./cmd/pgworkbench evidence release status --json \
   evidence/templates/release-evidence-index.json
 # Once a complete downloaded release set and typed provider inventory exist:
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 go run ./cmd/pgworkbench evidence candidate init \
-  --release-manifest downloaded/pgworkbench-0.2.0-release-manifest.json \
+  --release-manifest "downloaded/pgworkbench-${release_version}-release-manifest.json" \
   --asset-inventory draft-verification/asset-inventory.json \
   --output evidence/index-r0.json
 # After copying an exact typed workflow summary to durable storage:
@@ -664,13 +665,13 @@ go run ./cmd/pgworkbench evidence gate attach \
   --index evidence/index-r0.json \
   --gate draft_external_drivers \
   --evidence-file downloaded/verification.json \
-  --evidence-ref 's3://release-evidence/v0.2.0/external-drivers.json?versionId=...' \
+  --evidence-ref "s3://release-evidence/v${release_version}/external-drivers.json?versionId=..." \
   --output evidence/index-r1.json
 # Attach one post-draft controls observation to all three preventive paths:
 go run ./cmd/pgworkbench evidence controls attach \
   --index evidence/index-r1.json \
   --evidence-file downloaded/preventive-controls-verification.json \
-  --evidence-ref 's3://release-evidence/v0.2.0/preventive-controls.json?versionId=...' \
+  --evidence-ref "s3://release-evidence/v${release_version}/preventive-controls.json?versionId=..." \
   --output evidence/index-r2.json
 # Preserve the exact contiguous revision chain in a deterministic archive:
 go run ./cmd/pgworkbench evidence bundle create --json \
@@ -748,7 +749,7 @@ dependency scopes separate.
 
 ## Status
 
-`v0.2.0` candidate: the source tree contains the portable Docker/native runtime,
+`v0.2.7` candidate: the source tree contains the portable Docker/native runtime,
 scenario-pack, and versioned evidence contracts. It is not a v1 release claim;
 the exact candidate still has to satisfy the local, publication, compatibility,
 and external-adoption gates in

@@ -260,6 +260,12 @@ func runPreparedPlan(root string, plan experimentplan.Plan, specContent []byte, 
 		"PGWORKBENCH_CLEANUP_GRACE="+cleanupGrace.String(),
 		"PGWORKBENCH_CLEANUP_GRACE_SECONDS="+strconv.FormatInt(ceilSeconds(cleanupGrace), 10),
 	)
+	if !options.ExactEnvironment {
+		// The runtime-port digest is an internal operation-runner capability.
+		// Shadow ambient or caller-provided values for ordinary runs so they
+		// cannot manufacture a standalone run-manifest v2 claim.
+		env = append(env, "PGWORKBENCH_RUNTIME_PORTS_DIGEST=")
+	}
 	if options.BinaryPath != "" {
 		env = append(env, "PGWORKBENCH_BIN="+options.BinaryPath)
 	}

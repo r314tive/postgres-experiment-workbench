@@ -122,6 +122,48 @@ func validateRepresentativeContracts(t *testing.T, registry *Registry) {
 			t.Fatal(err)
 		}
 	})
+	validProxySeriesV2 := cloneMap(validPGConfigSeries)
+	validProxySeriesV2["schema_version"] = "pgworkbench.benchmark-series/v2"
+	validProxySeriesV2["target"] = "pgbouncer"
+	validProxySeriesV2["target_endpoint_contract"] = "pgworkbench.pgbench-target/pgbouncer/v1"
+	validProxySeriesV2["target_topology"] = "pgbouncer"
+	validProxySeriesV2["pgbouncer_port"] = 59432
+	t.Run("positive/benchmark-series-v2-pgbouncer", func(t *testing.T) {
+		if err := registry.Validate("benchmark-series.schema.json", validProxySeriesV2); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	validOperationSeriesV1 := operationSeries(digest)
+	t.Run("positive/operation-series-v1", func(t *testing.T) {
+		if err := registry.Validate("operation-benchmark-series.schema.json", validOperationSeriesV1); err != nil {
+			t.Fatal(err)
+		}
+	})
+	validOperationSeriesV2 := cloneMap(validOperationSeriesV1)
+	validOperationSeriesV2["schema_version"] = "pgworkbench.operation-benchmark-series/v2"
+	validOperationSeriesV2["runtime_ports"] = runtimePortFixture()
+	validOperationSeriesV2["runtime_ports_digest"] = digest
+	t.Run("positive/operation-series-v2", func(t *testing.T) {
+		if err := registry.Validate("operation-benchmark-series.schema.json", validOperationSeriesV2); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	validRunManifestV1 := runManifest(digest)
+	t.Run("positive/run-manifest-v1", func(t *testing.T) {
+		if err := registry.Validate("run-manifest.schema.json", validRunManifestV1); err != nil {
+			t.Fatal(err)
+		}
+	})
+	validRunManifestV2 := cloneMap(validRunManifestV1)
+	validRunManifestV2["schema_version"] = "pgworkbench.run-manifest/v2"
+	validRunManifestV2["runtime_ports_digest"] = digest
+	t.Run("positive/run-manifest-v2", func(t *testing.T) {
+		if err := registry.Validate("run-manifest.schema.json", validRunManifestV2); err != nil {
+			t.Fatal(err)
+		}
+	})
 
 	validNativeToolchainSeries := benchmarkSeries(digest, "native_toolchain")
 	validNativeToolchainSeries["runtime"] = "native"
@@ -197,6 +239,36 @@ func validateRepresentativeContracts(t *testing.T, registry *Registry) {
 	invalidSeriesDimension := cloneMap(validPGConfigSeries)
 	invalidSeriesDimension["allowed_subject_differences"] = []any{"unknown_dimension"}
 	assertRejected(t, registry, "benchmark-series.schema.json", "benchmark-series-unknown-subject-difference", invalidSeriesDimension)
+	v1SeriesWithPort := cloneMap(validPGConfigSeries)
+	v1SeriesWithPort["pgbouncer_port"] = 59432
+	assertRejected(t, registry, "benchmark-series.schema.json", "benchmark-series-v1-with-v2-port", v1SeriesWithPort)
+	v2SeriesMissingPort := cloneMap(validProxySeriesV2)
+	delete(v2SeriesMissingPort, "pgbouncer_port")
+	assertRejected(t, registry, "benchmark-series.schema.json", "benchmark-series-v2-missing-port", v2SeriesMissingPort)
+	v2DirectSeries := cloneMap(validProxySeriesV2)
+	v2DirectSeries["target"] = "direct-postgres"
+	v2DirectSeries["target_endpoint_contract"] = "pgworkbench.pgbench-target/direct-postgres/v1"
+	v2DirectSeries["target_topology"] = "single"
+	assertRejected(t, registry, "benchmark-series.schema.json", "benchmark-series-v2-direct-target", v2DirectSeries)
+
+	for _, key := range []string{"runtime_ports", "runtime_ports_digest"} {
+		v1WithV2Field := cloneMap(validOperationSeriesV1)
+		if key == "runtime_ports" {
+			v1WithV2Field[key] = runtimePortFixture()
+		} else {
+			v1WithV2Field[key] = digest
+		}
+		assertRejected(t, registry, "operation-benchmark-series.schema.json", "operation-series-v1-with-"+key, v1WithV2Field)
+		v2MissingField := cloneMap(validOperationSeriesV2)
+		delete(v2MissingField, key)
+		assertRejected(t, registry, "operation-benchmark-series.schema.json", "operation-series-v2-missing-"+key, v2MissingField)
+	}
+	v1ManifestWithDigest := cloneMap(validRunManifestV1)
+	v1ManifestWithDigest["runtime_ports_digest"] = digest
+	assertRejected(t, registry, "run-manifest.schema.json", "run-manifest-v1-with-v2-digest", v1ManifestWithDigest)
+	v2ManifestMissingDigest := cloneMap(validRunManifestV2)
+	delete(v2ManifestMissingDigest, "runtime_ports_digest")
+	assertRejected(t, registry, "run-manifest.schema.json", "run-manifest-v2-missing-digest", v2ManifestMissingDigest)
 
 	duplicateSeriesDimension := cloneMap(validNativeToolchainSeries)
 	duplicateSeriesDimension["allowed_subject_differences"] = []any{"native_toolchain", "native_toolchain"}
@@ -374,6 +446,103 @@ func benchmarkSeries(digest, subjectDimension string) map[string]any {
 		"trials_failed":               0,
 		"trials_invalid":              0,
 		"trials":                      []any{},
+	}
+}
+
+func runtimePortFixture() map[string]any {
+	return map[string]any{
+		"POSTGRES_PORT":                    45433,
+		"POSTGRES_REPLICA_PORT":            45434,
+		"POSTGRES_LOGICAL_SUBSCRIBER_PORT": 45435,
+		"PGBOUNCER_PORT":                   46432,
+		"POSTGRES_UPGRADE_OLD_PORT":        45436,
+		"POSTGRES_UPGRADE_NEW_PORT":        45437,
+	}
+}
+
+func operationSeries(digest string) map[string]any {
+	return map[string]any{
+		"schema_version":              "pgworkbench.operation-benchmark-series/v1",
+		"artifact_type":               "pgworkbench.operation-benchmark-series",
+		"operation":                   "schema-gate",
+		"name":                        "Schema gate operation series",
+		"description":                 "Representative operation series",
+		"classification":              "descriptive-engineering",
+		"decision_eligible":           false,
+		"assurance":                   "local-only",
+		"run_id":                      "schema-gate-operation",
+		"run_dir":                     ".",
+		"spec_ref":                    "benchmarks/operations/schema/gate.json",
+		"spec_digest":                 digest,
+		"experiment_spec":             "schema/gate",
+		"experiment_ref":              "experiments/schema/gate.env",
+		"experiment_digest":           digest,
+		"engine_version":              "0.2.7",
+		"engine_commit":               strings.Repeat("a", 40),
+		"engine_binary_ref":           "protocol/engine/pgworkbench",
+		"engine_binary_digest":        digest,
+		"execution_parameters_digest": digest,
+		"pack_digest":                 digest,
+		"inputs_digest":               digest,
+		"inputs": []any{map[string]any{
+			"path": "experiments/schema/gate.env", "size": 1, "digest": digest,
+		}},
+		"runtime":        "docker",
+		"topology":       "single",
+		"measurement":    map[string]any{"basis": "linked-run-wall-clock", "metric": "elapsed", "unit": "ms", "direction": "lower-is-better", "scope": "whole-run"},
+		"trials_planned": 2,
+		"trials_valid":   0,
+		"trials_failed":  0,
+		"max_cv_pct":     100,
+		"started_at":     "2026-08-13T00:00:00Z",
+		"finished_at":    "2026-08-13T00:00:01Z",
+		"status":         "failed",
+		"reasons":        []any{"schema fixture"},
+		"trials":         []any{},
+	}
+}
+
+func runManifest(digest string) map[string]any {
+	return map[string]any{
+		"schema_version":                  "pgworkbench.run-manifest/v1",
+		"artifact_type":                   "pgworkbench.run-manifest",
+		"run_id":                          "schema-gate-run",
+		"started_at":                      "2026-08-13T00:00:00Z",
+		"experiment_spec":                 "schema/gate",
+		"experiment_spec_id":              "schema/gate",
+		"experiment_spec_ref":             "experiments/schema/gate.env",
+		"experiment_spec_digest":          digest,
+		"source_spec_kind":                "",
+		"source_spec_id":                  "",
+		"source_spec_ref":                 "",
+		"source_spec_digest":              "",
+		"execution_parameters_digest":     digest,
+		"experiment_identity_digest":      digest,
+		"runtime":                         "docker",
+		"engine_version":                  "0.2.7",
+		"engine_commit":                   strings.Repeat("a", 40),
+		"pack_id":                         "",
+		"pack_version":                    "",
+		"pack_digest":                     "",
+		"runtime_fingerprint_status":      "unavailable",
+		"runtime_fingerprint_target":      "primary",
+		"runtime_os":                      "",
+		"runtime_arch":                    "",
+		"postgres_server_version_num":     "",
+		"postgres_server_major":           "",
+		"runtime_fingerprint_observed_at": "",
+		"experiment_name":                 "Schema gate",
+		"experiment_topology":             "single",
+		"experiment_pg_config":            "default",
+		"profile":                         "",
+		"dataset_spec":                    "",
+		"profile_size":                    "small",
+		"workload_spec":                   "sql/smoke-run",
+		"background_specs":                "",
+		"metrics_enabled":                 "0",
+		"metrics_samples":                 "",
+		"artifact_root":                   ".",
+		"run_dir":                         ".",
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -43,15 +44,26 @@ func TestRunManifestJSONSchemaTracksRuntimeFingerprintContract(t *testing.T) {
 			t.Fatalf("run manifest schema does not require %q", key)
 		}
 	}
+	if _, ok := schema.Properties["runtime_ports_digest"]; !ok {
+		t.Fatal("run manifest schema missing v2 runtime_ports_digest property")
+	}
+	if containsString(schema.Required, "runtime_ports_digest") {
+		t.Fatal("run manifest root requires runtime_ports_digest and would reject v1 manifests")
+	}
 
 	var schemaVersion struct {
-		Const string `json:"const"`
+		Enum []string `json:"enum"`
 	}
 	if err := json.Unmarshal(schema.Properties["schema_version"], &schemaVersion); err != nil {
 		t.Fatal(err)
 	}
-	if schemaVersion.Const != ManifestSchemaVersion {
-		t.Fatalf("schema const = %q, want %q", schemaVersion.Const, ManifestSchemaVersion)
+	if len(schemaVersion.Enum) != 2 || schemaVersion.Enum[0] != ManifestSchemaVersion || schemaVersion.Enum[1] != ManifestSchemaVersionV2 {
+		t.Fatalf("schema versions = %q, want v1/v2", schemaVersion.Enum)
+	}
+	compact := strings.NewReplacer(" ", "", "\n", "", "\t", "").Replace(string(content))
+	if !strings.Contains(compact, `"then":{"required":["runtime_ports_digest"]}`) ||
+		!strings.Contains(compact, `"else":{"not":{"required":["runtime_ports_digest"]}}`) {
+		t.Fatal("run manifest schema does not require the port digest only for v2")
 	}
 
 	var sourceSpecKind struct {

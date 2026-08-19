@@ -87,7 +87,7 @@ if PGWORKBENCH_BIN="$TMP_DIR/pgworkbench" \
   echo "FAIL: legacy shell state writer was accepted" >&2
   exit 1
 fi
-grep -q 'cannot write the v1 evidence contract' "$TMP_DIR/state-writer.log"
+grep -q 'cannot write the versioned evidence contract' "$TMP_DIR/state-writer.log"
 if [[ -e "$REPO_DIR/runs/$STATE_WRITER_RUN_ID" || -L "$REPO_DIR/runs/$STATE_WRITER_RUN_ID" ]]; then
   echo "FAIL: rejected state writer created a run directory" >&2
   exit 1

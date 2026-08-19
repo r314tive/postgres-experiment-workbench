@@ -6,7 +6,6 @@ on:
       version:
         description: Version without a leading v.
         required: true
-        default: 0.2.0
         type: string
   push:
     tags:
