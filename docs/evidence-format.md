@@ -67,8 +67,8 @@ with status `observed`. `primary` is the target for ordinary topologies;
 `multi-version-upgrade` uses `upgrade-new`, the restore destination. The OS
 and architecture are the producer binary's Go execution target (`GOOS` and
 `GOARCH`), not a claim about every layer of a container image. A failed run may
-remain `unavailable` when the server never became queryable; a passed versioned run
-must be `observed`.
+remain `unavailable` when the server never became queryable; a passed run using
+a versioned manifest must be `observed`.
 
 The singular PostgreSQL version in the manifest describes only that named
 target. In particular, it is not evidence of the source/target version pair in
@@ -117,15 +117,14 @@ and are covered by the same inventory.
 The schemas under `schemas/` describe JSON artifacts. The env manifest/verdict
 use the same closed field set enforced directly by `pgworkbench run verify`.
 Legacy unversioned runs remain readable. Current producers select v1 when the
-v2-only runtime-port binding is absent and v2 when it is present. Readers in
-v0.2.7 accept both exact shapes; older strict readers reject new v2 artifacts
-by design rather than silently ignoring evidence they do not understand.
+v2-only runtime-port binding is absent and v2 when it is present. v0.2.7 reads
+both versions; readers predating v0.2.7 reject v2.
 
-Runtime fingerprint verification is deliberately bounded. It checks canonical
-fields, derives the major again from `server_version_num`, includes the values
-in experiment identity, and binds the final manifest to the verdict. It does
-not independently attest the producer host, authenticate the PostgreSQL server,
-or turn one observed tuple into a compatibility or support claim.
+Runtime fingerprint verification checks the canonical fields, derives the major
+again from `server_version_num`, includes the values in experiment identity,
+and binds the final manifest to the verdict. It does not attest the producer
+host, authenticate the PostgreSQL server, or turn one observed tuple into a
+compatibility or support claim.
 
 ## Benchmark contracts
 

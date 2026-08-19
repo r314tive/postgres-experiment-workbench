@@ -660,7 +660,7 @@ go run ./cmd/pgworkbench evidence candidate init \
   --release-manifest "downloaded/pgworkbench-${release_version}-release-manifest.json" \
   --asset-inventory draft-verification/asset-inventory.json \
   --output evidence/index-r0.json
-# After copying an exact typed workflow summary to durable storage:
+# After saving the typed workflow summary to durable storage:
 go run ./cmd/pgworkbench evidence gate attach \
   --index evidence/index-r0.json \
   --gate draft_external_drivers \
@@ -673,35 +673,27 @@ go run ./cmd/pgworkbench evidence controls attach \
   --evidence-file downloaded/preventive-controls-verification.json \
   --evidence-ref "s3://release-evidence/v${release_version}/preventive-controls.json?versionId=..." \
   --output evidence/index-r2.json
-# Preserve the exact contiguous revision chain in a deterministic archive:
+# Bundle the revision chain:
 go run ./cmd/pgworkbench evidence bundle create --json \
   evidence/index-r2.json generated/release-evidence.tar.gz
-# After extraction, verify the closed chain from any new parent directory:
+# Verify it after extracting to a different directory:
 mkdir -p extracted && tar -xpzf generated/release-evidence.tar.gz -C extracted
 go run ./cmd/pgworkbench evidence bundle verify --json \
   extracted/pgworkbench-release-evidence
 ```
 
-The current offline attachment adapter persists its trust boundary in the new
-index revision. A semantically passed local record with an operator-supplied
-durable URI remains in `unqualified_evidence` and cannot authorize release
-`GO`. V3 intentionally has no verified override; a proof-backed class will be
-introduced only with a typed verifier that authenticates the remote object and
-producer.
+Attachments validate record contents, not the provenance or durability of an
+operator-supplied `--evidence-ref`. Such evidence stays in
+`unqualified_evidence`, leaving the release decision at `NO-GO`. The controls
+command reads one record tied to the candidate and updates the tag-ruleset,
+bypass-review, and immutable-release paths together. It rejects partial updates
+and attempts to replace existing evidence.
 
-`evidence controls attach` accepts no individual control names or statuses. It
-derives the tag-ruleset, bypass-review, and immutable-release states together
-from one strict candidate-bound record and rejects partial or superseding
-updates. Its three path-specific evidence entries still share the same record
-digest and operator-attested trust boundary, so they remain an effective
-`NO-GO` until remote durability and review authenticity are independently
-verified.
-
-The closed evidence bundle retains only the exact project-authored index
-revision bytes and `release-evidence-bundle.json`; it does not copy or fetch the
-external objects named by durable references. Relocated verification proves
-internal closure and lineage without upgrading `NO-GO`, remote authenticity,
-durability, or release authorization.
+A bundle contains the index revision files and
+`release-evidence-bundle.json`. Objects referenced by `evidence.ref` remain
+outside the archive. Bundle verification checks the chain and inventory, not
+remote durability, authenticity, or release authorization. See
+[release evidence](docs/release-evidence.md) for the full contract.
 
 Run `go run ./cmd/pgworkbench` without arguments for the complete command tree.
 Go migration notes live in [docs/go-migration.md](docs/go-migration.md).
