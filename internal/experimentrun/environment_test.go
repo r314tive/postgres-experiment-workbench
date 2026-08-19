@@ -96,7 +96,10 @@ func TestRunOwnsDisabledExactEnvironmentMarker(t *testing.T) {
 	_, err := Run(root, speccatalog.New(root), "smoke", Options{
 		Runtime: "docker",
 		RunID:   "ordinary-run",
-		Env:     []string{"PGWORKBENCH_EXACT_ENVIRONMENT=1"},
+		Env: []string{
+			"PGWORKBENCH_EXACT_ENVIRONMENT=1",
+			"PGWORKBENCH_RUNTIME_PORTS_DIGEST=sha256:" + strings.Repeat("a", 64),
+		},
 		RunCommand: func(_ string, _ []string, env []string, _, _ io.Writer) CommandResult {
 			seen = append([]string(nil), env...)
 			return CommandResult{ExitCode: 0}
@@ -107,6 +110,9 @@ func TestRunOwnsDisabledExactEnvironmentMarker(t *testing.T) {
 	}
 	if !contains(seen, "PGWORKBENCH_EXACT_ENVIRONMENT=0") || countEnvironmentName(seen, "PGWORKBENCH_EXACT_ENVIRONMENT") != 1 {
 		t.Fatalf("ordinary runner did not own the disabled exact-environment marker: %#v", seen)
+	}
+	if !contains(seen, "PGWORKBENCH_RUNTIME_PORTS_DIGEST=") || countEnvironmentName(seen, "PGWORKBENCH_RUNTIME_PORTS_DIGEST") != 1 {
+		t.Fatalf("ordinary runner did not shadow the internal runtime-port digest capability: %#v", seen)
 	}
 }
 

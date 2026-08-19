@@ -30,12 +30,20 @@ the manual matrix and `release-check` keeps generated manifests bound to the
 candidate SemVer and commit instead of `dev`/`unknown`. Before running the
 block, set `PGWORKBENCH_RELEASE_DOCKER_HOST` to the local daemon's explicit
 `unix://` socket and `PGWORKBENCH_RELEASE_COMPOSE_PLUGIN` to an absolute,
-executable Docker Compose plugin. The block stages only that plugin into an
-otherwise empty Docker CLI configuration:
+executable Docker Compose plugin. Execute the whole block with Bash 4 or newer;
+the block stages only that plugin into an otherwise empty Docker CLI
+configuration. For the current candidate, export
+`PGWORKBENCH_RELEASE_VERSION=0.2.7` before running it:
 
 ```bash
+if [[ -z "${BASH_VERSION:-}" || "${BASH_VERSINFO[0]:-0}" -lt 4 ]]; then
+  echo "This release block requires Bash 4 or newer" >&2
+  return 2 2>/dev/null || exit 2
+fi
 set -euo pipefail
 
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION, for example 0.2.7}"
+[[ "$release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 go_command="${PGWORKBENCH_GO:-go}"
 go_bin="$(command -v "$go_command")"
 case "$go_bin" in
@@ -78,8 +86,11 @@ release_common_env=(
 bootstrap_env=(env -i "HOME=$release_tmp" "${release_common_env[@]}")
 
 candidate_sha="$("${bootstrap_env[@]}" git rev-parse HEAD)"
-candidate_parent="$("${bootstrap_env[@]}" mktemp -d "$release_tmp/pgworkbench-v0.2.0.XXXXXX")"
-candidate_checkout="$candidate_parent/pgworkbench-${candidate_sha:0:12}"
+candidate_parent="$("${bootstrap_env[@]}" mktemp -d "$release_tmp/pgworkbench-v${release_version}.XXXXXX")"
+candidate_parent_hash="$("${bootstrap_env[@]}" git hash-object --stdin <<<"$candidate_parent")"
+[[ "$candidate_parent_hash" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]
+candidate_nonce="${candidate_parent_hash:0:16}"
+candidate_checkout="$candidate_parent/pgworkbench-${candidate_sha:0:12}-${candidate_nonce}"
 release_home="$candidate_parent/home"
 docker_config="$release_home/.docker"
 "${bootstrap_env[@]}" mkdir -p "$docker_config/cli-plugins"
@@ -96,38 +107,120 @@ release_env=(
 )
 "${release_env[@]}" git worktree add --detach "$candidate_checkout" "$candidate_sha"
 cd -P "$candidate_checkout"
+release_project="${candidate_checkout##*/}"
 for path in .env runs generated .tmp; do test ! -e "$path"; done
+test "$("${release_env[@]}" jq -er '.version' pgworkbench-pack.json)" = "$release_version"
 
 "${release_env[@]}" bash -c '(( BASH_VERSINFO[0] >= 4 ))'
+release_port_names=(
+  POSTGRES_PORT
+  POSTGRES_REPLICA_PORT
+  POSTGRES_LOGICAL_SUBSCRIBER_PORT
+  PGBOUNCER_PORT
+  POSTGRES_UPGRADE_OLD_PORT
+  POSTGRES_UPGRADE_NEW_PORT
+)
+mapfile -t release_port_env < <("${release_env[@]}" ./scripts/assign_test_ports.sh)
+test "${#release_port_env[@]}" -eq "${#release_port_names[@]}"
+release_port_values=()
+for name in "${release_port_names[@]}"; do
+  value=""
+  matches=0
+  for assignment in "${release_port_env[@]}"; do
+    if [[ "$assignment" == "$name="* ]]; then
+      value="${assignment#*=}"
+      matches=$((matches + 1))
+    fi
+  done
+  test "$matches" -eq 1
+  [[ "$value" =~ ^[0-9]+$ ]]
+  (( value >= 1024 && value <= 65535 ))
+  for existing in "${release_port_values[@]}"; do test "$value" != "$existing"; done
+  release_port_values+=("$value")
+  release_env+=("$name=$value")
+done
 test "$("${release_env[@]}" docker context inspect --format '{{.Endpoints.docker.Host}}')" = "$docker_host"
 "${release_env[@]}" docker compose version >/dev/null
 "${release_env[@]}" docker info >/dev/null
-release_project="${candidate_checkout##*/}"
-for container_name in \
-  postgres-experiment-workbench \
-  postgres-experiment-workbench-replica \
-  postgres-experiment-workbench-logical-subscriber \
-  postgres-experiment-workbench-pgbouncer \
-  postgres-experiment-workbench-upgrade-old \
-  postgres-experiment-workbench-upgrade-new; do
-  test -z "$("${release_env[@]}" docker ps -aq --filter "name=^/${container_name}$")"
-done
-test -z "$("${release_env[@]}" docker ps -aq \
-  --filter "label=com.docker.compose.project=$release_project")"
-test -z "$("${release_env[@]}" docker volume ls -q \
-  --filter "label=com.docker.compose.project=$release_project")"
-test -z "$("${release_env[@]}" docker network ls -q \
-  --filter "label=com.docker.compose.project=$release_project")"
+if ! release_compose_config="$("${release_env[@]}" docker compose --env-file .env.example --profile '*' \
+  config --format json)"; then
+  exit 1
+fi
+"${release_env[@]}" jq -e \
+  --arg project "$release_project" \
+  --arg postgres "${release_port_values[0]}" \
+  --arg replica "${release_port_values[1]}" \
+  --arg logical "${release_port_values[2]}" \
+  --arg pgbouncer "${release_port_values[3]}" \
+  --arg old "${release_port_values[4]}" \
+  --arg new "${release_port_values[5]}" '
+    def published($service; $port):
+      (.services[$service].ports | length) == 1 and
+      (.services[$service].ports[0] |
+        .host_ip == "127.0.0.1" and
+        (.published | tostring) == $port and
+        (.target | tostring) == "5432");
+    .name == $project and
+    all(.services[]; (.container_name? // "") == "") and
+    published("postgres"; $postgres) and
+    published("replica"; $replica) and
+    published("logical-subscriber"; $logical) and
+    published("pgbouncer"; $pgbouncer) and
+    published("postgres-old"; $old) and
+    published("postgres-new"; $new)
+  ' <<<"$release_compose_config" >/dev/null
+
+assert_release_project_absent() {
+  local resources
+  resources="$("${release_env[@]}" docker ps -aq \
+    --filter "label=com.docker.compose.project=$release_project")" || return 1
+  test -z "$resources" || return 1
+  resources="$("${release_env[@]}" docker volume ls -q \
+    --filter "label=com.docker.compose.project=$release_project")" || return 1
+  test -z "$resources" || return 1
+  resources="$("${release_env[@]}" docker network ls -q \
+    --filter "label=com.docker.compose.project=$release_project")" || return 1
+  test -z "$resources" || return 1
+}
+report_release_project_resources() {
+  echo "Candidate Compose resources still present for project $release_project:" >&2
+  "${release_env[@]}" docker ps -a \
+    --filter "label=com.docker.compose.project=$release_project" >&2 || true
+  "${release_env[@]}" docker volume ls \
+    --filter "label=com.docker.compose.project=$release_project" >&2 || true
+  "${release_env[@]}" docker network ls \
+    --filter "label=com.docker.compose.project=$release_project" >&2 || true
+}
+cleanup_release_compose_best_effort() {
+  if ! "${release_env[@]}" docker compose --env-file .env.example \
+    --profile replica --profile logical --profile pgbouncer \
+    --profile upgrade --profile workload \
+    down --volumes --remove-orphans >/dev/null 2>&1; then
+    echo "WARNING: candidate Compose cleanup failed" >&2
+    report_release_project_resources
+    return
+  fi
+  if ! assert_release_project_absent; then
+    echo "WARNING: candidate Compose cleanup left project-scoped resources" >&2
+    report_release_project_resources
+  fi
+}
+if ! assert_release_project_absent; then
+  echo "Candidate Compose project is not absent or could not be inspected" >&2
+  report_release_project_resources
+  exit 1
+fi
+trap cleanup_release_compose_best_effort EXIT
 
 candidate_bin="$PWD/.tmp/release-candidate/pgworkbench"
-matrix_run_id="v0.2.0-massive-dml-${candidate_sha:0:12}"
+matrix_run_id="v${release_version}-massive-dml-${candidate_sha:0:12}"
 matrix_dir="$PWD/runs/matrices/$matrix_run_id"
 
 "${release_env[@]}" PGWORKBENCH_GO="$go_bin" \
-  ./scripts/build_candidate_binary.sh 0.2.0 "$candidate_sha" "$candidate_bin"
+  ./scripts/build_candidate_binary.sh "$release_version" "$candidate_sha" "$candidate_bin"
 
 "${release_env[@]}" make candidate-preflight \
-  VERSION=0.2.0 BUILD_COMMIT="$candidate_sha" GO="$go_bin"
+  VERSION="$release_version" BUILD_COMMIT="$candidate_sha" GO="$go_bin"
 
 "${release_env[@]}" \
 PGWORKBENCH_BIN="$candidate_bin" PGWORKBENCH_RUNTIME=docker \
@@ -138,15 +231,22 @@ MATRIX_PROFILE_SIZES=medium MATRIX_REPEATS=3 \
 "${release_env[@]}" PGWORKBENCH_CLI="$candidate_bin" \
   make matrix-candidate-verify \
   MATRIX_RUN="$matrix_dir" MATRIX_EXPECTED_RUNS=9 \
-  VERSION=0.2.0 BUILD_COMMIT="$candidate_sha"
+  VERSION="$release_version" BUILD_COMMIT="$candidate_sha"
 
 "${release_env[@]}" \
 PGWORKBENCH_BIN="$candidate_bin" PGWORKBENCH_RUNTIME=docker \
 ENV_FILE=.env.example \
   make release-check \
-    VERSION=0.2.0 BUILD_COMMIT="$candidate_sha" GO="$go_bin" \
+    VERSION="$release_version" BUILD_COMMIT="$candidate_sha" GO="$go_bin" \
     PGWORKBENCH_CLI="$candidate_bin" \
     PGWORKBENCH_NATIVE_BINDIR="$native_bindir"
+
+"${release_env[@]}" docker compose --env-file .env.example \
+  --profile replica --profile logical --profile pgbouncer \
+  --profile upgrade --profile workload \
+  down --volumes --remove-orphans
+assert_release_project_absent
+trap - EXIT
 ```
 
 The intentionally inherited user values are process bootstrap only and remain
@@ -159,10 +259,16 @@ PostgreSQL bindir, and a fixed list of conventional host tool locations; the
 temporary root is fixed to the physical path behind `/tmp`. Docker uses an
 explicit local socket and a candidate-private context/config containing only
 the selected Compose plugin, so the user's current context, credential store,
-and other CLI plugins are not inputs. The SHA-specific checkout basename gives
-Compose a SHA-specific project name, and the preflight fails instead of touching
-any pre-existing fixed-name container or project-labelled container, volume, or
-network. Persistent Go environment/workspace state, ambient build flags, and
+and other CLI plugins are not inputs. The controlled SHA-plus-path-derived
+lowercase-hex nonce checkout basename becomes the Compose project name and
+scopes the candidate's generated container, volume, and network identities
+without relying on inherited state, including during concurrent gates for the
+same commit.
+One validated set of dynamically allocated loopback ports is held constant across
+the matrix and release gates, so another checkout can keep using the example
+ports. Preflight and final cleanup inspect only the candidate project labels;
+the cleanup never addresses another checkout by a fixed container name.
+Persistent Go environment/workspace state, ambient build flags, and
 system/global Git configuration, checkout-time hooks, and automatic CRLF
 conversion are disabled explicitly. All workbench, PostgreSQL, profile,
 workload, and experiment controls are removed before each gate and only the
@@ -179,10 +285,11 @@ release index.
 Verify every matrix row and release archive:
 
 ```bash
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 make experiment-summary SUMMARY_INPUT="$matrix_dir"
 make scan-artifacts
 make privacy-scan
-cd generated/release && shasum -a 256 -c pgworkbench-0.2.0-SHA256SUMS.txt
+cd generated/release && shasum -a 256 -c "pgworkbench-${release_version}-SHA256SUMS.txt"
 ```
 
 Each archive contains the binary and complete scenario pack. `release-smoke`
@@ -203,7 +310,7 @@ runtime-supported until real execution cells are added and pass.
 
 ## Candidate to release
 
-1. Finalize the dated `v0.2.0` changelog heading, then commit and push the
+1. Finalize the dated `v<version>` changelog heading, then commit and push the
    complete candidate bytes and open or update its pull request. A release-branch
    push alone does not trigger the required workflows.
 2. Require the pull-request `check` and source-mode `compatibility` workflows to
@@ -215,7 +322,7 @@ runtime-supported until real execution cells are added and pass.
    Any later edit, including release-note text, creates a new candidate and
    requires every exact-commit gate again.
 4. Before consuming the version tag, optionally dispatch `release-snapshot.yml`
-   on that exact `main` commit with `version=0.2.0`. The untagged path runs source
+   on that exact `main` commit with `version=<version>`. The untagged path runs source
    compatibility, both aggregate attempts, snapshot construction, and read-only
    candidate verification without entering publication jobs; verify its
    `headSha` before continuing.
@@ -291,16 +398,17 @@ are source-pack schema-gate dependencies represented as dependency-package
 `TEST_DEPENDENCY_OF` relationships with SPDX licenses and Go package URLs;
 they are not described as runtime-linked. Runtime module relationships are
 derived separately and fail closed against the embedded Go build information
-in the packaged `pgworkbench` binary. The v0.2.0 runtime set is empty.
+in the packaged `pgworkbench` binary. The current candidate's runtime set is empty.
 
 Standalone SBOM verification must be bound to the exact extracted package root;
 document-only validation is intentionally not exposed as a successful release
 gate:
 
 ```sh
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 pgworkbench release sbom verify \
-  --package-root extracted/pgworkbench-0.2.0-linux-amd64 \
-  pgworkbench-0.2.0-linux-amd64.spdx.json
+  --package-root "extracted/pgworkbench-${release_version}-linux-amd64" \
+  "pgworkbench-${release_version}-linux-amd64.spdx.json"
 ```
 
 The release asset set is intentionally fixed at 16 files:

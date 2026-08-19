@@ -222,8 +222,8 @@ func deriveFromSource(root, source string, options Options, forceMode string) (A
 	if err != nil {
 		return Artifact{}, "", fmt.Errorf("parse verified manifest.env: %w", err)
 	}
-	if manifest["schema_version"] != runstate.ManifestSchemaVersion {
-		return Artifact{}, "", fmt.Errorf("source must use versioned run manifest %s", runstate.ManifestSchemaVersion)
+	if !runstate.IsManifestSchemaVersion(manifest["schema_version"]) {
+		return Artifact{}, "", fmt.Errorf("source must use a supported versioned run manifest")
 	}
 	if manifest["source_spec_kind"] != "" {
 		return Artifact{}, "", fmt.Errorf("source must be an ordinary experiment run; source_spec_kind %q is not eligible", manifest["source_spec_kind"])

@@ -14,6 +14,11 @@ three tracked templates are:
   validated by
   [`critical-finding-review.schema.json`](../schemas/critical-finding-review.schema.json).
 
+The generated `release-evidence-bundle.json` closed inventory is validated by
+[`release-evidence-bundle-inventory.schema.json`](../schemas/release-evidence-bundle-inventory.schema.json).
+It is generated from an existing immutable revision chain and therefore has no
+tracked template.
+
 The release workflow additionally emits a typed
 [`release-asset-inventory`](../schemas/release-asset-inventory.schema.json)
 record alongside draft/public verification evidence. It is deliberately not a
@@ -30,6 +35,15 @@ They are deliberately not summaries of a green workflow, nor proof that Actions
 will retain the referenced bytes. The closed local adapters can attach them only
 to their one matching readiness requirement, with operator-attested, `NO-GO`
 assurance.
+
+The protected post-draft controls sealer emits one strict
+[`release-preventive-controls-verification`](../schemas/release-preventive-controls-verification.schema.json)
+record. It binds the full candidate and same-run draft asset observation to the
+exact source control artifact, fresh tag-ruleset and immutable-release API
+digests, and the reviewed ruleset revision. The record says explicitly that the
+referenced bypass-review object was not fetched and its signature was not
+verified; it is therefore fact-only, operator-attested evidence rather than
+release authorization.
 
 Copy templates into a release-specific durable location; do not edit the
 templates as historical evidence. A practical layout is
@@ -90,7 +104,12 @@ administrator reviewer. The live ruleset ID and `updated_at` must equal the
 signed review, and review time must not precede the ruleset revision. Any edit
 invalidates the old review. Missing credentials, review metadata, an exact
 active ruleset, or `.enabled == true` for immutable releases leaves publication
-closed. Both controls are queried again in the final publish step.
+closed. Both controls are queried again in the final publish step. The
+post-draft `seal-preventive-controls` job performs a fresh read-only query,
+emits the candidate-bound typed record, and exposes its exact artifact
+ID/name/digest. `publish-release` consumes that exact record and performs one
+last live equality check immediately before its sole state-changing command.
+Neither the Actions artifact nor workflow success is treated as durable proof.
 
 ## Publication boundary
 
@@ -196,8 +215,9 @@ Revision zero is derived from a locally complete downloaded release set and a
 typed provider asset inventory:
 
 ```bash
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 pgworkbench evidence candidate init \
-  --release-manifest downloaded/pgworkbench-0.2.0-release-manifest.json \
+  --release-manifest "downloaded/pgworkbench-${release_version}-release-manifest.json" \
   --asset-inventory draft-verification/asset-inventory.json \
   --output evidence/index-r0.json
 ```
@@ -234,11 +254,12 @@ Every gate mutation consumes a producer-specific fact record. There is no
 generic `--status` or `passed=true` input:
 
 ```bash
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
 pgworkbench evidence gate attach \
   --index evidence/index-r0.json \
   --gate draft_external_drivers \
   --evidence-file downloaded/verification.json \
-  --evidence-ref 's3://release-evidence/v0.2.0/external-drivers.json?versionId=...' \
+  --evidence-ref "s3://release-evidence/v${release_version}/external-drivers.json?versionId=..." \
   --output evidence/index-r1.json
 ```
 
@@ -271,7 +292,32 @@ The supported positive mappings are deliberately closed:
   `draft_asset_verification`;
 - the same asset contract in `published` mode to
   `public_asset_verification`;
-- `pgworkbench.release-publication-verification/v1` to `publication`.
+- `pgworkbench.release-publication-verification/v1` to `publication`;
+- `pgworkbench.release-compatibility-verification/v1` in `source`, `draft`, or
+  `published` mode to its corresponding compatibility gate;
+- `pgworkbench.release-aggregate-verification/v1` attempt 1 or 2 to its
+  corresponding aggregate gate, with attempt 2 bound to the attached attempt-1
+  record digest.
+
+Preventive controls use a separate atomic command because they are one observed
+control set, not three caller-selectable gate outcomes:
+
+```bash
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
+pgworkbench evidence controls attach \
+  --index evidence/index-rN.json \
+  --evidence-file downloaded/preventive-controls-verification.json \
+  --evidence-ref "s3://release-evidence/v${release_version}/preventive-controls.json?versionId=..." \
+  --output evidence/index-rN+1.json
+```
+
+One valid record changes exactly the canonical open tag ruleset, bypass review,
+and immutable-release requirements to `verified`, `admin-reviewed`, and
+`verified`. It cannot repair a partial state or supersede earlier evidence. The
+same record identity and trust boundary are persisted on all three paths with
+path-specific adapter discriminators, and bundle verification accepts only
+this exact atomic transition. All three requirements remain listed in
+`unqualified_evidence`, so the effective result remains `NO-GO`.
 
 The signed `pgworkbench.critical-finding-review/v1` record is also a closed
 human-review mapping to `critical_finding_review`: a valid signed `go` review
@@ -300,7 +346,8 @@ requires the fixed 16-asset set, and binds the verified manifest asset. The
 publication record is emitted only by the fresh read-only `public-verify` job
 after it observes a published immutable release and verifies the release
 attestation; it embeds the complete published-asset record. It is never emitted
-by the mutating `publish-release` job. All four mappings are pass-only and carry
+by the mutating `publish-release` job. All workflow verification mappings are
+pass-only and carry
 fixed non-performance/non-production assurance facts. Missing, malformed,
 contradictory, wrong-candidate, or wrong-gate records produce no revision. An
 already passed or failed gate is not silently superseded.
@@ -323,3 +370,53 @@ GitHub Actions run/artifact URLs are rejected because their retention is
 transport-only. Move the exact summary bytes to a versioned or
 content-addressed durable location first. A successful attachment can still
 report `release_status=open decision=no-go`; it is not release authorization.
+
+## Closed evidence bundle contract
+
+M1.4 defines a deterministic, relocatable archive around one complete index
+revision chain:
+
+```bash
+pgworkbench evidence bundle create --json \
+  evidence/index-r7.json generated/release-evidence-r7.tar.gz
+
+# Preserve the archived 0644 modes even under a restrictive umask, then verify:
+mkdir -p extracted
+tar -xpzf generated/release-evidence-r7.tar.gz -C extracted
+pgworkbench evidence bundle verify --json \
+  extracted/pgworkbench-release-evidence
+```
+
+The schema, command surface, and full relocation/tamper/fault/race matrix now
+complete the bounded M1.4 packaging gate. They do not complete M1, authenticate
+external evidence, or authorize a release. The archive root contains exactly
+`release-evidence-bundle.json` and the canonical
+contiguous `index-r0.json` through `index-r<N>.json` chain. Index bytes are
+copied verbatim: durable `evidence.ref` values are neither rewritten to local
+paths nor replaced by bundled copies of the referenced objects.
+
+`index-r<N>.json` selects an explicit immutable prefix. Adjacent later
+revisions are not imported and do not invalidate that prefix; the bundle makes
+no claim that `N` is a globally current or unique head.
+
+The inventory binds the full candidate identity, canonical head name/revision,
+exact head digest, independently recomputed outcome, file count, total size,
+sorted path/revision/size/digest/mode rows, and a deterministic tree digest.
+Index files have normalized mode `0644`; the inventory permits at most 256
+revisions and uses JSON-safe integer bounds. Extraction must preserve archived
+modes (`tar -xpzf`, not an umask-dependent extraction). Verification must
+reject a gap, wrong predecessor digest, different candidate, missing or extra
+path, duplicate or unsorted row, symlink or non-regular entry, changed bytes,
+size or mode, and an index transplanted from a different chain. A well-formed
+bundle whose head derives `NO-GO` remains valid evidence of `NO-GO`; packaging
+never promotes it to `GO`.
+
+The bundle deliberately contains no downloaded gate-record bytes, GitHub
+Actions logs, provider artifacts, or other externally authored evidence. It
+therefore proves only the relocated chain's internal byte, mode, lineage,
+candidate, and outcome consistency. It does not verify remote retention,
+authenticate a durable URI or producer, validate a signature, or authorize a
+release. Because the inventory is unsigned and self-describing, an attacker
+who rewrites the complete chain and inventory can create a different internally
+consistent bundle; publisher trust still requires an independently trusted
+archive digest, signature, or release provenance.

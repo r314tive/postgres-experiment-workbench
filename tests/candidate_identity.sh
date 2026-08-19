@@ -145,6 +145,7 @@ grep -q 'does not match GITHUB_SHA' "$TMP_DIR/build-github-sha.out"
 
 COMPATIBILITY_WORKFLOW="$REPO_DIR/.github/workflows/compatibility.yml"
 AGGREGATE_WORKFLOW="$REPO_DIR/.github/workflows/aggregate-gate.yml"
+RELEASE_WORKFLOW="$REPO_DIR/.github/workflows/release-snapshot.yml"
 require_count() {
   local needle="$1" file="$2" expected="$3" actual
   actual="$(grep -Fc -- "$needle" "$file")"
@@ -169,5 +170,70 @@ fi
 require_text 'BUILD_COMMIT="$GITHUB_SHA"' "$AGGREGATE_WORKFLOW"
 require_text 'PGWORKBENCH_CLI="$PGWORKBENCH_BIN"' "$AGGREGATE_WORKFLOW"
 require_text './scripts/assert_run_candidate_identity.sh' "$AGGREGATE_WORKFLOW"
+if awk '
+  $0 == "      version:" { active = 1; next }
+  active && $0 !~ /^        / { exit }
+  active && $0 ~ /^[[:space:]]+default:/ { found = 1 }
+  END { exit found ? 0 : 1 }
+' "$RELEASE_WORKFLOW"; then
+  echo 'FAIL: release workflow_dispatch version must not carry a stale default' >&2
+  exit 1
+fi
 
-printf 'PASS: immutable candidate and run-manifest identity guards\n'
+RELEASE_RUNBOOK="$REPO_DIR/docs/release.md"
+require_text 'release_version="${PGWORKBENCH_RELEASE_VERSION:?' "$RELEASE_RUNBOOK"
+require_text '${BASH_VERSINFO[0]:-0}' "$RELEASE_RUNBOOK"
+require_text 'git hash-object --stdin <<<"$candidate_parent"' "$RELEASE_RUNBOOK"
+require_text '[[ "$candidate_parent_hash" =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]' "$RELEASE_RUNBOOK"
+require_text 'candidate_nonce="${candidate_parent_hash:0:16}"' "$RELEASE_RUNBOOK"
+require_text 'candidate_checkout="$candidate_parent/pgworkbench-${candidate_sha:0:12}-${candidate_nonce}"' "$RELEASE_RUNBOOK"
+require_text 'release_project="${candidate_checkout##*/}"' "$RELEASE_RUNBOOK"
+require_text 'test "$("${release_env[@]}" jq -er '\''.version'\'' pgworkbench-pack.json)" = "$release_version"' "$RELEASE_RUNBOOK"
+require_text 'mapfile -t release_port_env < <("${release_env[@]}" ./scripts/assign_test_ports.sh)' "$RELEASE_RUNBOOK"
+require_text 'release_compose_config="$("${release_env[@]}" docker compose --env-file .env.example --profile '\''*'\''' "$RELEASE_RUNBOOK"
+require_text '"${release_env[@]}" jq -e \' "$RELEASE_RUNBOOK"
+require_text '--arg new "${release_port_values[5]}"' "$RELEASE_RUNBOOK"
+require_text 'all(.services[]; (.container_name? // "") == "")' "$RELEASE_RUNBOOK"
+for service in postgres replica logical-subscriber pgbouncer postgres-old postgres-new; do
+  require_text "published(\"$service\";" "$RELEASE_RUNBOOK"
+done
+require_text 'down --volumes --remove-orphans' "$RELEASE_RUNBOOK"
+require_text 'resources="$("${release_env[@]}" docker ps -aq' "$RELEASE_RUNBOOK"
+require_text 'resources="$("${release_env[@]}" docker volume ls -q' "$RELEASE_RUNBOOK"
+require_text 'resources="$("${release_env[@]}" docker network ls -q' "$RELEASE_RUNBOOK"
+require_count ')" || return 1' "$RELEASE_RUNBOOK" 3
+if grep -Eq '(^|[[:space:]])VERSION=[0-9]+\.[0-9]+\.[0-9]+|build_candidate_binary\.sh [0-9]+\.[0-9]+\.[0-9]+|matrix_run_id="v[0-9]+\.' "$RELEASE_RUNBOOK"; then
+  echo 'FAIL: release runbook hardcodes a candidate version in an executable command' >&2
+  exit 1
+fi
+if grep -Eq 'pgworkbench-[0-9]+\.[0-9]+\.[0-9]+|version=[0-9]+\.[0-9]+\.[0-9]+|`v[0-9]+\.[0-9]+\.[0-9]+`' "$RELEASE_RUNBOOK"; then
+  echo 'FAIL: release runbook contains a stale operational candidate version' >&2
+  exit 1
+fi
+if grep -Fq 'COMPOSE_PROJECT_NAME' "$RELEASE_RUNBOOK"; then
+  echo 'FAIL: release runbook overrides the checkout-derived Compose project identity' >&2
+  exit 1
+fi
+for operational_doc in \
+  README.md \
+  docs/ci.md \
+  docs/go-migration.md \
+  docs/compatibility.md \
+  docs/authoring-tutorial.md \
+  docs/release-evidence.md \
+  docs/roadmap.md \
+  docs/post-v0.2-roadmap.md; do
+  if grep -Fq '0.2.0' "$REPO_DIR/$operational_doc"; then
+    echo "FAIL: stale candidate version remains in operational documentation: $operational_doc" >&2
+    exit 1
+  fi
+done
+require_text "\`v$VERSION\` candidate:" "$REPO_DIR/README.md"
+for legacy_name in POSTGRES_CONTAINER POSTGRES_REPLICA_CONTAINER POSTGRES_LOGICAL_SUBSCRIBER_CONTAINER PGBOUNCER_CONTAINER POSTGRES_UPGRADE_OLD_CONTAINER POSTGRES_UPGRADE_NEW_CONTAINER; do
+  if grep -Fq "$legacy_name" "$REPO_DIR/compose.yaml" || grep -Fq "$legacy_name" "$REPO_DIR/.env.example" || grep -Fq "$legacy_name" "$REPO_DIR/scripts/run_workload.sh"; then
+    echo "FAIL: removed fixed-name Compose override remains active: $legacy_name" >&2
+    exit 1
+  fi
+done
+
+printf 'PASS: immutable candidate, run-manifest identity, and release runbook guards\n'

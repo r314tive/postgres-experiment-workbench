@@ -4,7 +4,10 @@
 
 Current experiment-run producer contracts are:
 
-- `pgworkbench.run-manifest/v1` in `manifest.env`;
+- `pgworkbench.run-manifest/v1` in ordinary, utility, and benchmark
+  `manifest.env` files that have no runner-owned six-port binding;
+- `pgworkbench.run-manifest/v2` in operation-benchmark trial `manifest.env`
+  files, with a required canonical runner-owned port-set digest;
 - `pgworkbench.run-verdict/v1` in `verdict.env` and `verdict.json`;
 - `pgworkbench.run-bundle-inventory/v1` in an extracted bundle's
   `.pgworkbench-bundle.json`;
@@ -13,7 +16,7 @@ Current experiment-run producer contracts are:
 The CLI emits the experiment-result object only after the runner has initialized
 that schema identity. Catalog, option, runtime, or pack validation that fails
 before a run exists returns nonzero with a diagnostic on stderr and no result on
-stdout; it never serializes a zero-value object as contract v1.
+stdout; it never serializes a zero-value object as a versioned contract.
 
 The manifest records a portable spec reference, exact spec digest, a digest of
 effective execution parameters (including environment overrides), resolved
@@ -23,6 +26,15 @@ closed-field contract is mirrored by
 [`schemas/run-manifest.schema.json`](../schemas/run-manifest.schema.json). It
 intentionally does not store raw hook parameters merely to make the digest
 reproducible; hooks may contain private operator values.
+
+Operation benchmark trials use run-manifest v2 and carry a required canonical
+`runtime_ports_digest`. It binds the runner-owned six-port snapshot retained in
+the operation series to each linked run and to its experiment identity without
+exposing unrelated ambient variables. Run-manifest v1 must omit the field
+entirely; it may not serialize an empty placeholder. The operation verifier
+requires the series-v2 typed snapshot, its digest, and every linked
+run-manifest-v2 value to agree. It retains read compatibility for a legacy
+operation-series-v1 plus run-manifest-v1 pair, with both new fields absent.
 
 The Go runner reads the selected top-level experiment spec once and uses those
 same bytes for parsing, catalog validation, planning, the result digest, and a
@@ -55,7 +67,7 @@ with status `observed`. `primary` is the target for ordinary topologies;
 `multi-version-upgrade` uses `upgrade-new`, the restore destination. The OS
 and architecture are the producer binary's Go execution target (`GOOS` and
 `GOARCH`), not a claim about every layer of a container image. A failed run may
-remain `unavailable` when the server never became queryable; a passed v1 run
+remain `unavailable` when the server never became queryable; a passed versioned run
 must be `observed`.
 
 The singular PostgreSQL version in the manifest describes only that named
@@ -104,7 +116,10 @@ and are covered by the same inventory.
 
 The schemas under `schemas/` describe JSON artifacts. The env manifest/verdict
 use the same closed field set enforced directly by `pgworkbench run verify`.
-Legacy unversioned runs remain readable, but new producers emit only v1.
+Legacy unversioned runs remain readable. Current producers select v1 when the
+v2-only runtime-port binding is absent and v2 when it is present. Readers in
+v0.2.7 accept both exact shapes; older strict readers reject new v2 artifacts
+by design rather than silently ignoring evidence they do not understand.
 
 Runtime fingerprint verification is deliberately bounded. It checks canonical
 fields, derives the major again from `server_version_num`, includes the values
@@ -136,6 +151,7 @@ the table makes that storage boundary explicit.
 | `pgworkbench.benchmark-scenario-pack/v1` | [`benchmark-scenario-pack.schema.json`](../schemas/benchmark-scenario-pack.schema.json) | pack-bound series `protocol/scenario-pack.json`; portable full file inventory whose exact bytes and independently recomputed pack digest are bound from `result.json` |
 | `pgworkbench.native-toolchain/v1` | [`native-toolchain.schema.json`](../schemas/native-toolchain.schema.json) | native ordinary-benchmark and operation series `protocol/native-toolchain/manifest.json`, plus A/B v3 `toolchains/<role>/manifest.json`; an A/B-linked ordinary series keeps its own canonical series-local snapshot in addition to the arm-level binding. Each manifest binds an identity-only snapshot of seven native PostgreSQL executables and their observed versions; adjacent installation/system dependencies and source/build provenance remain unattested |
 | `pgworkbench.benchmark-series/v1` | [`benchmark-series.schema.json`](../schemas/benchmark-series.schema.json) | `result.json` |
+| `pgworkbench.benchmark-series/v2` | [`benchmark-series.schema.json`](../schemas/benchmark-series.schema.json) | PgBouncer-target `result.json`; requires the runner-owned published PgBouncer port, while direct-PostgreSQL producers remain exact v1 and omit the inactive field |
 | `pgworkbench.benchmark-comparison/v1` | [`benchmark-comparison.schema.json`](../schemas/benchmark-comparison.schema.json) | `benchmark compare --json` output; not persisted automatically |
 | `pgworkbench.benchmark-bundle/v1` | [`benchmark-bundle-inventory.schema.json`](../schemas/benchmark-bundle-inventory.schema.json) | `benchmark-bundle.json` at the extracted bundle root |
 | `pgworkbench.benchmark-host-qualification/v1` | [`benchmark-host-qualification.schema.json`](../schemas/benchmark-host-qualification.schema.json) | standalone `benchmark host-inspect --output` artifact; unsigned and operator-recorded |
@@ -151,6 +167,7 @@ the table makes that storage boundary explicit.
 | `pgworkbench.operation-benchmark-spec/v1` | [`operation-benchmark-spec.schema.json`](../schemas/operation-benchmark-spec.schema.json) | strict source `benchmarks/operations/**/*.json`, retained as an immutable series snapshot |
 | `pgworkbench.operation-result/v1` | [`operation-result.schema.json`](../schemas/operation-result.schema.json) | exact standardized linked-run result for `operation-result` measurement bases; never interpreted as TPS |
 | `pgworkbench.operation-benchmark-series/v1` | [`operation-benchmark-series.schema.json`](../schemas/operation-benchmark-series.schema.json) | descriptive `runs/operation-benchmarks/<id>/result.json`; binds the clean execution contract, bounded recomputable input closure, retained engine bytes, and native seven-file toolchain identity when applicable |
+| `pgworkbench.operation-benchmark-series/v2` | [`operation-benchmark-series.schema.json`](../schemas/operation-benchmark-series.schema.json) | current descriptive operation-series `result.json`; additionally requires the typed distinct six-port snapshot and canonical digest linked to every run-manifest-v2 trial |
 | `pgworkbench.operation-benchmark-bundle/v1` | [`operation-benchmark-bundle-inventory.schema.json`](../schemas/operation-benchmark-bundle-inventory.schema.json) | unsigned `operation-benchmark-bundle.json` at the extracted bundle root; its canonical `series_ref` is required to resolve to the exact series being verified |
 | `pgworkbench.benchmark-import/v1` contract `1.1.0` | [`benchmark-import.schema.json`](../schemas/benchmark-import.schema.json) | descriptive offline import `result.json`; strict pinned parsers record driver commit and error/timing completeness without becoming series or decision input |
 | `pgworkbench.benchmark-import-mapping/v1` | [`benchmark-import-mapping.schema.json`](../schemas/benchmark-import-mapping.schema.json) | retained `raw/mapping.json` only for generic legacy HammerDB/BenchBase typed JSON Pointer selection; pinned strict formats need no mapping |
@@ -159,6 +176,7 @@ the table makes that storage boundary explicit.
 | `pgworkbench.sysbench-native-run-config/v1` | [`benchmark-driver-sysbench-config.schema.json`](../schemas/benchmark-driver-sysbench-config.schema.json) | closed non-secret sysbench PostgreSQL target and workload-control input used to reconstruct fixed argv |
 | `pgworkbench.hammerdb-v6-native-run-config/v1` | [`benchmark-driver-hammerdb-config.schema.json`](../schemas/benchmark-driver-hammerdb-config.schema.json) | closed non-secret HammerDB v6.0 PostgreSQL TPROC-C/TPROC-H execute-only input used to reconstruct adapter-generated Tcl |
 | `pgworkbench.benchmark-import-bundle/v1` | [`benchmark-import-bundle-inventory.schema.json`](../schemas/benchmark-import-bundle-inventory.schema.json) | `benchmark-import-bundle.json` at the extracted import bundle root |
+| `pgworkbench.release-evidence-bundle/v1` | [`release-evidence-bundle-inventory.schema.json`](../schemas/release-evidence-bundle-inventory.schema.json) | generated `release-evidence-bundle.json` at the extracted flat release-evidence chain root; unsigned internal-consistency inventory, not remote evidence authentication or release authorization |
 
 External-driver execution v2 adds
 `execution.json.inputs.driver_runtime`. It records the adapter strategy,

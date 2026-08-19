@@ -101,7 +101,8 @@ The workflow can qualify either a source candidate or a published tag:
 
 ```bash
 gh workflow run compatibility.yml
-gh workflow run compatibility.yml -f release_tag=v0.2.0
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
+gh workflow run compatibility.yml -f release_tag="v${release_version}"
 ```
 
 When a release tag is supplied, every job checks the live GitHub Release state:
@@ -154,7 +155,8 @@ build the release archives. It runs on tags matching `v*` and can also be
 started manually:
 
 ```bash
-gh workflow run release-snapshot.yml -f version=0.2.0
+release_version="${PGWORKBENCH_RELEASE_VERSION:?export PGWORKBENCH_RELEASE_VERSION}"
+gh workflow run release-snapshot.yml -f version="$release_version"
 ```
 
 A manual dispatch stops after the read-only build and semantic artifact

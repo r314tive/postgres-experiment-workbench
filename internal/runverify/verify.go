@@ -79,8 +79,9 @@ func VerifyWithOptions(root string, input string, options Options) (Result, erro
 			"profile_size",
 			"run_dir",
 		})
-		if checkSchema(&result, "manifest.env", manifest.Value("schema_version", ""), runstate.ManifestSchemaVersion) {
-			checkAllowedEnvKeys(&result, "manifest.env", manifest, []string{
+		manifestSchema := manifest.Value("schema_version", "")
+		if checkSchemaVersions(&result, "manifest.env", manifestSchema, runstate.ManifestSchemaVersion, runstate.ManifestSchemaVersionV2) {
+			allowedManifestKeys := []string{
 				"schema_version", "artifact_type", "run_id", "started_at", "experiment_spec",
 				"experiment_spec_id", "experiment_spec_ref", "experiment_spec_digest", "execution_parameters_digest",
 				"source_spec_kind", "source_spec_id", "source_spec_ref", "source_spec_digest",
@@ -91,8 +92,12 @@ func VerifyWithOptions(root string, input string, options Options) (Result, erro
 				"experiment_name", "experiment_topology", "experiment_pg_config", "profile",
 				"dataset_spec", "profile_size", "workload_spec", "background_specs", "metrics_enabled", "metrics_samples",
 				"artifact_root", "run_dir",
-			})
-			checkRequiredEnv(&result, "manifest.env", manifest, []string{
+			}
+			if manifestSchema == runstate.ManifestSchemaVersionV2 {
+				allowedManifestKeys = append(allowedManifestKeys, "runtime_ports_digest")
+			}
+			checkAllowedEnvKeys(&result, "manifest.env", manifest, allowedManifestKeys, manifestSchema)
+			requiredManifestKeys := []string{
 				"artifact_type",
 				"experiment_spec_ref",
 				"execution_parameters_digest",
@@ -104,7 +109,11 @@ func VerifyWithOptions(root string, input string, options Options) (Result, erro
 				"runtime_fingerprint_target",
 				"metrics_enabled",
 				"artifact_root",
-			})
+			}
+			if manifestSchema == runstate.ManifestSchemaVersionV2 {
+				requiredManifestKeys = append(requiredManifestKeys, "runtime_ports_digest")
+			}
+			checkRequiredEnv(&result, "manifest.env", manifest, requiredManifestKeys)
 			checkValue(&result, "manifest.env", "artifact_type", manifest.Value("artifact_type", ""), runstate.ManifestArtifactType)
 			checkValue(&result, "manifest.env", "artifact_root", manifest.Value("artifact_root", ""), ".")
 			checkPresentEnvKeys(&result, "manifest.env", manifest, []string{
@@ -116,6 +125,9 @@ func VerifyWithOptions(root string, input string, options Options) (Result, erro
 			checkOptionalDigest(&result, "manifest.env", "experiment_spec_digest", manifest.Value("experiment_spec_digest", ""))
 			checkSourceSpecIdentity(&result, manifest)
 			checkDigest(&result, "manifest.env", "execution_parameters_digest", manifest.Value("execution_parameters_digest", ""))
+			if manifestSchema == runstate.ManifestSchemaVersionV2 {
+				checkDigest(&result, "manifest.env", "runtime_ports_digest", manifest.Value("runtime_ports_digest", ""))
+			}
 			checkManifestIdentity(&result, manifest)
 			checkEngineIdentity(&result, manifest)
 			checkPackIdentity(&result, manifest)
@@ -156,7 +168,7 @@ func VerifyWithOptions(root string, input string, options Options) (Result, erro
 				"finished_at", "experiment_spec_id", "experiment_spec_digest",
 				"experiment_identity_digest", "manifest_digest", "artifact_root", "run_dir",
 				"workload_exit", "assert_exit", "scan_exit",
-			})
+			}, runstate.VerdictSchemaVersion)
 			checkRequiredEnv(&result, "verdict.env", verdict, []string{
 				"artifact_type",
 				"run_id",
@@ -192,11 +204,11 @@ func VerifyWithOptions(root string, input string, options Options) (Result, erro
 		checkSchemaCohesion(&result, manifest.Value("schema_version", ""), verdict.Value("schema_version", ""), verdictJSON.SchemaVersion)
 		checkRecordedRunDirConsistency(&result, manifest.Value("run_dir", ""), verdict.Value("run_dir", ""), verdictJSON.RunDir)
 		checkManifestBindings(&result, manifestPath, manifest, verdict, verdictJSON)
-		if manifest.Value("schema_version", "") == runstate.ManifestSchemaVersion && verdictJSON.Status == "passed" && manifest.Value("runtime_fingerprint_status", "") != runstate.RuntimeFingerprintObserved {
+		if runstate.IsManifestSchemaVersion(manifest.Value("schema_version", "")) && verdictJSON.Status == "passed" && manifest.Value("runtime_fingerprint_status", "") != runstate.RuntimeFingerprintObserved {
 			addIssue(&result, "passed versioned run requires an observed runtime fingerprint")
 		}
 	}
-	if options.RequireBundleInventory && manifestOK && manifest.Value("schema_version", "") == runstate.ManifestSchemaVersion {
+	if options.RequireBundleInventory && manifestOK && runstate.IsManifestSchemaVersion(manifest.Value("schema_version", "")) {
 		checkExperimentSpecSnapshot(&result, dir, manifest)
 		switch manifest.Value("source_spec_kind", "") {
 		case "utility-test":
@@ -458,7 +470,7 @@ func checkPresentEnvKeys(result *Result, label string, values runartifact.Env, k
 	}
 }
 
-func checkAllowedEnvKeys(result *Result, label string, values runartifact.Env, allowedKeys []string) {
+func checkAllowedEnvKeys(result *Result, label string, values runartifact.Env, allowedKeys []string, schemaVersion string) {
 	allowed := make(map[string]struct{}, len(allowedKeys))
 	for _, key := range allowedKeys {
 		allowed[key] = struct{}{}
@@ -471,7 +483,7 @@ func checkAllowedEnvKeys(result *Result, label string, values runartifact.Env, a
 	}
 	sort.Strings(unknown)
 	for _, key := range unknown {
-		addIssue(result, "%s unknown key for schema v1: %s", label, key)
+		addIssue(result, "%s unknown key for schema %s: %s", label, schemaVersion, key)
 	}
 }
 
@@ -484,6 +496,19 @@ func checkSchema(result *Result, label string, value string, supported string) b
 		return false
 	}
 	return true
+}
+
+func checkSchemaVersions(result *Result, label string, value string, supported ...string) bool {
+	if value == "" {
+		return false
+	}
+	for _, candidate := range supported {
+		if value == candidate {
+			return true
+		}
+	}
+	addIssue(result, "%s unsupported schema_version: %s", label, value)
+	return false
 }
 
 func checkValue(result *Result, label string, key string, value string, expected string) {
@@ -544,6 +569,7 @@ func checkManifestIdentity(result *Result, manifest runartifact.Env) {
 		PostgresServerVersionNum:  manifest.Value("postgres_server_version_num", ""),
 		PostgresServerMajor:       manifest.Value("postgres_server_major", ""),
 		ExecutionParametersDigest: manifest.Value("execution_parameters_digest", ""),
+		RuntimePortsDigest:        manifest.Value("runtime_ports_digest", ""),
 	}
 	if expected := identity.Digest(); digest != expected {
 		addIssue(result, "manifest.env experiment_identity_digest does not match resolved experiment identity")

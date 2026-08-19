@@ -496,6 +496,7 @@ func TestNativeTrialUsesExactEnvironmentAndExplicitBoundEndpoint(t *testing.T) {
 		Getenv: func(key string) string {
 			return map[string]string{
 				"POSTGRES_HOST": "hostile.example", "POSTGRES_PORT": "1",
+				"PGBOUNCER_PORT":   "not-a-port",
 				"WORKLOAD_COMMAND": "hostile-command", "BASH_ENV": "/tmp/hostile",
 				"EXPERIMENT_BEFORE_SHELL": "hostile-hook", "COMPOSE": "hostile-compose",
 			}[key]
@@ -506,6 +507,7 @@ func TestNativeTrialUsesExactEnvironmentAndExplicitBoundEndpoint(t *testing.T) {
 			}
 			for key, want := range map[string]string{
 				"ENV_FILE": ".env.example", "POSTGRES_HOST": "127.0.0.1", "POSTGRES_PORT": "59433",
+				"PGBOUNCER_PORT":          "56432",
 				"EXPERIMENT_BEFORE_SHELL": "", "PGWORKBENCH_RUNTIME": "native",
 			} {
 				if got := envValue(options.Env, key); got != want {
@@ -530,6 +532,90 @@ func TestNativeTrialUsesExactEnvironmentAndExplicitBoundEndpoint(t *testing.T) {
 	}
 	if series.Environment.TargetEndpointHost != "127.0.0.1" || series.Environment.TargetEndpointPort != 59433 || !evidence.IsDigest(series.Environment.NativeToolchainDigest) {
 		t.Fatalf("native environment omitted endpoint/toolchain binding: %#v", series.Environment)
+	}
+	if series.SchemaVersion != SeriesSchemaVersion || series.PgBouncerPort != nil || series.PgBouncerPortPresent {
+		t.Fatalf("direct series must retain the v1 shape without an inactive PgBouncer port: %#v", series)
+	}
+}
+
+func TestStartProjectsCustomPgBouncerPortOnlyForActiveProxy(t *testing.T) {
+	root := writeRunCatalog(t, 1, true)
+	plan := writePgBouncerRunPlan(t, root)
+	execution, err := Start(root, speccatalog.New(root), plan, Options{
+		Runtime:    "docker",
+		RunID:      "custom-active-pgbouncer-port",
+		BinaryPath: fakeBenchmarkEngine(t, "custom-active-pgbouncer-port"),
+		Getenv: func(key string) string {
+			if key == "PGBOUNCER_PORT" {
+				return "59432"
+			}
+			return ""
+		},
+	})
+	if err != nil {
+		t.Fatalf("Start() rejected custom active PgBouncer port: %v", err)
+	}
+	series := execution.Snapshot()
+	if series.SchemaVersion != SeriesSchemaVersionV2 || series.PgBouncerPort == nil || *series.PgBouncerPort != 59432 || !series.PgBouncerPortPresent {
+		t.Fatalf("active proxy series PgBouncer binding = %#v, want v2/59432", series.PgBouncerPort)
+	}
+	parameters := trialParametersWithPgBouncerPort(plan, "docker", 1, *series.PgBouncerPort)
+	if parameters["PGBOUNCER_PORT"] != "59432" {
+		t.Fatalf("active proxy exact parameters omitted custom port: %#v", parameters)
+	}
+}
+
+func TestStartRejectsInvalidPgBouncerPortBeforeReservingEvidence(t *testing.T) {
+	for _, value := range []string{"1", "056432", "65536", "hostile", "-1"} {
+		t.Run(value, func(t *testing.T) {
+			root := writeRunCatalog(t, 1, true)
+			plan := writePgBouncerRunPlan(t, root)
+			runID := "invalid-pgbouncer-port"
+			execution, err := Start(root, speccatalog.New(root), plan, Options{
+				Runtime: "docker",
+				RunID:   runID,
+				Getenv: func(key string) string {
+					if key == "PGBOUNCER_PORT" {
+						return value
+					}
+					return ""
+				},
+			})
+			if err == nil || !strings.Contains(err.Error(), "PGBOUNCER_PORT") {
+				t.Fatalf("Start() error = %v, want strict PgBouncer port rejection", err)
+			}
+			if execution != nil {
+				t.Fatalf("Start() execution = %#v, want nil", execution)
+			}
+			if _, statErr := os.Stat(filepath.Join(root, "runs", "benchmarks", runID)); !os.IsNotExist(statErr) {
+				t.Fatalf("invalid port reserved benchmark evidence: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestStartRejectsCollidingActivePgBouncerPortBeforeReservingEvidence(t *testing.T) {
+	root := writeRunCatalog(t, 1, true)
+	plan := writePgBouncerRunPlan(t, root)
+	runID := "colliding-active-pgbouncer-port"
+	execution, err := Start(root, speccatalog.New(root), plan, Options{
+		Runtime: "docker",
+		RunID:   runID,
+		Getenv: func(key string) string {
+			if key == "POSTGRES_PORT" || key == "PGBOUNCER_PORT" {
+				return "59432"
+			}
+			return ""
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be distinct") {
+		t.Fatalf("Start() error = %v, want active endpoint collision rejection", err)
+	}
+	if execution != nil {
+		t.Fatalf("Start() execution = %#v, want nil", execution)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "runs", "benchmarks", runID)); !os.IsNotExist(statErr) {
+		t.Fatalf("colliding endpoint ports reserved benchmark evidence: %v", statErr)
 	}
 }
 
@@ -1106,6 +1192,31 @@ func writeRunCatalog(t *testing.T, trials int, logTransactions bool) string {
 		"BENCHMARK_LOG_TRANSACTIONS=%d",
 	}, "\n")+"\n", trials, trials, boolRunInt(logTransactions)))
 	return root
+}
+
+func writePgBouncerRunPlan(t *testing.T, root string) benchmarkplan.Plan {
+	t.Helper()
+	writeRunFile(t, root, "topologies/pgbouncer.env", "TOPOLOGY_NAME=pgbouncer\nTOPOLOGY_SERVICES='postgres pgbouncer'\n")
+	writeRunFile(t, root, "experiments/benchmarks/pgbench-pgbouncer.env", strings.Join([]string{
+		"EXPERIMENT_NAME=Benchmark through PgBouncer",
+		"EXPERIMENT_TOPOLOGY=pgbouncer",
+		"EXPERIMENT_PG_CONFIG=default",
+		"EXPERIMENT_WORKLOAD_SPEC=pgbench/tiny",
+	}, "\n")+"\n")
+	path := filepath.Join(root, "benchmarks", "test.env")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = []byte(strings.Replace(string(content),
+		"BENCHMARK_EXPERIMENT_SPEC=benchmarks/pgbench",
+		"BENCHMARK_EXPERIMENT_SPEC=benchmarks/pgbench-pgbouncer\nBENCHMARK_TARGET=pgbouncer", 1))
+	writeRunFile(t, root, "benchmarks/test.env", string(content))
+	plan, err := benchmarkplan.Build(speccatalog.New(root), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
 }
 
 func fakeBenchmarkEngine(t *testing.T, identity string) string {

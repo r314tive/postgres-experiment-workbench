@@ -130,6 +130,167 @@ func TestVerifyAcceptsSyntheticLinkedRunFixture(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsSchemaInvalidTopLevelNull(t *testing.T) {
+	root, seriesDir, _, _, _ := writeArtifactFixture(t)
+	path := filepath.Join(seriesDir, "result.json")
+	content := string(mustReadArtifactFile(t, path))
+	content = strings.Replace(content, `"reasons": []`, `"reasons": null`, 1)
+	writeArtifactFile(t, path, content)
+
+	if _, err := Load(root, seriesDir); err == nil || !strings.Contains(err.Error(), "$.reasons: null is not allowed") {
+		t.Fatalf("Load() error = %v, want rejected top-level null", err)
+	}
+}
+
+func TestLoadRejectsSchemaInvalidNestedNull(t *testing.T) {
+	root, seriesDir, _, _, _ := writeArtifactFixture(t)
+	path := filepath.Join(seriesDir, "result.json")
+	var content map[string]any
+	if err := json.Unmarshal(mustReadArtifactFile(t, path), &content); err != nil {
+		t.Fatal(err)
+	}
+	trials := content["trials"].([]any)
+	trial := trials[0].(map[string]any)
+	trial["effective_settings"] = nil
+	writeArtifactJSON(t, path, content)
+
+	if _, err := Load(root, seriesDir); err == nil || !strings.Contains(err.Error(), "$.trials[0].effective_settings: null is not allowed") {
+		t.Fatalf("Load() error = %v, want rejected nested null", err)
+	}
+}
+
+func TestVerifyRejectsPgBouncerPortFieldInLegacySeries(t *testing.T) {
+	for _, value := range []string{"0", "null", "59432"} {
+		t.Run(value, func(t *testing.T) {
+			root, seriesDir, _, _, _ := writeArtifactFixture(t)
+			path := filepath.Join(seriesDir, "result.json")
+			bytes, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content := string(bytes)
+			content = strings.Replace(content, `"runtime": "docker",`, `"runtime": "docker", "pgbouncer_port": `+value+`,`, 1)
+			writeArtifactFile(t, path, content)
+
+			result, err := Verify(root, seriesDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.IsValid() {
+				t.Fatalf("benchmark series v1 accepted explicit pgbouncer_port=%s", value)
+			}
+		})
+	}
+}
+
+func TestVerifyAcceptsPgBouncerSeriesV2AndBindsPortToLinkedExecution(t *testing.T) {
+	root, seriesDir, _, _, linkedRunDir := writeArtifactFixture(t)
+	upgradeArtifactFixtureToPgBouncerSeriesV2(t, seriesDir, linkedRunDir, 59432)
+	result, err := Verify(root, seriesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsValid() {
+		t.Fatalf("valid PgBouncer series v2 was rejected: %v", result.Issues)
+	}
+
+	var series benchmarkrun.Series
+	readArtifactJSON(t, filepath.Join(seriesDir, "result.json"), &series)
+	tamperedPort := 59433
+	series.PgBouncerPort = &tamperedPort
+	writeArtifactJSON(t, filepath.Join(seriesDir, "result.json"), series)
+	result, err = Verify(root, seriesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsValid() || !containsArtifactIssue(result.Issues, "linked benchmark protocol does not match plan") {
+		t.Fatalf("series-only PgBouncer port rewrite escaped linked execution identity: %v", result.Issues)
+	}
+}
+
+func TestVerifyAcceptsLegacyPgBouncerSeriesV1WithImplicitDefaultPort(t *testing.T) {
+	root, seriesDir, _, _, linkedRunDir := writeArtifactFixture(t)
+	upgradeArtifactFixtureToPgBouncerSeriesV2(t, seriesDir, linkedRunDir, benchmarkrun.DefaultPgBouncerPort)
+	var series benchmarkrun.Series
+	readArtifactJSON(t, filepath.Join(seriesDir, "result.json"), &series)
+	series.SchemaVersion = benchmarkrun.SeriesSchemaVersion
+	series.PgBouncerPort = nil
+	series.PgBouncerPortPresent = false
+	writeArtifactJSON(t, filepath.Join(seriesDir, "result.json"), series)
+	writeArtifactFile(t, filepath.Join(seriesDir, "summary.md"), string(benchmarkrun.SummaryBytes(series)))
+	result, err := Verify(root, seriesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsValid() {
+		t.Fatalf("legacy PgBouncer series v1 with implicit default port was rejected: %v", result.Issues)
+	}
+}
+
+func TestVerifyRejectsPgBouncerSeriesV2NullPort(t *testing.T) {
+	root, seriesDir, _, _, linkedRunDir := writeArtifactFixture(t)
+	upgradeArtifactFixtureToPgBouncerSeriesV2(t, seriesDir, linkedRunDir, 59432)
+	path := filepath.Join(seriesDir, "result.json")
+	content := string(mustReadArtifactFile(t, path))
+	content = strings.Replace(content, `"pgbouncer_port": 59432`, `"pgbouncer_port": null`, 1)
+	writeArtifactFile(t, path, content)
+	result, err := Verify(root, seriesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsValid() {
+		t.Fatal("benchmark series v2 accepted a present null PgBouncer port")
+	}
+}
+
+func TestVerifyRejectsPgBouncerSeriesPortBindingDowngrade(t *testing.T) {
+	root, seriesDir, _, _, linkedRunDir := writeArtifactFixture(t)
+	upgradeArtifactFixtureToPgBouncerSeriesV2(t, seriesDir, linkedRunDir, 59432)
+	var series benchmarkrun.Series
+	readArtifactJSON(t, filepath.Join(seriesDir, "result.json"), &series)
+	series.SchemaVersion = benchmarkrun.SeriesSchemaVersion
+	series.PgBouncerPort = nil
+	series.PgBouncerPortPresent = false
+	writeArtifactJSON(t, filepath.Join(seriesDir, "result.json"), series)
+	writeArtifactFile(t, filepath.Join(seriesDir, "summary.md"), string(benchmarkrun.SummaryBytes(series)))
+	result, err := Verify(root, seriesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsValid() || !containsArtifactIssue(result.Issues, "linked benchmark protocol does not match plan") {
+		t.Fatalf("custom PgBouncer port binding was downgraded to implicit v1: %v", result.Issues)
+	}
+}
+
+func TestVerifyRejectsConfusedPgBouncerSeriesV2Shapes(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(*benchmarkrun.Series)
+	}{
+		{name: "missing-port", mutate: func(series *benchmarkrun.Series) { series.PgBouncerPort = nil }},
+		{name: "zero-port", mutate: func(series *benchmarkrun.Series) { value := 0; series.PgBouncerPort = &value }},
+		{name: "out-of-range-port", mutate: func(series *benchmarkrun.Series) { value := 65536; series.PgBouncerPort = &value }},
+		{name: "direct-target", mutate: func(series *benchmarkrun.Series) { series.Target = benchmarkplan.TargetDirectPostgres }},
+		{name: "downgraded-schema", mutate: func(series *benchmarkrun.Series) { series.SchemaVersion = benchmarkrun.SeriesSchemaVersion }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root, seriesDir, _, _, linkedRunDir := writeArtifactFixture(t)
+			upgradeArtifactFixtureToPgBouncerSeriesV2(t, seriesDir, linkedRunDir, 59432)
+			var series benchmarkrun.Series
+			readArtifactJSON(t, filepath.Join(seriesDir, "result.json"), &series)
+			test.mutate(&series)
+			writeArtifactJSON(t, filepath.Join(seriesDir, "result.json"), series)
+			result, err := Verify(root, seriesDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.IsValid() {
+				t.Fatal("confused benchmark series schema/target/port shape verified")
+			}
+		})
+	}
+}
+
 func TestVerifyAcceptsProtocolV2Artifact(t *testing.T) {
 	root, seriesDir, _, _, linkedRunDir := writeArtifactFixture(t)
 	upgradeArtifactFixtureToProtocolV2(t, seriesDir, linkedRunDir)
@@ -1404,6 +1565,74 @@ func writeArtifactFixture(t *testing.T) (root, seriesDir, summaryPath, rawPath, 
 	return root, seriesDir, summaryPath, rawPath, linkedRunDir
 }
 
+func upgradeArtifactFixtureToPgBouncerSeriesV2(t *testing.T, seriesDir, linkedRunDir string, pgBouncerPort int) {
+	t.Helper()
+
+	specPath := filepath.Join(seriesDir, "benchmark-spec.env")
+	specContent := string(mustReadArtifactFile(t, specPath))
+	if !strings.Contains(specContent, "BENCHMARK_DRIVER=pgbench\n") {
+		t.Fatal("PgBouncer fixture cannot locate benchmark driver declaration")
+	}
+	specContent = strings.Replace(specContent, "BENCHMARK_DRIVER=pgbench\n", "BENCHMARK_DRIVER=pgbench\nBENCHMARK_TARGET=pgbouncer\n", 1)
+	writeArtifactFile(t, specPath, specContent)
+	writeArtifactFile(t, filepath.Join(seriesDir, "protocol", "capsule", "benchmarks", "synthetic.env"), specContent)
+
+	topologyContent := "TOPOLOGY_NAME=pgbouncer\nTOPOLOGY_SERVICES='postgres pgbouncer'\n"
+	topologyPath := filepath.Join(seriesDir, "protocol", "target-topology.env")
+	writeArtifactFile(t, topologyPath, topologyContent)
+	oldCapsuleTopology := filepath.Join(seriesDir, "protocol", "capsule", "topologies", "single.env")
+	if err := os.Remove(oldCapsuleTopology); err != nil {
+		t.Fatal(err)
+	}
+	writeArtifactFile(t, filepath.Join(seriesDir, "protocol", "capsule", "topologies", "pgbouncer.env"), topologyContent)
+
+	var plan benchmarkplan.Plan
+	readArtifactJSON(t, filepath.Join(seriesDir, "plan.json"), &plan)
+	plan.Target = benchmarkplan.TargetPgBouncer
+	plan.TargetEndpointContract = benchmarkplan.EndpointPgBouncerV1
+	plan.TargetTopology = "pgbouncer"
+	plan.TargetTopologyPath = "topologies/pgbouncer.env"
+	plan.TargetTopologyDigest = artifactFixtureDigest(t, topologyPath)
+	plan.SpecDigest = artifactFixtureDigest(t, specPath)
+	protocolDigest, comparisonDigest, err := benchmarkplan.IdentityDigests(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.ProtocolDigest = protocolDigest
+	plan.ComparisonKeyDigest = comparisonDigest
+	if err := benchmarkplan.VerifyDigests(plan); err != nil {
+		t.Fatalf("build PgBouncer series-v2 fixture plan: %v", err)
+	}
+	writeArtifactJSON(t, filepath.Join(seriesDir, "plan.json"), plan)
+
+	var series benchmarkrun.Series
+	readArtifactJSON(t, filepath.Join(seriesDir, "result.json"), &series)
+	series.SchemaVersion = benchmarkrun.SeriesSchemaVersionV2
+	series.Target = benchmarkplan.TargetPgBouncer
+	series.TargetEndpointContract = benchmarkplan.EndpointPgBouncerV1
+	series.TargetTopology = "pgbouncer"
+	series.SpecDigest = plan.SpecDigest
+	series.ProtocolDigest = plan.ProtocolDigest
+	series.ComparisonKeyDigest = plan.ComparisonKeyDigest
+	series.PgBouncerPort = &pgBouncerPort
+	series.PgBouncerPortPresent = true
+	if series.Environment == nil {
+		t.Fatal("PgBouncer fixture series has no environment")
+	}
+	series.Environment.Target = benchmarkplan.TargetPgBouncer
+	series.Environment.TargetEndpointContract = benchmarkplan.EndpointPgBouncerV1
+	series.Environment.TargetEndpointHost = "pgbouncer"
+	series.Environment.TargetEndpointPort = 5432
+	series.Environment.TargetTopology = "pgbouncer"
+	series.Environment.Digest = benchmarkEnvironmentDigest(t, *series.Environment)
+	series.Trials[0].EnvironmentDigest = series.Environment.Digest
+	writeArtifactJSON(t, filepath.Join(seriesDir, "environment.json"), series.Environment)
+	writeArtifactJSON(t, filepath.Join(seriesDir, "trials", "001.json"), series.Trials[0])
+	writeVerifiedLinkedRunForPlanAndPgBouncerPort(t, linkedRunDir, series.Trials[0].RunID, "docker", plan, pgBouncerPort)
+	writeArtifactJSON(t, filepath.Join(seriesDir, "result.json"), series)
+	writeArtifactFile(t, filepath.Join(seriesDir, "summary.md"), string(benchmarkrun.SummaryBytes(series)))
+}
+
 func upgradeArtifactFixtureToProtocolV2(t *testing.T, seriesDir, linkedRunDir string) {
 	t.Helper()
 
@@ -1555,6 +1784,10 @@ func writeVerifiedLinkedRun(t *testing.T, runDir, runID, runtimeName, seriesDir 
 }
 
 func writeVerifiedLinkedRunForPlan(t *testing.T, runDir, runID, runtimeName string, plan benchmarkplan.Plan) {
+	writeVerifiedLinkedRunForPlanAndPgBouncerPort(t, runDir, runID, runtimeName, plan, benchmarkrun.DefaultPgBouncerPort)
+}
+
+func writeVerifiedLinkedRunForPlanAndPgBouncerPort(t *testing.T, runDir, runID, runtimeName string, plan benchmarkplan.Plan, pgBouncerPort int) {
 	t.Helper()
 	manifest := runstate.Manifest{
 		RunID:                     runID,
@@ -1566,7 +1799,7 @@ func writeVerifiedLinkedRunForPlan(t *testing.T, runDir, runID, runtimeName stri
 		SourceSpecID:              plan.Spec,
 		SourceSpecRef:             "benchmarks/synthetic.env",
 		SourceSpecDigest:          plan.SpecDigest,
-		ExecutionParametersDigest: benchmarkrun.ExpectedExecutionParametersDigest(plan, runtimeName, 1),
+		ExecutionParametersDigest: benchmarkrun.ExpectedExecutionParametersDigestWithToolchainAndPgBouncerPort(plan, runtimeName, 1, "", pgBouncerPort),
 		Runtime:                   runtimeName,
 		EngineVersion:             "0.3.0",
 		EngineCommit:              strings.Repeat("a", 40),
@@ -1578,7 +1811,7 @@ func writeVerifiedLinkedRunForPlan(t *testing.T, runDir, runID, runtimeName stri
 		PostgresServerMajor:       "17",
 		RuntimeFingerprintAt:      "2026-08-12T00:00:00Z",
 		ExperimentName:            "Synthetic benchmark trial",
-		ExperimentTopology:        "single",
+		ExperimentTopology:        plan.TargetTopology,
 		ExperimentPGConfig:        "default",
 		ProfileSize:               "small",
 		WorkloadSpec:              "pgbench/tiny",
@@ -1601,7 +1834,11 @@ func writeVerifiedLinkedRunForPlan(t *testing.T, runDir, runID, runtimeName stri
 	if err := runstate.WriteVerdict(runDir, verdict); err != nil {
 		t.Fatal(err)
 	}
-	writeArtifactFile(t, filepath.Join(runDir, "stdout.log"), "pgworkbench_benchmark_target=direct-postgres endpoint_contract=pgworkbench.pgbench-target/direct-postgres/v1 driver_service=postgres endpoint_host=127.0.0.1 endpoint_port=5432 driver_image_id=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd target_image_id=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n")
+	targetHost := "127.0.0.1"
+	if plan.Target == benchmarkplan.TargetPgBouncer {
+		targetHost = "pgbouncer"
+	}
+	writeArtifactFile(t, filepath.Join(runDir, "stdout.log"), fmt.Sprintf("pgworkbench_benchmark_target=%s endpoint_contract=%s driver_service=postgres endpoint_host=%s endpoint_port=5432 driver_image_id=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd target_image_id=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\n", plan.Target, plan.TargetEndpointContract, targetHost))
 	writeArtifactFile(t, filepath.Join(runDir, "metrics.csv"), string(metricstest.Default()))
 }
 

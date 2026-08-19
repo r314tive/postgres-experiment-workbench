@@ -29,7 +29,10 @@ import (
 	"github.com/r314tive/postgres-experiment-workbench/internal/runstate"
 	"github.com/r314tive/postgres-experiment-workbench/internal/runverify"
 	"github.com/r314tive/postgres-experiment-workbench/internal/scenariopack"
+	"github.com/r314tive/postgres-experiment-workbench/internal/strictjson"
 )
+
+const maxBenchmarkSeriesBytes = 64 << 20
 
 type VerifyResult struct {
 	Dir    string               `json:"dir"`
@@ -66,12 +69,96 @@ func Load(root string, input string) (benchmarkrun.Series, error) {
 	if err != nil {
 		return benchmarkrun.Series{}, err
 	}
-	var series benchmarkrun.Series
-	if err := decodeStrict(filepath.Join(dir, "result.json"), &series); err != nil {
+	resultPath := filepath.Join(dir, "result.json")
+	content, err := strictjson.ReadFile(resultPath, maxBenchmarkSeriesBytes)
+	if err != nil {
 		return benchmarkrun.Series{}, err
 	}
+	var series benchmarkrun.Series
+	if err := strictjson.ParseAllowNull(content, &series); err != nil {
+		return benchmarkrun.Series{}, err
+	}
+	if err := rejectUnexpectedBenchmarkNulls(content, "$", "$"); err != nil {
+		return benchmarkrun.Series{}, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(content, &fields); err != nil {
+		return benchmarkrun.Series{}, err
+	}
+	_, series.PgBouncerPortPresent = fields["pgbouncer_port"]
 	series.ArtifactDir = dir
 	return series, nil
+}
+
+var nullableBenchmarkPaths = map[string]struct{}{
+	"$.stats.cv_pct":                                      {},
+	"$.stats.robust_cv_pct":                               {},
+	"$.trials[].pgbench.duration_seconds":                 {},
+	"$.trials[].pgbench.transactions_per_client":          {},
+	"$.trials[].pgbench.transactions_expected":            {},
+	"$.trials[].pgbench.serialization_failures":           {},
+	"$.trials[].pgbench.deadlock_failures":                {},
+	"$.trials[].pgbench.other_failures":                   {},
+	"$.trials[].pgbench.transactions_skipped":             {},
+	"$.trials[].pgbench.transactions_retried":             {},
+	"$.trials[].pgbench.total_retries":                    {},
+	"$.trials[].pgbench.latency_limit_ms":                 {},
+	"$.trials[].pgbench.transactions_above_latency_limit": {},
+	"$.trials[].pgbench.latency_limit_total":              {},
+	"$.trials[].pgbench.latency_stddev_ms":                {},
+	"$.trials[].pgbench.schedule_lag_average_ms":          {},
+	"$.trials[].pgbench.schedule_lag_max_ms":              {},
+	"$.trials[].pgbench.initial_connection_time_ms":       {},
+	"$.trials[].pgbench.average_connection_time_ms":       {},
+	"$.trials[].pgbench.tps_including_connections":        {},
+	"$.trials[].pgbench.tps_excluding_connections":        {},
+	"$.trials[].transaction_log.latency_us":               {},
+	"$.trials[].transaction_log.schedule_lag_us":          {},
+}
+
+// rejectUnexpectedBenchmarkNulls keeps the nullable wire contract as narrow
+// as the benchmark schemas. ParseAllowNull has already rejected duplicate
+// properties and malformed JSON in this same byte snapshot.
+func rejectUnexpectedBenchmarkNulls(content json.RawMessage, canonicalPath string, displayPath string) error {
+	trimmed := bytes.TrimSpace(content)
+	if bytes.Equal(trimmed, []byte("null")) {
+		if _, allowed := nullableBenchmarkPaths[canonicalPath]; allowed {
+			return nil
+		}
+		return fmt.Errorf("%s: null is not allowed", displayPath)
+	}
+	if len(trimmed) == 0 {
+		return fmt.Errorf("%s: empty JSON value", displayPath)
+	}
+
+	switch trimmed[0] {
+	case '{':
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &fields); err != nil {
+			return err
+		}
+		names := make([]string, 0, len(fields))
+		for name := range fields {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			if err := rejectUnexpectedBenchmarkNulls(fields[name], canonicalPath+"."+name, displayPath+"."+name); err != nil {
+				return err
+			}
+		}
+	case '[':
+		var values []json.RawMessage
+		if err := json.Unmarshal(trimmed, &values); err != nil {
+			return err
+		}
+		for index, value := range values {
+			if err := rejectUnexpectedBenchmarkNulls(value, canonicalPath+"[]", fmt.Sprintf("%s[%d]", displayPath, index)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func Verify(root string, input string) (VerifyResult, error) {
@@ -465,7 +552,19 @@ func checkSnapshotDigest(result *VerifyResult, path string, label string, expect
 }
 
 func checkSeriesIdentity(result *VerifyResult, dir string, series benchmarkrun.Series) {
-	if series.SchemaVersion != benchmarkrun.SeriesSchemaVersion {
+	switch series.SchemaVersion {
+	case benchmarkrun.SeriesSchemaVersion:
+		if series.PgBouncerPortPresent || series.PgBouncerPort != nil {
+			addIssue(result, "benchmark series v1 must omit pgbouncer_port")
+		}
+	case benchmarkrun.SeriesSchemaVersionV2:
+		if series.Target != benchmarkplan.TargetPgBouncer {
+			addIssue(result, "benchmark series v2 is reserved for the PgBouncer target")
+		}
+		if !series.PgBouncerPortPresent || series.PgBouncerPort == nil || *series.PgBouncerPort < 1024 || *series.PgBouncerPort > 65535 {
+			addIssue(result, "benchmark series v2 requires a present runner-owned PgBouncer port between 1024 and 65535")
+		}
+	default:
 		addIssue(result, "unsupported result schema: %q", series.SchemaVersion)
 	}
 	if series.ArtifactType != benchmarkrun.SeriesArtifactType {
@@ -546,7 +645,15 @@ func checkTrial(result *VerifyResult, artifactRoot string, seriesDir string, num
 		if manifestErr != nil {
 			addIssue(result, "trial %d linked benchmark protocol manifest cannot be parsed: %v", number, manifestErr)
 		} else {
-			if bindErr := benchmarkrun.ValidateLinkedRunProtocolWithToolchain(*plan, series.Runtime, number, nativeToolchainDigest, manifest); bindErr != nil {
+			pgBouncerPort := benchmarkrun.DefaultPgBouncerPort
+			if series.SchemaVersion == benchmarkrun.SeriesSchemaVersionV2 && series.PgBouncerPort != nil {
+				pgBouncerPort = *series.PgBouncerPort
+			}
+			if pgBouncerPort < 1024 || pgBouncerPort > 65535 {
+				addIssue(result, "trial %d linked benchmark protocol has invalid runner-owned PgBouncer port %d", number, pgBouncerPort)
+				return
+			}
+			if bindErr := benchmarkrun.ValidateLinkedRunProtocolWithToolchainAndPgBouncerPort(*plan, series.Runtime, number, nativeToolchainDigest, pgBouncerPort, manifest); bindErr != nil {
 				addIssue(result, "trial %d linked benchmark protocol does not match plan: %v", number, bindErr)
 			}
 		}

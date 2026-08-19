@@ -1,7 +1,6 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: ${POSTGRES_CONTAINER:-postgres-experiment-workbench}
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-pg_experiment_workbench}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
@@ -34,7 +33,6 @@ services:
 
   replica:
     image: postgres:16-alpine
-    container_name: ${POSTGRES_REPLICA_CONTAINER:-postgres-experiment-workbench-replica}
     profiles:
       - replica
     environment:
@@ -85,7 +83,6 @@ services:
 
   logical-subscriber:
     image: postgres:16-alpine
-    container_name: ${POSTGRES_LOGICAL_SUBSCRIBER_CONTAINER:-postgres-experiment-workbench-logical-subscriber}
     profiles:
       - logical
     environment:
@@ -116,7 +113,6 @@ services:
 
   pgbouncer:
     image: ${PGBOUNCER_IMAGE:-edoburu/pgbouncer:v1.25.1-p0}
-    container_name: ${PGBOUNCER_CONTAINER:-postgres-experiment-workbench-pgbouncer}
     profiles:
       - pgbouncer
     depends_on:
@@ -150,7 +146,6 @@ services:
 
   postgres-old:
     image: ${POSTGRES_UPGRADE_OLD_IMAGE:-postgres:15-alpine}
-    container_name: ${POSTGRES_UPGRADE_OLD_CONTAINER:-postgres-experiment-workbench-upgrade-old}
     profiles:
       - upgrade
     environment:
@@ -172,7 +167,6 @@ services:
 
   postgres-new:
     image: ${POSTGRES_UPGRADE_NEW_IMAGE:-postgres:16-alpine}
-    container_name: ${POSTGRES_UPGRADE_NEW_CONTAINER:-postgres-experiment-workbench-upgrade-new}
     profiles:
       - upgrade
     environment:

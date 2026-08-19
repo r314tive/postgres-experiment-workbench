@@ -6,7 +6,6 @@ on:
       version:
         description: Version without a leading v.
         required: true
-        default: 0.2.0
         type: string
   push:
     tags:
@@ -505,10 +504,67 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          valid_durable_ref() {
+            local value="$1" scheme rest authority path host path_lower body nid nss escaped
+            local urn_nss_pattern="^[-A-Za-z0-9._~!$&'()*+,;=:@/%]+$"
+            test -n "$value" || return 1
+            test "${#value}" -le 2048 || return 1
+            [[ ! "$value" =~ [[:cntrl:][:space:]] ]] || return 1
+            case "$value" in
+              https://*|s3://*|gs://*)
+                scheme="${value%%://*}"
+                rest="${value#*://}"
+                [[ "$rest" != *"#"* && "$rest" == */* ]] || return 1
+                escaped="$rest"
+                while [[ "$escaped" == *%* ]]; do
+                  escaped="${escaped#*%}"
+                  [[ "$escaped" =~ ^[0-9A-Fa-f]{2} ]] || return 1
+                  escaped="${escaped:2}"
+                done
+                authority="${rest%%/*}"
+                [[ -n "$authority" && "$authority" != *"@"* ]] || return 1
+                [[ "$authority" =~ ^[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]] || return 1
+                path="/${rest#*/}"
+                path="${path%%\?*}"
+                [[ "$path" != "/" ]] || return 1
+                if [[ "$scheme" == "https" ]]; then
+                  host="${authority%%:*}"
+                  host="${host,,}"
+                  host="${host%.}"
+                  path_lower="${path,,}"
+                  if [[ "$host" == "github.com" &&
+                    ( "$path_lower" == *"/actions/runs/"* || "$path_lower" == *"/actions/artifacts/"* ) ]]; then
+                    return 1
+                  fi
+                  if [[ "$host" == "api.github.com" && "$path_lower" == *"/actions/artifacts/"* ]]; then
+                    return 1
+                  fi
+                  [[ "$host" != "pipelines.actions.githubusercontent.com" &&
+                    "$host" != "objects.githubusercontent.com" ]] || return 1
+                fi
+                ;;
+              urn:*)
+                [[ "$value" != *"#"* && "$value" != *"?"* ]] || return 1
+                body="${value#urn:}"
+                [[ "$body" == *:* ]] || return 1
+                nid="${body%%:*}"
+                nss="${body#*:}"
+                [[ "$nid" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,30}[A-Za-z0-9]$ ]] || return 1
+                [[ "${nid,,}" != "urn" && -n "$nss" && "${nss:0:1}" != "/" ]] || return 1
+                [[ "$nss" =~ $urn_nss_pattern ]] || return 1
+                while [[ "$nss" == *%* ]]; do
+                  nss="${nss#*%}"
+                  [[ "$nss" =~ ^[0-9A-Fa-f]{2} ]] || return 1
+                  nss="${nss:2}"
+                done
+                ;;
+              *) return 1 ;;
+            esac
+          }
           test -n "$IMMUTABLE_RELEASES_ADMIN_TOKEN"
-          [[ "$TAG_RULESET_ADMIN_REVIEW_REF" =~ ^(https?|s3|gs)://[^[:space:]]+$|^urn:[^[:space:]]+$ ]]
+          valid_durable_ref "$TAG_RULESET_ADMIN_REVIEW_REF"
           [[ "$TAG_RULESET_ADMIN_REVIEW_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$TAG_RULESET_ADMIN_REVIEWER" =~ ^[A-Za-z0-9@._-]+$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWER" =~ ^[A-Za-z0-9][A-Za-z0-9._@+:-]{0,127}$ ]]
           [[ "$TAG_RULESET_ADMIN_REVIEWED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
           [[ "$TAG_RULESET_ADMIN_REVIEWED_ID" =~ ^[0-9]+$ ]]
           [[ "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
@@ -749,6 +805,9 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
     outputs:
       asset_fingerprint: ${{ steps.draft_assets.outputs.asset_fingerprint }}
+      verification_artifact_digest: ${{ steps.upload_verification.outputs.artifact-digest }}
+      verification_artifact_id: ${{ steps.upload_verification.outputs.artifact-id }}
+      verification_artifact_name: ${{ steps.draft_assets.outputs.artifact_name }}
 
     steps:
       - name: Download draft release into clean workspace
@@ -773,6 +832,8 @@ jobs:
           asset_inventory="$(jq -cS '[.assets[] | {id, name, size, digest}] | sort_by(.name)' <<<"$release_json")"
           asset_fingerprint="$(printf '%s' "$asset_inventory" | sha256sum | awk '{print $1}')"
           printf 'asset_fingerprint=%s\n' "$asset_fingerprint" >> "$GITHUB_OUTPUT"
+          printf 'artifact_name=draft-verification-%s-%s-%s\n' \
+            "$GITHUB_REF_NAME" "$GITHUB_SHA" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           mkdir -p downloaded draft-verification
           jq -n \
             --arg schema_version pgworkbench.release-asset-inventory/v1 \
@@ -985,6 +1046,7 @@ jobs:
             }' > draft-verification/asset-verification.json
 
       - name: Upload draft verification evidence
+        id: upload_verification
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: draft-verification-${{ github.ref_name }}-${{ github.sha }}-${{ github.run_attempt }}
@@ -2473,6 +2535,498 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  seal-preventive-controls:
+    if: github.ref_type == 'tag'
+    needs:
+      - prepare
+      - attest-and-create-draft
+      - draft-verify
+      - verify-publication-evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release-publication
+    permissions:
+      actions: read
+      contents: read
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      VERIFIED_ASSET_FINGERPRINT: ${{ needs['draft-verify'].outputs.asset_fingerprint }}
+      SOURCE_CONTROLS_ARTIFACT_DIGEST: ${{ needs['attest-and-create-draft'].outputs.controls_artifact_digest }}
+      SOURCE_CONTROLS_ARTIFACT_ID: ${{ needs['attest-and-create-draft'].outputs.controls_artifact_id }}
+      SOURCE_CONTROLS_ARTIFACT_NAME: ${{ needs['attest-and-create-draft'].outputs.controls_artifact_name }}
+      SOURCE_REPOSITORY_CONTROLS_DIGEST: ${{ needs['attest-and-create-draft'].outputs.repository_controls_digest }}
+      DRAFT_VERIFICATION_ARTIFACT_DIGEST: ${{ needs['draft-verify'].outputs.verification_artifact_digest }}
+      DRAFT_VERIFICATION_ARTIFACT_ID: ${{ needs['draft-verify'].outputs.verification_artifact_id }}
+      DRAFT_VERIFICATION_ARTIFACT_NAME: ${{ needs['draft-verify'].outputs.verification_artifact_name }}
+    outputs:
+      artifact_digest: ${{ steps.upload_verification.outputs.artifact-digest }}
+      artifact_id: ${{ steps.upload_verification.outputs.artifact-id }}
+      artifact_name: ${{ steps.seal.outputs.artifact_name }}
+      record_digest: ${{ steps.seal.outputs.record_digest }}
+
+    steps:
+      - name: Seal typed preventive-control verification
+        id: seal
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMMUTABLE_RELEASES_ADMIN_TOKEN: ${{ secrets.PGWORKBENCH_ADMIN_READ_TOKEN }}
+          TAG_RULESET_ADMIN_REVIEW_REF: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEW_REF }}
+          TAG_RULESET_ADMIN_REVIEW_DIGEST: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEW_DIGEST }}
+          TAG_RULESET_ADMIN_REVIEWER: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWER }}
+          TAG_RULESET_ADMIN_REVIEWED_AT: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_AT }}
+          TAG_RULESET_ADMIN_REVIEWED_ID: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_ID }}
+          TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          valid_durable_ref() {
+            local value="$1" scheme rest authority path host path_lower body nid nss escaped
+            local urn_nss_pattern="^[-A-Za-z0-9._~!$&'()*+,;=:@/%]+$"
+            test -n "$value" || return 1
+            test "${#value}" -le 2048 || return 1
+            [[ ! "$value" =~ [[:cntrl:][:space:]] ]] || return 1
+            case "$value" in
+              https://*|s3://*|gs://*)
+                scheme="${value%%://*}"
+                rest="${value#*://}"
+                [[ "$rest" != *"#"* && "$rest" == */* ]] || return 1
+                escaped="$rest"
+                while [[ "$escaped" == *%* ]]; do
+                  escaped="${escaped#*%}"
+                  [[ "$escaped" =~ ^[0-9A-Fa-f]{2} ]] || return 1
+                  escaped="${escaped:2}"
+                done
+                authority="${rest%%/*}"
+                [[ -n "$authority" && "$authority" != *"@"* ]] || return 1
+                [[ "$authority" =~ ^[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]] || return 1
+                path="/${rest#*/}"
+                path="${path%%\?*}"
+                [[ "$path" != "/" ]] || return 1
+                if [[ "$scheme" == "https" ]]; then
+                  host="${authority%%:*}"
+                  host="${host,,}"
+                  host="${host%.}"
+                  path_lower="${path,,}"
+                  if [[ "$host" == "github.com" &&
+                    ( "$path_lower" == *"/actions/runs/"* || "$path_lower" == *"/actions/artifacts/"* ) ]]; then
+                    return 1
+                  fi
+                  if [[ "$host" == "api.github.com" && "$path_lower" == *"/actions/artifacts/"* ]]; then
+                    return 1
+                  fi
+                  [[ "$host" != "pipelines.actions.githubusercontent.com" &&
+                    "$host" != "objects.githubusercontent.com" ]] || return 1
+                fi
+                ;;
+              urn:*)
+                [[ "$value" != *"#"* && "$value" != *"?"* ]] || return 1
+                body="${value#urn:}"
+                [[ "$body" == *:* ]] || return 1
+                nid="${body%%:*}"
+                nss="${body#*:}"
+                [[ "$nid" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,30}[A-Za-z0-9]$ ]] || return 1
+                [[ "${nid,,}" != "urn" && -n "$nss" && "${nss:0:1}" != "/" ]] || return 1
+                [[ "$nss" =~ $urn_nss_pattern ]] || return 1
+                while [[ "$nss" == *%* ]]; do
+                  nss="${nss#*%}"
+                  [[ "$nss" =~ ^[0-9A-Fa-f]{2} ]] || return 1
+                  nss="${nss:2}"
+                done
+                ;;
+              *) return 1 ;;
+            esac
+          }
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME"
+          test "$GITHUB_REF_NAME" = "v$VERSION"
+          test "$GITHUB_REPOSITORY" = "r314tive/postgres-experiment-workbench"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]]
+          [[ ! "$GITHUB_SHA" =~ ^0{40}$|^0{64}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,31}$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          jq -n -e --arg value "$GITHUB_RUN_ATTEMPT" \
+            '($value | tonumber) <= 9007199254740991' >/dev/null
+          [[ "$VERIFIED_ASSET_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
+          test -n "$IMMUTABLE_RELEASES_ADMIN_TOKEN"
+          valid_durable_ref "$TAG_RULESET_ADMIN_REVIEW_REF"
+          [[ "$TAG_RULESET_ADMIN_REVIEW_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWER" =~ ^[A-Za-z0-9][A-Za-z0-9._@+:-]{0,127}$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_ID" =~ ^[1-9][0-9]*$ ]]
+          jq -n -e --arg value "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            '($value | tonumber) <= 9007199254740991' >/dev/null
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          jq -n -e \
+            --arg reviewed_at "$TAG_RULESET_ADMIN_REVIEWED_AT" \
+            --arg updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            '($reviewed_at | fromdateiso8601) >= ($updated_at | fromdateiso8601)' \
+            >/dev/null
+
+          normalize_digest() {
+            case "$1" in
+              sha256:[0-9a-f][0-9a-f]*) printf '%s\n' "$1" ;;
+              [0-9a-f][0-9a-f]*) printf 'sha256:%s\n' "$1" ;;
+              *) return 1 ;;
+            esac
+          }
+          controls_artifact_digest="$(normalize_digest "$SOURCE_CONTROLS_ARTIFACT_DIGEST")"
+          draft_artifact_digest="$(normalize_digest "$DRAFT_VERIFICATION_ARTIFACT_DIGEST")"
+          [[ "$controls_artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$draft_artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$SOURCE_CONTROLS_ARTIFACT_ID" =~ ^[1-9][0-9]{0,31}$ ]]
+          [[ "$DRAFT_VERIFICATION_ARTIFACT_ID" =~ ^[1-9][0-9]{0,31}$ ]]
+          jq -n -e \
+            --arg controls "$SOURCE_CONTROLS_ARTIFACT_ID" \
+            --arg draft "$DRAFT_VERIFICATION_ARTIFACT_ID" \
+            '($controls | tonumber) <= 9007199254740991 and
+             ($draft | tonumber) <= 9007199254740991' >/dev/null
+          test "$SOURCE_CONTROLS_ARTIFACT_NAME" = \
+            "release-controls-${GITHUB_REF_NAME}-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
+          test "$DRAFT_VERIFICATION_ARTIFACT_NAME" = \
+            "draft-verification-${GITHUB_REF_NAME}-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$SOURCE_REPOSITORY_CONTROLS_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+          controls_artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$SOURCE_CONTROLS_ARTIFACT_ID")"
+          draft_artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$DRAFT_VERIFICATION_ARTIFACT_ID")"
+          jq -e \
+            --argjson id "$SOURCE_CONTROLS_ARTIFACT_ID" \
+            --arg name "$SOURCE_CONTROLS_ARTIFACT_NAME" \
+            --arg digest "$controls_artifact_digest" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg head_sha "$GITHUB_SHA" \
+            '.id == $id and .name == $name and .expired == false and
+             .digest == $digest and .workflow_run.id == $run_id and
+             .workflow_run.head_sha == $head_sha and
+             (.size_in_bytes | type) == "number" and
+             .size_in_bytes >= 1 and .size_in_bytes <= 10485760' \
+            <<<"$controls_artifact_json" >/dev/null
+          jq -e \
+            --argjson id "$DRAFT_VERIFICATION_ARTIFACT_ID" \
+            --arg name "$DRAFT_VERIFICATION_ARTIFACT_NAME" \
+            --arg digest "$draft_artifact_digest" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg head_sha "$GITHUB_SHA" \
+            '.id == $id and .name == $name and .expired == false and
+             .digest == $digest and .workflow_run.id == $run_id and
+             .workflow_run.head_sha == $head_sha and
+             (.size_in_bytes | type) == "number" and
+             .size_in_bytes >= 1 and .size_in_bytes <= 10485760' \
+            <<<"$draft_artifact_json" >/dev/null
+
+          source_dir=preventive-controls-source
+          draft_dir=preventive-controls-draft
+          controls_zip=preventive-controls-source.zip
+          draft_zip=preventive-controls-draft.zip
+          test ! -e "$source_dir"
+          test ! -e "$draft_dir"
+          test ! -e "$controls_zip"
+          test ! -e "$draft_zip"
+          gh api -L "repos/$GITHUB_REPOSITORY/actions/artifacts/$SOURCE_CONTROLS_ARTIFACT_ID/zip" \
+            > "$controls_zip"
+          gh api -L "repos/$GITHUB_REPOSITORY/actions/artifacts/$DRAFT_VERIFICATION_ARTIFACT_ID/zip" \
+            > "$draft_zip"
+          test -f "$controls_zip"
+          test ! -L "$controls_zip"
+          test -f "$draft_zip"
+          test ! -L "$draft_zip"
+          test "$(stat -c %s "$controls_zip")" -le 10485760
+          test "$(stat -c %s "$draft_zip")" -le 10485760
+          test "sha256:$(sha256sum "$controls_zip" | awk '{print $1}')" = \
+            "$controls_artifact_digest"
+          test "sha256:$(sha256sum "$draft_zip" | awk '{print $1}')" = \
+            "$draft_artifact_digest"
+          expected_source_files="$(printf '%s\n' \
+            immutable-releases.json repository-controls.json ruleset-pages.json \
+            rulesets.json tag-ruleset.json | LC_ALL=C sort)"
+          expected_draft_files="$(printf '%s\n' \
+            asset-inventory.json asset-verification.json assets.txt result.env | LC_ALL=C sort)"
+          test "$(unzip -Z1 "$controls_zip" | LC_ALL=C sort)" = "$expected_source_files"
+          test "$(unzip -Z1 "$draft_zip" | LC_ALL=C sort)" = "$expected_draft_files"
+          controls_uncompressed_size="$(unzip -l "$controls_zip" | awk 'END {print $1}')"
+          draft_uncompressed_size="$(unzip -l "$draft_zip" | awk 'END {print $1}')"
+          [[ "$controls_uncompressed_size" =~ ^[0-9]+$ ]]
+          [[ "$draft_uncompressed_size" =~ ^[0-9]+$ ]]
+          test "$controls_uncompressed_size" -le 5242880
+          test "$draft_uncompressed_size" -le 5242880
+          mkdir "$source_dir" "$draft_dir"
+          unzip -q "$controls_zip" -d "$source_dir"
+          unzip -q "$draft_zip" -d "$draft_dir"
+          test "$(find "$source_dir" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" = ""
+          test "$(find "$draft_dir" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" = ""
+          actual_source_files="$(find "$source_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
+          test "$actual_source_files" = "$expected_source_files"
+          actual_draft_files="$(find "$draft_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
+          test "$actual_draft_files" = "$expected_draft_files"
+          for source_file in "$source_dir"/* "$draft_dir"/*; do
+            test -f "$source_file"
+            test ! -L "$source_file"
+            test "$(stat -c %s "$source_file")" -le 1048576
+          done
+
+          repository_controls="$source_dir/repository-controls.json"
+          draft_record="$draft_dir/asset-verification.json"
+          draft_inventory="$draft_dir/asset-inventory.json"
+          test "sha256:$(sha256sum "$repository_controls" | awk '{print $1}')" = \
+            "$SOURCE_REPOSITORY_CONTROLS_DIGEST"
+          test "$(jq -r .tag_ruleset.api_evidence_digest "$repository_controls")" = \
+            "sha256:$(sha256sum "$source_dir/tag-ruleset.json" | awk '{print $1}')"
+          test "$(jq -r .immutable_releases.api_evidence_digest "$repository_controls")" = \
+            "sha256:$(sha256sum "$source_dir/immutable-releases.json" | awk '{print $1}')"
+          jq -e --slurpfile pages "$source_dir/ruleset-pages.json" \
+            '. == ($pages[0] | add)' "$source_dir/rulesets.json" >/dev/null
+          jq -e --argjson id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            'any(.[]; .id == $id)' "$source_dir/rulesets.json" >/dev/null
+          jq -e \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg sha "$GITHUB_SHA" \
+            --arg reviewer "$TAG_RULESET_ADMIN_REVIEWER" \
+            --arg reviewed_at "$TAG_RULESET_ADMIN_REVIEWED_AT" \
+            --argjson ruleset_id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            --arg ruleset_updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            --arg review_ref "$TAG_RULESET_ADMIN_REVIEW_REF" \
+            --arg review_digest "$TAG_RULESET_ADMIN_REVIEW_DIGEST" \
+            '(keys | sort) == ["artifact_type","candidate_sha","immutable_releases","schema_version","tag","tag_ruleset"] and
+             .schema_version == "pgworkbench.repository-release-controls/v1" and
+             .artifact_type == "pgworkbench.repository-release-controls" and
+             .tag == $tag and .candidate_sha == $sha and
+             (.tag_ruleset | keys | sort) == ["api_evidence_digest","bypass_review","creation_restricted","deletion_prohibited","enforcement","excludes","id","include_pattern","status","target","update_prohibited"] and
+             .tag_ruleset.status == "verified" and .tag_ruleset.id == $ruleset_id and
+             .tag_ruleset.target == "tag" and .tag_ruleset.enforcement == "active" and
+             .tag_ruleset.include_pattern == "refs/tags/v*" and .tag_ruleset.excludes == [] and
+             .tag_ruleset.creation_restricted == true and .tag_ruleset.update_prohibited == true and
+             .tag_ruleset.deletion_prohibited == true and
+             (.tag_ruleset.bypass_review | keys | sort) == ["evidence_digest","evidence_ref","reviewed_at","reviewer","ruleset_id","ruleset_updated_at","status"] and
+             .tag_ruleset.bypass_review == {status:"admin-reviewed",reviewer:$reviewer,reviewed_at:$reviewed_at,ruleset_id:$ruleset_id,ruleset_updated_at:$ruleset_updated_at,evidence_ref:$review_ref,evidence_digest:$review_digest} and
+             (.immutable_releases | keys | sort) == ["api_evidence_digest","enabled","enforced_by_owner","status"] and
+             .immutable_releases.status == "verified" and .immutable_releases.enabled == true and
+             (.immutable_releases.enforced_by_owner | type) == "boolean"' \
+            "$repository_controls" >/dev/null
+
+          jq -e \
+            --arg version "$VERSION" \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg sha "$GITHUB_SHA" \
+            --arg fingerprint "$VERIFIED_ASSET_FINGERPRINT" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg ref "$GITHUB_REF" \
+            '(keys | sort) == ["artifact_type","assurance","candidate","captured_at","checks","inventory","provider_observation","qualification_mode","schema_version","source","workflow_run"] and
+             .schema_version == "pgworkbench.release-asset-verification/v1" and
+             .artifact_type == "pgworkbench.release-asset-verification" and
+             .qualification_mode == "draft" and
+             .candidate.version == $version and .candidate.tag == $tag and
+             .candidate.git_commit == $sha and .candidate.asset_fingerprint == $fingerprint and
+             (.candidate | keys | sort) == ["asset_fingerprint","git_commit","scenario_pack","tag","version"] and
+             (.candidate.scenario_pack | keys | sort) == ["digest","id","version"] and
+             (.candidate.version | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$")) and
+             (.candidate.scenario_pack.id | test("^[a-z0-9._-]*[a-z0-9][a-z0-9._-]*$")) and
+             (.candidate.scenario_pack.version | test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$")) and
+             (.candidate.scenario_pack.digest | test("^sha256:[0-9a-f]{64}$")) and
+             .workflow_run == {id:$run_id,attempt:$run_attempt,head_sha:$sha,repository:$repository,workflow:"release-snapshot",job:"draft-verify",ref:$ref} and
+             .inventory.asset_fingerprint == $fingerprint and
+             .provider_observation.asset_fingerprint == $fingerprint and
+             .provider_observation.release_state == "draft" and
+             .provider_observation.is_draft == true and
+             .provider_observation.asset_count == 16 and
+             .assurance.actions_artifact_durable == false and
+             .assurance.candidate_identity_reverified == true and
+             .assurance.provider_asset_set_recomputed == true and
+             .assurance.all_downloaded_bytes_verified == true and
+             .assurance.performance_claim == false and
+             .assurance.benchmark_comparability_claim == false and
+             .assurance.recovery_claim == false and
+             .assurance.production_decision_eligible == false and
+             ((has("status") or has("passed")) | not)' \
+            "$draft_record" >/dev/null
+          test "$(jq -r .source.asset_inventory_digest "$draft_record")" = \
+            "sha256:$(sha256sum "$draft_inventory" | awk '{print $1}')"
+          jq -e --slurpfile inventory "$draft_inventory" \
+            '.inventory == $inventory[0]' "$draft_record" >/dev/null
+          embedded_assets="$(jq -cS .inventory.assets "$draft_record")"
+          test "$(printf '%s' "$embedded_assets" | sha256sum | awk '{print $1}')" = \
+            "$VERIFIED_ASSET_FINGERPRINT"
+          test "$(jq -r --arg name "pgworkbench-$VERSION-release-manifest.json" \
+            '.inventory.assets[] | select(.name == $name) | .digest' "$draft_record")" = \
+            "$(jq -r .source.release_manifest_digest "$draft_record")"
+
+          effective_rulesets="$(gh api --paginate --slurp \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/rulesets?targets=tag&includes_parents=true&per_page=100")"
+          jq -e --argjson id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            'add | any(.[]; .id == $id)' <<<"$effective_rulesets" >/dev/null
+          live_ruleset_raw="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/rulesets/$TAG_RULESET_ADMIN_REVIEWED_ID")"
+          live_ruleset="$(jq -cS . <<<"$live_ruleset_raw")"
+          jq -e \
+            --argjson ruleset_id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            --arg updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            '.id == $ruleset_id and .updated_at == $updated_at and
+             .target == "tag" and .enforcement == "active" and
+             .conditions.ref_name.include == ["refs/tags/v*"] and
+             .conditions.ref_name.exclude == [] and
+             ([.rules[].type] | index("creation")) != null and
+             ([.rules[].type] | index("update")) != null and
+             ([.rules[].type] | index("deletion")) != null' \
+            <<<"$live_ruleset" >/dev/null
+          test "$live_ruleset" = "$(jq -cS . "$source_dir/tag-ruleset.json")"
+
+          live_immutable_raw="$({ GH_TOKEN="$IMMUTABLE_RELEASES_ADMIN_TOKEN" gh api \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases"; })"
+          live_immutable="$(jq -cS . <<<"$live_immutable_raw")"
+          jq -e '.enabled == true and
+                 (.enforced_by_owner | type) == "boolean" and
+                 (keys | sort) == ["enabled", "enforced_by_owner"]' \
+            <<<"$live_immutable" >/dev/null
+          test "$live_immutable" = "$(jq -cS . "$source_dir/immutable-releases.json")"
+
+          tag_ruleset_api_digest="sha256:$(printf '%s' "$live_ruleset" | sha256sum | awk '{print $1}')"
+          immutable_releases_api_digest="sha256:$(printf '%s' "$live_immutable" | sha256sum | awk '{print $1}')"
+          tag_ruleset="$(jq -cn --argjson value "$live_ruleset" '{
+            id:$value.id,
+            updated_at:$value.updated_at,
+            target:$value.target,
+            enforcement:$value.enforcement,
+            include_pattern:"refs/tags/v*",
+            excludes:[],
+            creation_restricted:([ $value.rules[].type ] | index("creation") != null),
+            update_prohibited:([ $value.rules[].type ] | index("update") != null),
+            deletion_prohibited:([ $value.rules[].type ] | index("deletion") != null)
+          }')"
+          bypass_review="$(jq -cn \
+            --arg reviewer "$TAG_RULESET_ADMIN_REVIEWER" \
+            --arg reviewed_at "$TAG_RULESET_ADMIN_REVIEWED_AT" \
+            --argjson ruleset_id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            --arg ruleset_updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            --arg evidence_ref "$TAG_RULESET_ADMIN_REVIEW_REF" \
+            --arg evidence_digest "$TAG_RULESET_ADMIN_REVIEW_DIGEST" \
+            '{reviewer:$reviewer,reviewed_at:$reviewed_at,ruleset_id:$ruleset_id,ruleset_updated_at:$ruleset_updated_at,evidence_ref:$evidence_ref,evidence_digest:$evidence_digest}')"
+          immutable_releases="$(jq -cn --argjson value "$live_immutable" \
+            '{enabled:$value.enabled,enforced_by_owner:$value.enforced_by_owner}')"
+          seal_remote_sha="$(gh api \
+            "repos/$GITHUB_REPOSITORY/commits/$GITHUB_REF_NAME" --jq .sha)"
+          test "$seal_remote_sha" = "$GITHUB_SHA"
+          seal_release_json="$(gh release view "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" --json isDraft,tagName,assets)"
+          test "$(jq -r .isDraft <<<"$seal_release_json")" = true
+          test "$(jq -r .tagName <<<"$seal_release_json")" = "$GITHUB_REF_NAME"
+          jq -e '.assets | length == 16 and all(.[];
+            .id != null and (.name | type) == "string" and
+            (.size | type) == "number" and (.digest | test("^sha256:[0-9a-f]{64}$")))' \
+            <<<"$seal_release_json" >/dev/null
+          seal_inventory="$(jq -cS '[.assets[] | {id,name,size,digest}] | sort_by(.name)' \
+            <<<"$seal_release_json")"
+          seal_fingerprint="$(printf '%s' "$seal_inventory" | sha256sum | awk '{print $1}')"
+          test "$seal_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"
+          captured_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          output_dir=preventive-controls-verification
+          output="$output_dir/verification.json"
+          mkdir "$output_dir"
+          jq -n \
+            --arg schema_version pgworkbench.release-preventive-controls-verification/v1 \
+            --arg artifact_type pgworkbench.release-preventive-controls-verification \
+            --arg captured_at "$captured_at" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg head_sha "$GITHUB_SHA" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg ref "$GITHUB_REF" \
+            --arg controls_artifact_id "$SOURCE_CONTROLS_ARTIFACT_ID" \
+            --arg controls_artifact_name "$SOURCE_CONTROLS_ARTIFACT_NAME" \
+            --arg controls_artifact_digest "$controls_artifact_digest" \
+            --arg repository_controls_digest "$SOURCE_REPOSITORY_CONTROLS_DIGEST" \
+            --arg tag_ruleset_api_digest "$tag_ruleset_api_digest" \
+            --arg immutable_releases_api_digest "$immutable_releases_api_digest" \
+            --slurpfile draft_asset_verification "$draft_record" \
+            --argjson tag_ruleset "$tag_ruleset" \
+            --argjson bypass_review "$bypass_review" \
+            --argjson immutable_releases "$immutable_releases" \
+            '{
+              schema_version:$schema_version,
+              artifact_type:$artifact_type,
+              candidate:$draft_asset_verification[0].candidate,
+              captured_at:$captured_at,
+              workflow_run:{id:$run_id,attempt:$run_attempt,head_sha:$head_sha,repository:$repository,workflow:"release-snapshot",job:"seal-preventive-controls",ref:$ref},
+              draft_asset_verification:$draft_asset_verification[0],
+              source:{
+                controls_artifact:{id:$controls_artifact_id,name:$controls_artifact_name,digest:$controls_artifact_digest},
+                repository_controls_digest:$repository_controls_digest,
+                tag_ruleset_api_digest:$tag_ruleset_api_digest,
+                immutable_releases_api_digest:$immutable_releases_api_digest
+              },
+              tag_ruleset:$tag_ruleset,
+              bypass_review:$bypass_review,
+              immutable_releases:$immutable_releases,
+              assurance:{
+                purpose:"prepublication-preventive-controls-observation",
+                verification_scope:"workflow-local-github-api-and-source-binding",
+                actions_artifact_durable:false,
+                candidate_identity_reverified:true,
+                bypass_review_remote_object_fetched:false,
+                bypass_review_signature_verified:false,
+                performance_claim:false,
+                benchmark_comparability_claim:false,
+                recovery_claim:false,
+                production_decision_eligible:false
+              }
+            }' > "$output"
+          test -f "$output"
+          test ! -L "$output"
+          test "$(stat -c %s "$output")" -le 65536
+          jq -e \
+            --arg version "$VERSION" \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg sha "$GITHUB_SHA" \
+            --arg fingerprint "$VERIFIED_ASSET_FINGERPRINT" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg ref "$GITHUB_REF" \
+            --arg controls_id "$SOURCE_CONTROLS_ARTIFACT_ID" \
+            --arg controls_name "$SOURCE_CONTROLS_ARTIFACT_NAME" \
+            --arg controls_digest "$controls_artifact_digest" \
+            --arg repository_controls_digest "$SOURCE_REPOSITORY_CONTROLS_DIGEST" \
+            --arg ruleset_digest "$tag_ruleset_api_digest" \
+            --arg immutable_digest "$immutable_releases_api_digest" \
+            --argjson normalized_ruleset "$tag_ruleset" \
+            --argjson normalized_review "$bypass_review" \
+            --argjson normalized_immutable "$immutable_releases" \
+            '(keys | sort) == ["artifact_type","assurance","bypass_review","candidate","captured_at","draft_asset_verification","immutable_releases","schema_version","source","tag_ruleset","workflow_run"] and
+             .schema_version == "pgworkbench.release-preventive-controls-verification/v1" and
+             .artifact_type == "pgworkbench.release-preventive-controls-verification" and
+             .candidate.version == $version and .candidate.tag == $tag and
+             .candidate.git_commit == $sha and .candidate.asset_fingerprint == $fingerprint and
+             .draft_asset_verification.candidate == .candidate and
+             .draft_asset_verification.workflow_run.id == $run_id and
+             .draft_asset_verification.workflow_run.attempt == $run_attempt and
+             .workflow_run == {id:$run_id,attempt:$run_attempt,head_sha:$sha,repository:$repository,workflow:"release-snapshot",job:"seal-preventive-controls",ref:$ref} and
+             (.captured_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9]Z$")) and
+             (.captured_at | fromdateiso8601) >= (.draft_asset_verification.captured_at | fromdateiso8601) and
+             (.captured_at | fromdateiso8601) >= (.tag_ruleset.updated_at | fromdateiso8601) and
+             (.captured_at | fromdateiso8601) >= (.bypass_review.reviewed_at | fromdateiso8601) and
+             .source == {controls_artifact:{id:$controls_id,name:$controls_name,digest:$controls_digest},repository_controls_digest:$repository_controls_digest,tag_ruleset_api_digest:$ruleset_digest,immutable_releases_api_digest:$immutable_digest} and
+             .tag_ruleset == $normalized_ruleset and
+             .bypass_review == $normalized_review and
+             .immutable_releases == $normalized_immutable and
+             .assurance == {purpose:"prepublication-preventive-controls-observation",verification_scope:"workflow-local-github-api-and-source-binding",actions_artifact_durable:false,candidate_identity_reverified:true,bypass_review_remote_object_fetched:false,bypass_review_signature_verified:false,performance_claim:false,benchmark_comparability_claim:false,recovery_claim:false,production_decision_eligible:false}' \
+            "$output" >/dev/null
+          artifact_name="preventive-controls-verification-${GITHUB_REF_NAME}-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
+          record_digest="sha256:$(sha256sum "$output" | awk '{print $1}')"
+          printf 'artifact_name=%s\n' "$artifact_name" >> "$GITHUB_OUTPUT"
+          printf 'record_digest=%s\n' "$record_digest" >> "$GITHUB_OUTPUT"
+
+      - name: Upload typed preventive-control verification
+        id: upload_verification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: preventive-controls-verification-${{ github.ref_name }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: preventive-controls-verification/verification.json
+          if-no-files-found: error
+          retention-days: 90
+
   publish-release:
     if: github.ref_type == 'tag'
     needs:
@@ -2482,6 +3036,7 @@ jobs:
       - draft-compatibility
       - draft-external-drivers
       - verify-publication-evidence
+      - seal-preventive-controls
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: release-publication
@@ -2503,6 +3058,10 @@ jobs:
       VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME: ${{ needs['verify-publication-evidence'].outputs.verified_external_driver_artifact_name }}
       VERIFIED_EXTERNAL_DRIVER_ARCHIVE_DIGEST: ${{ needs['verify-publication-evidence'].outputs.verified_external_driver_archive_digest }}
       VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST: ${{ needs['verify-publication-evidence'].outputs.verified_external_driver_gate_digest }}
+      VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_DIGEST: ${{ needs['seal-preventive-controls'].outputs.artifact_digest }}
+      VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_ID: ${{ needs['seal-preventive-controls'].outputs.artifact_id }}
+      VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_NAME: ${{ needs['seal-preventive-controls'].outputs.artifact_name }}
+      VERIFIED_PREVENTIVE_CONTROLS_RECORD_DIGEST: ${{ needs['seal-preventive-controls'].outputs.record_digest }}
 
     steps:
       - name: Download exact protected control evidence
@@ -2523,28 +3082,121 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           IMMUTABLE_RELEASES_ADMIN_TOKEN: ${{ secrets.PGWORKBENCH_ADMIN_READ_TOKEN }}
+          TAG_RULESET_ADMIN_REVIEW_REF: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEW_REF }}
+          TAG_RULESET_ADMIN_REVIEW_DIGEST: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEW_DIGEST }}
+          TAG_RULESET_ADMIN_REVIEWER: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWER }}
+          TAG_RULESET_ADMIN_REVIEWED_AT: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_AT }}
           TAG_RULESET_ADMIN_REVIEWED_ID: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_ID }}
           TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT }}
         shell: bash
         run: |
           set -euo pipefail
+          umask 077
+          valid_durable_ref() {
+            local value="$1" scheme rest authority path host path_lower body nid nss escaped
+            local urn_nss_pattern="^[-A-Za-z0-9._~!$&'()*+,;=:@/%]+$"
+            test -n "$value" || return 1
+            test "${#value}" -le 2048 || return 1
+            [[ ! "$value" =~ [[:cntrl:][:space:]] ]] || return 1
+            case "$value" in
+              https://*|s3://*|gs://*)
+                scheme="${value%%://*}"
+                rest="${value#*://}"
+                [[ "$rest" != *"#"* && "$rest" == */* ]] || return 1
+                escaped="$rest"
+                while [[ "$escaped" == *%* ]]; do
+                  escaped="${escaped#*%}"
+                  [[ "$escaped" =~ ^[0-9A-Fa-f]{2} ]] || return 1
+                  escaped="${escaped:2}"
+                done
+                authority="${rest%%/*}"
+                [[ -n "$authority" && "$authority" != *"@"* ]] || return 1
+                [[ "$authority" =~ ^[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]] || return 1
+                path="/${rest#*/}"
+                path="${path%%\?*}"
+                [[ "$path" != "/" ]] || return 1
+                if [[ "$scheme" == "https" ]]; then
+                  host="${authority%%:*}"
+                  host="${host,,}"
+                  host="${host%.}"
+                  path_lower="${path,,}"
+                  if [[ "$host" == "github.com" &&
+                    ( "$path_lower" == *"/actions/runs/"* || "$path_lower" == *"/actions/artifacts/"* ) ]]; then
+                    return 1
+                  fi
+                  if [[ "$host" == "api.github.com" && "$path_lower" == *"/actions/artifacts/"* ]]; then
+                    return 1
+                  fi
+                  [[ "$host" != "pipelines.actions.githubusercontent.com" &&
+                    "$host" != "objects.githubusercontent.com" ]] || return 1
+                fi
+                ;;
+              urn:*)
+                [[ "$value" != *"#"* && "$value" != *"?"* ]] || return 1
+                body="${value#urn:}"
+                [[ "$body" == *:* ]] || return 1
+                nid="${body%%:*}"
+                nss="${body#*:}"
+                [[ "$nid" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,30}[A-Za-z0-9]$ ]] || return 1
+                [[ "${nid,,}" != "urn" && -n "$nss" && "${nss:0:1}" != "/" ]] || return 1
+                [[ "$nss" =~ $urn_nss_pattern ]] || return 1
+                while [[ "$nss" == *%* ]]; do
+                  nss="${nss#*%}"
+                  [[ "$nss" =~ ^[0-9A-Fa-f]{2} ]] || return 1
+                  nss="${nss:2}"
+                done
+                ;;
+              *) return 1 ;;
+            esac
+          }
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME"
+          test "$GITHUB_REF_NAME" = "v$VERSION"
+          test "$GITHUB_REPOSITORY" = "r314tive/postgres-experiment-workbench"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$|^[0-9a-f]{64}$ ]]
+          [[ ! "$GITHUB_SHA" =~ ^0{40}$|^0{64}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,31}$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          jq -n -e --arg value "$GITHUB_RUN_ATTEMPT" \
+            '($value | tonumber) <= 9007199254740991' >/dev/null
           test -n "$IMMUTABLE_RELEASES_ADMIN_TOKEN"
+          valid_durable_ref "$TAG_RULESET_ADMIN_REVIEW_REF"
+          [[ "$TAG_RULESET_ADMIN_REVIEW_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWER" =~ ^[A-Za-z0-9][A-Za-z0-9._@+:-]{0,127}$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_ID" =~ ^[1-9][0-9]*$ ]]
+          jq -n -e --arg value "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            '($value | tonumber) <= 9007199254740991' >/dev/null
+          [[ "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          jq -n -e \
+            --arg reviewed_at "$TAG_RULESET_ADMIN_REVIEWED_AT" \
+            --arg updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            '($reviewed_at | fromdateiso8601) >= ($updated_at | fromdateiso8601)' \
+            >/dev/null
           test "$PRODUCER_EXTERNAL_DRIVER_ARTIFACT_ID" = "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID"
           test "$PRODUCER_EXTERNAL_DRIVER_ARTIFACT_NAME" = "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME"
           test "$PRODUCER_EXTERNAL_DRIVER_ARTIFACT_DIGEST" = "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST"
-          [[ "$VERIFIED_CONTROLS_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$VERIFIED_CONTROLS_ARTIFACT_ID" =~ ^[1-9][0-9]{0,31}$ ]]
+          [[ "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID" =~ ^[1-9][0-9]{0,31}$ ]]
+          [[ "$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_ID" =~ ^[1-9][0-9]{0,31}$ ]]
+          jq -n -e \
+            --arg controls "$VERIFIED_CONTROLS_ARTIFACT_ID" \
+            --arg external "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID" \
+            --arg preventive "$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_ID" \
+            '($controls | tonumber) <= 9007199254740991 and
+             ($external | tonumber) <= 9007199254740991 and
+             ($preventive | tonumber) <= 9007199254740991' >/dev/null
           [[ "$VERIFIED_REPOSITORY_CONTROLS_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$VERIFIED_PREVENTIVE_CONTROLS_RECORD_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST" =~ ^[0-9a-f]{64}$ ]]
           [[ "$VERIFIED_EXTERNAL_DRIVER_ARCHIVE_DIGEST" =~ ^[0-9a-f]{64}$ ]]
-          controls_prefix="release-controls-${GITHUB_REF_NAME}-${GITHUB_SHA}-"
-          test "${VERIFIED_CONTROLS_ARTIFACT_NAME#"$controls_prefix"}" != \
-            "$VERIFIED_CONTROLS_ARTIFACT_NAME"
-          [[ "${VERIFIED_CONTROLS_ARTIFACT_NAME#"$controls_prefix"}" =~ ^[1-9][0-9]*$ ]]
+          test "$VERIFIED_CONTROLS_ARTIFACT_NAME" = \
+            "release-controls-${GITHUB_REF_NAME}-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
           external_prefix="draft-external-driver-metadata-${GITHUB_REF_NAME}-${GITHUB_SHA}-"
           test "${VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME#"$external_prefix"}" != \
             "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME"
           [[ "${VERIFIED_EXTERNAL_DRIVER_ARTIFACT_NAME#"$external_prefix"}" =~ ^[1-9][0-9]*$ ]]
+          test "$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_NAME" = \
+            "preventive-controls-verification-${GITHUB_REF_NAME}-${GITHUB_SHA}-${GITHUB_RUN_ATTEMPT}"
           case "$VERIFIED_CONTROLS_ARTIFACT_DIGEST" in
             sha256:[0-9a-f][0-9a-f]*) controls_artifact_digest="$VERIFIED_CONTROLS_ARTIFACT_DIGEST" ;;
             [0-9a-f][0-9a-f]*) controls_artifact_digest="sha256:$VERIFIED_CONTROLS_ARTIFACT_DIGEST" ;;
@@ -2553,14 +3205,22 @@ jobs:
           case "$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" in
             sha256:[0-9a-f][0-9a-f]*) external_artifact_digest="$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" ;;
             [0-9a-f][0-9a-f]*) external_artifact_digest="sha256:$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_DIGEST" ;;
+              *) exit 1 ;;
+          esac
+          case "$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_DIGEST" in
+            sha256:[0-9a-f][0-9a-f]*) preventive_artifact_digest="$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_DIGEST" ;;
+            [0-9a-f][0-9a-f]*) preventive_artifact_digest="sha256:$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_DIGEST" ;;
             *) exit 1 ;;
           esac
           [[ "$controls_artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$external_artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$preventive_artifact_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           controls_artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
             "repos/$GITHUB_REPOSITORY/actions/artifacts/$VERIFIED_CONTROLS_ARTIFACT_ID")"
           external_artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
             "repos/$GITHUB_REPOSITORY/actions/artifacts/$VERIFIED_EXTERNAL_DRIVER_ARTIFACT_ID")"
+          preventive_artifact_json="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_ID")"
           jq -e \
             --argjson id "$VERIFIED_CONTROLS_ARTIFACT_ID" \
             --arg name "$VERIFIED_CONTROLS_ARTIFACT_NAME" \
@@ -2579,6 +3239,155 @@ jobs:
             '.id == $id and .name == $name and .expired == false and
              .digest == $digest and .workflow_run.id == $run_id and
              .workflow_run.head_sha == $head_sha' <<<"$external_artifact_json" >/dev/null
+          jq -e \
+            --argjson id "$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_ID" \
+            --arg name "$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_NAME" \
+            --arg digest "$preventive_artifact_digest" \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --arg head_sha "$GITHUB_SHA" \
+            '.id == $id and .name == $name and .expired == false and
+             .digest == $digest and .workflow_run.id == $run_id and
+             .workflow_run.head_sha == $head_sha and
+             (.size_in_bytes | type) == "number" and
+             .size_in_bytes >= 1 and .size_in_bytes <= 1048576' \
+            <<<"$preventive_artifact_json" >/dev/null
+
+          preventive_zip=preventive-controls-verification.zip
+          preventive_dir=preventive-controls-verification
+          test ! -e "$preventive_zip"
+          test ! -e "$preventive_dir"
+          gh api -L \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts/$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_ID/zip" \
+            > "$preventive_zip"
+          test -f "$preventive_zip"
+          test ! -L "$preventive_zip"
+          test "$(stat -c %s "$preventive_zip")" -le 1048576
+          test "sha256:$(sha256sum "$preventive_zip" | awk '{print $1}')" = \
+            "$preventive_artifact_digest"
+          test "$(unzip -Z1 "$preventive_zip")" = "verification.json"
+          preventive_uncompressed_size="$(unzip -l "$preventive_zip" | awk 'END {print $1}')"
+          [[ "$preventive_uncompressed_size" =~ ^[0-9]+$ ]]
+          test "$preventive_uncompressed_size" -le 65536
+          mkdir "$preventive_dir"
+          unzip -q "$preventive_zip" -d "$preventive_dir"
+          test "$(find "$preventive_dir" -mindepth 1 -maxdepth 1 ! -type f -print -quit)" = ""
+          test "$(find "$preventive_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n')" = \
+            "verification.json"
+          preventive_record="$preventive_dir/verification.json"
+          test -f "$preventive_record"
+          test ! -L "$preventive_record"
+          test "$(stat -c %s "$preventive_record")" -le 65536
+          test "sha256:$(sha256sum "$preventive_record" | awk '{print $1}')" = \
+            "$VERIFIED_PREVENTIVE_CONTROLS_RECORD_DIGEST"
+          jq -e \
+            --arg version "$VERSION" \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg sha "$GITHUB_SHA" \
+            --arg fingerprint "$VERIFIED_ASSET_FINGERPRINT" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg ref "$GITHUB_REF" \
+            --arg controls_id "$VERIFIED_CONTROLS_ARTIFACT_ID" \
+            --arg controls_name "$VERIFIED_CONTROLS_ARTIFACT_NAME" \
+            --arg controls_digest "$controls_artifact_digest" \
+            --arg repository_controls_digest "$VERIFIED_REPOSITORY_CONTROLS_DIGEST" \
+            --arg reviewer "$TAG_RULESET_ADMIN_REVIEWER" \
+            --arg reviewed_at "$TAG_RULESET_ADMIN_REVIEWED_AT" \
+            --argjson ruleset_id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
+            --arg ruleset_updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
+            --arg evidence_ref "$TAG_RULESET_ADMIN_REVIEW_REF" \
+            --arg evidence_digest "$TAG_RULESET_ADMIN_REVIEW_DIGEST" \
+            'def canonical_semver:
+               test("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$");
+             def expected_names($v):
+               (["darwin-amd64","darwin-arm64","linux-amd64","linux-arm64"] as $platforms |
+                ([ $platforms[] as $p |
+                   "pgworkbench-" + $v + "-" + $p + ".tar.gz",
+                   "pgworkbench-" + $v + "-" + $p + ".spdx.json",
+                   "pgworkbench-" + $v + "-" + $p + "-sbom.sigstore.json" ] +
+                 ["pgworkbench-" + $v + "-SHA256SUMS.txt",
+                  "pgworkbench-" + $v + "-METADATA-SHA256SUMS.txt",
+                  "pgworkbench-" + $v + "-release-manifest.json",
+                  "pgworkbench-" + $v + "-provenance.sigstore.json"]) | sort);
+             (keys | sort) == ["artifact_type","assurance","bypass_review","candidate","captured_at","draft_asset_verification","immutable_releases","schema_version","source","tag_ruleset","workflow_run"] and
+             .schema_version == "pgworkbench.release-preventive-controls-verification/v1" and
+             .artifact_type == "pgworkbench.release-preventive-controls-verification" and
+             (.candidate | keys | sort) == ["asset_fingerprint","git_commit","scenario_pack","tag","version"] and
+             (.candidate.scenario_pack | keys | sort) == ["digest","id","version"] and
+             .candidate.version == $version and .candidate.tag == $tag and
+             .candidate.git_commit == $sha and .candidate.asset_fingerprint == $fingerprint and
+             (.candidate.version | canonical_semver) and
+             (.candidate.scenario_pack.id | test("^[a-z0-9._-]*[a-z0-9][a-z0-9._-]*$")) and
+             (.candidate.scenario_pack.version | canonical_semver) and
+             (.candidate.scenario_pack.digest | test("^sha256:[0-9a-f]{64}$")) and
+             .workflow_run == {id:$run_id,attempt:$run_attempt,head_sha:$sha,repository:$repository,workflow:"release-snapshot",job:"seal-preventive-controls",ref:$ref} and
+             (.captured_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9]Z$")) and
+             (.captured_at | fromdateiso8601) >= (.draft_asset_verification.captured_at | fromdateiso8601) and
+             (.captured_at | fromdateiso8601) >= (.tag_ruleset.updated_at | fromdateiso8601) and
+             (.captured_at | fromdateiso8601) >= (.bypass_review.reviewed_at | fromdateiso8601) and
+             (.source | keys | sort) == ["controls_artifact","immutable_releases_api_digest","repository_controls_digest","tag_ruleset_api_digest"] and
+             (.source.controls_artifact | keys | sort) == ["digest","id","name"] and
+             .source.controls_artifact == {id:$controls_id,name:$controls_name,digest:$controls_digest} and
+             .source.repository_controls_digest == $repository_controls_digest and
+             (.source.tag_ruleset_api_digest | test("^sha256:[0-9a-f]{64}$")) and
+             (.source.immutable_releases_api_digest | test("^sha256:[0-9a-f]{64}$")) and
+             .tag_ruleset == {id:$ruleset_id,updated_at:$ruleset_updated_at,target:"tag",enforcement:"active",include_pattern:"refs/tags/v*",excludes:[],creation_restricted:true,update_prohibited:true,deletion_prohibited:true} and
+             .bypass_review == {reviewer:$reviewer,reviewed_at:$reviewed_at,ruleset_id:$ruleset_id,ruleset_updated_at:$ruleset_updated_at,evidence_ref:$evidence_ref,evidence_digest:$evidence_digest} and
+             (.immutable_releases | keys | sort) == ["enabled","enforced_by_owner"] and
+             .immutable_releases.enabled == true and
+             (.immutable_releases.enforced_by_owner | type) == "boolean" and
+             .assurance == {purpose:"prepublication-preventive-controls-observation",verification_scope:"workflow-local-github-api-and-source-binding",actions_artifact_durable:false,candidate_identity_reverified:true,bypass_review_remote_object_fetched:false,bypass_review_signature_verified:false,performance_claim:false,benchmark_comparability_claim:false,recovery_claim:false,production_decision_eligible:false} and
+             (.draft_asset_verification | keys | sort) == ["artifact_type","assurance","candidate","captured_at","checks","inventory","provider_observation","qualification_mode","schema_version","source","workflow_run"] and
+             .draft_asset_verification.schema_version == "pgworkbench.release-asset-verification/v1" and
+             .draft_asset_verification.artifact_type == "pgworkbench.release-asset-verification" and
+             .draft_asset_verification.qualification_mode == "draft" and
+             .draft_asset_verification.candidate == .candidate and
+             .draft_asset_verification.workflow_run == {id:$run_id,attempt:$run_attempt,head_sha:$sha,repository:$repository,workflow:"release-snapshot",job:"draft-verify",ref:$ref} and
+             (.draft_asset_verification.captured_at | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9]Z$")) and
+             (.draft_asset_verification.captured_at | fromdateiso8601) >= (.draft_asset_verification.inventory.captured_at | fromdateiso8601) and
+             (.draft_asset_verification.inventory | keys | sort) == ["artifact_type","asset_fingerprint","assets","captured_at","fingerprint_algorithm","git_commit","release_state","schema_version","tag"] and
+             .draft_asset_verification.inventory.schema_version == "pgworkbench.release-asset-inventory/v1" and
+             .draft_asset_verification.inventory.artifact_type == "pgworkbench.release-asset-inventory" and
+             .draft_asset_verification.inventory.release_state == "draft" and
+             .draft_asset_verification.inventory.tag == $tag and
+             .draft_asset_verification.inventory.git_commit == $sha and
+             .draft_asset_verification.inventory.fingerprint_algorithm == "github-release-assets-jq-cS/v1" and
+             .draft_asset_verification.inventory.asset_fingerprint == $fingerprint and
+             ([.draft_asset_verification.inventory.assets[].name] == expected_names($version)) and
+             (.draft_asset_verification.inventory.assets | length) == 16 and
+             ([.draft_asset_verification.inventory.assets[].id] | length) ==
+               ([.draft_asset_verification.inventory.assets[].id] | unique | length) and
+             all(.draft_asset_verification.inventory.assets[];
+               (keys | sort) == ["digest","id","name","size"] and
+               (((.id | type) == "string" and (.id | length) >= 1 and (.id | length) <= 256 and
+                 ((.id | test("[\\u0000-\\u001f\\u007f]")) | not)) or
+                ((.id | type) == "number" and .id == (.id | floor) and
+                 .id >= 1 and .id <= 9007199254740991)) and
+               (.name | test("^[A-Za-z0-9][A-Za-z0-9._+-]{0,254}$")) and
+               (.size | type) == "number" and .size == (.size | floor) and
+               .size >= 1 and .size <= 9007199254740991 and
+               (.digest | test("^sha256:[0-9a-f]{64}$"))) and
+             .draft_asset_verification.provider_observation == {tag:$tag,tag_target_sha:$sha,release_state:"draft",is_draft:true,asset_count:16,asset_fingerprint:$fingerprint} and
+             .draft_asset_verification.source == {asset_inventory_digest:.draft_asset_verification.source.asset_inventory_digest,release_manifest_digest:.draft_asset_verification.source.release_manifest_digest} and
+             (.draft_asset_verification.source.asset_inventory_digest | test("^sha256:[0-9a-f]{64}$")) and
+             (.draft_asset_verification.source.release_manifest_digest | test("^sha256:[0-9a-f]{64}$")) and
+             .draft_asset_verification.source.release_manifest_digest == ([.draft_asset_verification.inventory.assets[] | select(.name == ("pgworkbench-" + $version + "-release-manifest.json")) | .digest] | if length == 1 then .[0] else null end) and
+             .draft_asset_verification.checks == {tag_target:"verified",closed_asset_set:"verified",downloaded_asset_bytes:"verified",archive_checksums:"verified",metadata_checksums:"verified",release_manifest:"verified",candidate_binary_identity:"verified",provenance_attestations:"verified",sbom_attestations:"verified",sbom_contents:"verified",immutable_release:"not-applicable",release_attestation:"not-applicable"} and
+             .draft_asset_verification.assurance == {purpose:"release-asset-authenticity-and-integrity",verification_scope:"workflow-local-provider-and-content",actions_artifact_durable:false,candidate_identity_reverified:true,provider_asset_set_recomputed:true,all_downloaded_bytes_verified:true,performance_claim:false,benchmark_comparability_claim:false,recovery_claim:false,production_decision_eligible:false} and
+             ((has("status") or has("passed")) | not)' \
+            "$preventive_record" >/dev/null
+          embedded_assets="$(jq -cS '.draft_asset_verification.inventory.assets' "$preventive_record")"
+          test "$(printf '%s' "$embedded_assets" | sha256sum | awk '{print $1}')" = \
+            "$VERIFIED_ASSET_FINGERPRINT"
+          source_ruleset_digest="$(jq -r .source.tag_ruleset_api_digest "$preventive_record")"
+          source_immutable_digest="$(jq -r .source.immutable_releases_api_digest "$preventive_record")"
+          raw_ruleset="$(jq -cS . repository-controls/tag-ruleset.json)"
+          raw_immutable="$(jq -cS . repository-controls/immutable-releases.json)"
+          test "sha256:$(printf '%s' "$raw_ruleset" | sha256sum | awk '{print $1}')" = \
+            "$source_ruleset_digest"
+          test "sha256:$(printf '%s' "$raw_immutable" | sha256sum | awk '{print $1}')" = \
+            "$source_immutable_digest"
           test "sha256:$(sha256sum repository-controls/repository-controls.json | awk '{print $1}')" = \
             "$VERIFIED_REPOSITORY_CONTROLS_DIGEST"
           test "$(sha256sum draft-external-driver-package/metadata-only.tar.gz | awk '{print $1}')" = \
@@ -2604,15 +3413,26 @@ jobs:
             draft-external-driver-package/metadata-only.tar.gz \
             ./repository-controls/repository-controls.json | sha256sum | awk '{print $1}')"
           test "$static_controls_digest" = "$VERIFIED_REPOSITORY_CONTROLS_DIGEST"
-          [[ "$TAG_RULESET_ADMIN_REVIEWED_ID" =~ ^[0-9]+$ ]]
-          [[ "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+          tag="$GITHUB_REF_NAME"
+          prepublish_remote_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
+          test "$prepublish_remote_sha" = "$GITHUB_SHA"
+          prepublish_json="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName,assets)"
+          test "$(jq -r .isDraft <<<"$prepublish_json")" = true
+          test "$(jq -r .tagName <<<"$prepublish_json")" = "$tag"
+          prepublish_inventory="$(jq -cS '[.assets[] | {id, name, size, digest}] | sort_by(.name)' <<<"$prepublish_json")"
+          prepublish_fingerprint="$(printf '%s' "$prepublish_inventory" | sha256sum | awk '{print $1}')"
+          test "$prepublish_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"
+
+          # This is the final remote control observation before the sole
+          # irreversible release-state mutation below.
           effective_rulesets="$(gh api --paginate --slurp \
             -H 'X-GitHub-Api-Version: 2026-03-10' \
             "repos/$GITHUB_REPOSITORY/rulesets?targets=tag&includes_parents=true&per_page=100")"
           jq -e --argjson id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
             'add | any(.[]; .id == $id)' <<<"$effective_rulesets" >/dev/null
-          live_ruleset="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
+          live_ruleset_raw="$(gh api -H 'X-GitHub-Api-Version: 2026-03-10' \
             "repos/$GITHUB_REPOSITORY/rulesets/$TAG_RULESET_ADMIN_REVIEWED_ID")"
+          live_ruleset="$(jq -cS . <<<"$live_ruleset_raw")"
           jq -e \
             --argjson ruleset_id "$TAG_RULESET_ADMIN_REVIEWED_ID" \
             --arg updated_at "$TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT" \
@@ -2626,30 +3446,33 @@ jobs:
              ([.rules[].type] | index("update")) != null and
              ([.rules[].type] | index("deletion")) != null' \
             <<<"$live_ruleset" >/dev/null
-          live_ruleset_digest="sha256:$(printf '%s\n' "$live_ruleset" | sha256sum | awk '{print $1}')"
-          test "$live_ruleset_digest" = "$(jq -r .tag_ruleset.api_evidence_digest \
-            repository-controls/repository-controls.json)"
+          live_ruleset_digest="sha256:$(printf '%s' "$live_ruleset" | sha256sum | awk '{print $1}')"
+          test "$live_ruleset_digest" = "$source_ruleset_digest"
+          live_ruleset_normalized="$(jq -c '{
+            id:.id,
+            updated_at:.updated_at,
+            target:.target,
+            enforcement:.enforcement,
+            include_pattern:"refs/tags/v*",
+            excludes:[],
+            creation_restricted:([.rules[].type] | index("creation") != null),
+            update_prohibited:([.rules[].type] | index("update") != null),
+            deletion_prohibited:([.rules[].type] | index("deletion") != null)
+          }' <<<"$live_ruleset")"
+          test "$live_ruleset_normalized" = "$(jq -c .tag_ruleset "$preventive_record")"
 
-          live_immutable="$({ GH_TOKEN="$IMMUTABLE_RELEASES_ADMIN_TOKEN" gh api \
+          live_immutable_raw="$({ GH_TOKEN="$IMMUTABLE_RELEASES_ADMIN_TOKEN" gh api \
             -H 'X-GitHub-Api-Version: 2026-03-10' \
             "repos/$GITHUB_REPOSITORY/immutable-releases"; })"
+          live_immutable="$(jq -cS . <<<"$live_immutable_raw")"
           jq -e '.enabled == true and
                  (.enforced_by_owner | type) == "boolean" and
                  (keys | sort) == ["enabled", "enforced_by_owner"]' \
             <<<"$live_immutable" >/dev/null
-          live_immutable_digest="sha256:$(printf '%s\n' "$live_immutable" | sha256sum | awk '{print $1}')"
-          test "$live_immutable_digest" = "$(jq -r .immutable_releases.api_evidence_digest \
-            repository-controls/repository-controls.json)"
-
-          tag="$GITHUB_REF_NAME"
-          prepublish_remote_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"
-          test "$prepublish_remote_sha" = "$GITHUB_SHA"
-          prepublish_json="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName,assets)"
-          test "$(jq -r .isDraft <<<"$prepublish_json")" = true
-          test "$(jq -r .tagName <<<"$prepublish_json")" = "$tag"
-          prepublish_inventory="$(jq -cS '[.assets[] | {id, name, size, digest}] | sort_by(.name)' <<<"$prepublish_json")"
-          prepublish_fingerprint="$(printf '%s' "$prepublish_inventory" | sha256sum | awk '{print $1}')"
-          test "$prepublish_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"
+          live_immutable_digest="sha256:$(printf '%s' "$live_immutable" | sha256sum | awk '{print $1}')"
+          test "$live_immutable_digest" = "$source_immutable_digest"
+          test "$(jq -c '{enabled:.enabled,enforced_by_owner:.enforced_by_owner}' <<<"$live_immutable")" = \
+            "$(jq -c .immutable_releases "$preventive_record")"
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
 
   public-verify:

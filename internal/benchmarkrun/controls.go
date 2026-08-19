@@ -149,7 +149,14 @@ func MaterializeControlsV2FromEnvironment(root, runDir string, getenv func(strin
 	if manifest["run_id"] != runID {
 		return nil, fmt.Errorf("linked manifest run id does not match materializer binding")
 	}
-	if err := ValidateLinkedRunProtocolWithToolchain(plan, manifest["runtime"], trial, getenv("PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST"), manifest); err != nil {
+	pgBouncerPort := DefaultPgBouncerPort
+	if plan.Target == benchmarkplan.TargetPgBouncer {
+		pgBouncerPort, err = resolveOwnedRuntimePort("PGBOUNCER_PORT", 0, DefaultPgBouncerPort, getenv)
+		if err != nil {
+			return nil, fmt.Errorf("resolve runner-owned PgBouncer port: %w", err)
+		}
+	}
+	if err := ValidateLinkedRunProtocolWithToolchainAndPgBouncerPort(plan, manifest["runtime"], trial, getenv("PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST"), pgBouncerPort, manifest); err != nil {
 		return nil, fmt.Errorf("linked manifest protocol binding: %w", err)
 	}
 	return MaterializeControlsV2(runDir, plan, runID, trial, timeline, manifest["postgres_server_major"])

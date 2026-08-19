@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/r314tive/postgres-experiment-workbench/internal/envfile"
 	"github.com/r314tive/postgres-experiment-workbench/internal/evidence"
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentplan"
 	"github.com/r314tive/postgres-experiment-workbench/internal/experimentrun"
@@ -22,17 +23,158 @@ import (
 
 var fixturePackDigest = "sha256:" + strings.Repeat("a", 64)
 
+func TestResolveRuntimePortEnvironmentIsCanonicalDistinctAndComplete(t *testing.T) {
+	values := map[string]string{
+		"POSTGRES_PORT":                    "45433",
+		"POSTGRES_REPLICA_PORT":            "45434",
+		"POSTGRES_LOGICAL_SUBSCRIBER_PORT": "45435",
+		"PGBOUNCER_PORT":                   "46432",
+		"POSTGRES_UPGRADE_OLD_PORT":        "45436",
+		"POSTGRES_UPGRADE_NEW_PORT":        "45437",
+	}
+	ports, err := resolveRuntimePorts(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ports.environment()
+	if len(got) != 6 {
+		t.Fatalf("resolved ports = %#v, want all six assignments", got)
+	}
+	for _, assignment := range got {
+		name, value, ok := strings.Cut(assignment, "=")
+		if !ok || values[name] != value {
+			t.Fatalf("unexpected resolved port assignment %q", assignment)
+		}
+	}
+
+	for name, value := range map[string]string{
+		"non-canonical": "045433",
+		"below-range":   "1023",
+		"above-range":   "65536",
+		"hostile":       "55433; touch /tmp/hostile",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := resolveRuntimePorts(func(key string) string {
+				if key == "POSTGRES_PORT" {
+					return value
+				}
+				return ""
+			})
+			if err == nil || !strings.Contains(err.Error(), "POSTGRES_PORT") {
+				t.Fatalf("invalid port %q error = %v", value, err)
+			}
+		})
+	}
+	_, err = resolveRuntimePorts(func(key string) string {
+		if key == "POSTGRES_REPLICA_PORT" {
+			return "55433"
+		}
+		return ""
+	})
+	if err == nil || !strings.Contains(err.Error(), "must be distinct") {
+		t.Fatalf("duplicate runtime ports error = %v", err)
+	}
+}
+
+func TestRunRejectsInvalidRuntimePortBeforeReservingEvidence(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureInputs(t, root, 2)
+	runID := "invalid-runtime-port"
+	_, err := Run(root, "bulk/indexed", Options{
+		Runtime: "docker",
+		RunID:   runID,
+		Getenv: func(key string) string {
+			if key == "POSTGRES_LOGICAL_SUBSCRIBER_PORT" {
+				return "not-a-port"
+			}
+			return ""
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "POSTGRES_LOGICAL_SUBSCRIBER_PORT") {
+		t.Fatalf("Run() error = %v, want strict runtime port rejection", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "runs", "operation-benchmarks", runID)); !os.IsNotExist(statErr) {
+		t.Fatalf("invalid runtime port reserved operation evidence: %v", statErr)
+	}
+}
+
+func TestOperationSeriesRuntimePortVersionMatrix(t *testing.T) {
+	ports := RuntimePorts{Postgres: 45433, Replica: 45434, LogicalSubscriber: 45435, PgBouncer: 46432, UpgradeOld: 45436, UpgradeNew: 45437}
+	digest := digestRuntimePorts(ports)
+	for _, test := range []struct {
+		name     string
+		series   Series
+		manifest map[string]string
+		valid    bool
+	}{
+		{name: "legacy-v1", series: Series{SchemaVersion: SeriesSchemaVersion}, manifest: map[string]string{"schema_version": runstate.ManifestSchemaVersion}, valid: true},
+		{name: "current-v2", series: Series{SchemaVersion: SeriesSchemaVersionV2, RuntimePorts: &ports, RuntimePortsDigest: digest, RuntimePortsPresent: true, RuntimePortsDigestPresent: true}, manifest: map[string]string{"schema_version": runstate.ManifestSchemaVersionV2, "runtime_ports_digest": digest}, valid: true},
+		{name: "v1-series-with-v2-manifest", series: Series{SchemaVersion: SeriesSchemaVersion}, manifest: map[string]string{"schema_version": runstate.ManifestSchemaVersionV2, "runtime_ports_digest": digest}},
+		{name: "v2-series-with-v1-manifest", series: Series{SchemaVersion: SeriesSchemaVersionV2, RuntimePorts: &ports, RuntimePortsDigest: digest, RuntimePortsPresent: true, RuntimePortsDigestPresent: true}, manifest: map[string]string{"schema_version": runstate.ManifestSchemaVersion}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := VerifyResult{Issues: []string{}}
+			checkLinkedRuntimePortBinding(&result, test.series, test.manifest, 1)
+			if got := len(result.Issues) == 0; got != test.valid {
+				t.Fatalf("runtime-port version pairing valid=%v, want %v: %v", got, test.valid, result.Issues)
+			}
+		})
+	}
+
+	for _, content := range []string{
+		`{"schema_version":"pgworkbench.operation-benchmark-series/v1","runtime_ports":null}`,
+		`{"schema_version":"pgworkbench.operation-benchmark-series/v1","runtime_ports_digest":""}`,
+	} {
+		var series Series
+		if err := decodeStrictBytes([]byte(content), &series); err != nil {
+			if strings.Contains(content, `"runtime_ports":null`) && strings.Contains(err.Error(), "null is not allowed") {
+				continue
+			}
+			t.Fatal(err)
+		}
+		result := VerifyResult{Issues: []string{}}
+		checkRuntimePorts(&result, series)
+		if len(result.Issues) == 0 {
+			t.Fatalf("legacy operation series accepted a present v2-only field: %s", content)
+		}
+	}
+	portsJSON, err := json.Marshal(ports)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, content := range []string{
+		`{"schema_version":"pgworkbench.operation-benchmark-series/v2"}`,
+		`{"schema_version":"pgworkbench.operation-benchmark-series/v2","runtime_ports":null,"runtime_ports_digest":"` + digest + `"}`,
+		`{"schema_version":"pgworkbench.operation-benchmark-series/v2","runtime_ports":` + string(portsJSON) + `}`,
+		`{"schema_version":"pgworkbench.operation-benchmark-series/v2","runtime_ports_digest":"` + digest + `"}`,
+	} {
+		var series Series
+		if err := decodeStrictBytes([]byte(content), &series); err != nil {
+			if strings.Contains(content, `"runtime_ports":null`) && strings.Contains(err.Error(), "null is not allowed") {
+				continue
+			}
+			t.Fatal(err)
+		}
+		result := VerifyResult{Issues: []string{}}
+		checkRuntimePorts(&result, series)
+		if len(result.Issues) == 0 {
+			t.Fatalf("operation series v2 accepted a missing/null runtime port binding: %s", content)
+		}
+	}
+}
+
 func TestOperationSchemasTrackTopLevelGoContracts(t *testing.T) {
 	tests := []struct {
 		file     string
 		value    any
 		version  string
+		versions []string
 		artifact string
 	}{
-		{"operation-benchmark-spec.schema.json", Spec{}, SpecSchemaVersion, ""},
-		{"operation-result.schema.json", OperationResult{}, ResultSchemaVersion, ResultArtifactType},
-		{"operation-benchmark-series.schema.json", Series{}, SeriesSchemaVersion, SeriesArtifactType},
-		{"operation-benchmark-bundle-inventory.schema.json", BundleInventory{}, BundleSchemaVersion, BundleArtifactType},
+		{file: "operation-benchmark-spec.schema.json", value: Spec{}, version: SpecSchemaVersion},
+		{file: "operation-result.schema.json", value: OperationResult{}, version: ResultSchemaVersion, artifact: ResultArtifactType},
+		{file: "operation-benchmark-series.schema.json", value: Series{}, versions: []string{SeriesSchemaVersion, SeriesSchemaVersionV2}, artifact: SeriesArtifactType},
+		{file: "operation-benchmark-bundle-inventory.schema.json", value: BundleInventory{}, version: BundleSchemaVersion, artifact: BundleArtifactType},
 	}
 	for _, test := range tests {
 		t.Run(test.file, func(t *testing.T) {
@@ -48,7 +190,18 @@ func TestOperationSchemasTrackTopLevelGoContracts(t *testing.T) {
 				t.Fatal("schema must use draft 2020-12 and close root properties")
 			}
 			properties := document["properties"].(map[string]any)
-			if properties["schema_version"].(map[string]any)["const"] != test.version {
+			versionProperty := properties["schema_version"].(map[string]any)
+			if len(test.versions) > 0 {
+				got, ok := versionProperty["enum"].([]any)
+				if !ok || len(got) != len(test.versions) {
+					t.Fatal("schema versions drift")
+				}
+				for index, want := range test.versions {
+					if got[index] != want {
+						t.Fatal("schema versions drift")
+					}
+				}
+			} else if versionProperty["const"] != test.version {
 				t.Fatal("schema version drift")
 			}
 			if test.artifact != "" && properties["artifact_type"].(map[string]any)["const"] != test.artifact {
@@ -89,6 +242,31 @@ func TestCatalogAndOperationResultAreStrict(t *testing.T) {
 	}
 	if _, err := NewCatalog(root).Load("bulk/indexed"); err == nil || !strings.Contains(err.Error(), "duplicate JSON object key") {
 		t.Fatalf("duplicate JSON key was accepted: %v", err)
+	}
+}
+
+func TestOperationSeriesJSONRejectsSchemaInvalidNulls(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "root", content: `null`, want: "$: null is not allowed"},
+		{name: "reasons", content: `{"reasons":null}`, want: "$.reasons: null is not allowed"},
+		{name: "nested operation result", content: `{"trials":[{"operation_result":null}]}`, want: "$.trials[0].operation_result: null is not allowed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var series Series
+			err := decodeStrictBytes([]byte(test.content), &series)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("decodeStrictBytes() error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+
+	var nullableStats Series
+	if err := decodeStrictBytes([]byte(`{"stats":{"cv_pct":null,"robust_cv_pct":null}}`), &nullableStats); err != nil {
+		t.Fatalf("schema-authorized nullable statistics rejected: %v", err)
 	}
 }
 
@@ -251,6 +429,14 @@ func TestFinishSeriesExpandsEnvelopeToLinkedTrialPrecision(t *testing.T) {
 func TestRunVerifyBundleRelocateAndDetectTampering(t *testing.T) {
 	root := t.TempDir()
 	writeFixtureInputs(t, root, 2)
+	runtimePorts := map[string]string{
+		"POSTGRES_PORT":                    "45433",
+		"POSTGRES_REPLICA_PORT":            "45434",
+		"POSTGRES_LOGICAL_SUBSCRIBER_PORT": "45435",
+		"PGBOUNCER_PORT":                   "46432",
+		"POSTGRES_UPGRADE_OLD_PORT":        "45436",
+		"POSTGRES_UPGRADE_NEW_PORT":        "45437",
+	}
 	experimentDigest, err := evidence.DigestFile(filepath.Join(root, "experiments", "bulk.env"))
 	if err != nil {
 		t.Fatal(err)
@@ -260,23 +446,40 @@ func TestRunVerifyBundleRelocateAndDetectTampering(t *testing.T) {
 		if !options.ExactEnvironment || !contains(options.Env, "ENV_FILE=.env.example") || !containsPrefix(options.Env, "PGWORKBENCH_NATIVE_BINDIR=") || !containsPrefix(options.Env, "PGWORKBENCH_NATIVE_TOOLCHAIN_DIGEST=sha256:") {
 			t.Fatalf("operation runner did not receive an exact native environment: %#v", options)
 		}
+		for key, want := range runtimePorts {
+			if !contains(options.Env, key+"="+want) {
+				t.Fatalf("operation exact environment omitted %s=%s: %#v", key, want, options.Env)
+			}
+		}
+		runtimePortsDigest := ""
+		for _, assignment := range options.Env {
+			if key, value, ok := strings.Cut(assignment, "="); ok && key == "PGWORKBENCH_RUNTIME_PORTS_DIGEST" {
+				runtimePortsDigest = value
+			}
+		}
+		if !evidence.IsDigest(runtimePortsDigest) {
+			t.Fatalf("operation exact environment omitted canonical runtime ports digest: %#v", options.Env)
+		}
 		trial++
 		started := time.Date(2026, 8, 13, 0, 0, trial*2-1, 0, time.UTC)
 		finished := started.Add(time.Second)
 		runDir := filepath.Join(root, "runs", options.RunID)
-		writeVerifiedRun(t, runDir, options.RunID, input, experimentDigest, started, finished, float64(100+trial))
+		writeVerifiedRun(t, runDir, options.RunID, input, experimentDigest, runtimePortsDigest, started, finished, float64(100+trial))
 		return experimentrun.Result{SchemaVersion: experimentrun.SchemaVersion, ExperimentSpec: input, SpecSHA256: strings.TrimPrefix(experimentDigest, "sha256:"), Runtime: options.Runtime, Topology: "single", RunID: options.RunID, RunDir: runDir, StartedAt: started.Format(time.RFC3339), FinishedAt: finished.Format(time.RFC3339), DurationMS: 1000, ExitCode: 0, Status: "passed"}, nil
 	}
 	times := []time.Time{
 		time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC),
 		time.Date(2026, 8, 13, 0, 0, 5, 0, time.UTC),
 	}
-	series, err := Run(root, "bulk/indexed", Options{Runtime: "native", RunID: "operation-a", PackID: "fixture", PackVersion: "0.2.0", PackDigest: fixturePackDigest, EngineVersion: "0.2.0", EngineCommit: strings.Repeat("a", 40), BinaryPath: fakeOperationEngine(t), NativeBindir: fakeOperationToolchain(t), RunExperiment: runner, Now: func() time.Time { value := times[0]; times = times[1:]; return value }})
+	series, err := Run(root, "bulk/indexed", Options{Runtime: "native", RunID: "operation-a", PackID: "fixture", PackVersion: "0.2.0", PackDigest: fixturePackDigest, EngineVersion: "0.2.0", EngineCommit: strings.Repeat("a", 40), BinaryPath: fakeOperationEngine(t), NativeBindir: fakeOperationToolchain(t), Getenv: func(key string) string { return runtimePorts[key] }, RunExperiment: runner, Now: func() time.Time { value := times[0]; times = times[1:]; return value }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !series.Passed() || series.TrialsValid != 2 || series.Stats == nil || series.DecisionEligible {
 		t.Fatalf("unexpected series: %#v", series)
+	}
+	if series.RuntimePorts == nil || series.RuntimePorts.Postgres != 45433 || series.RuntimePorts.PgBouncer != 46432 || series.RuntimePortsDigest != digestRuntimePorts(*series.RuntimePorts) {
+		t.Fatalf("operation series omitted bound runtime port snapshot: %#v", series)
 	}
 	verified, err := Verify(root, series.ArtifactDir)
 	if err != nil {
@@ -285,6 +488,7 @@ func TestRunVerifyBundleRelocateAndDetectTampering(t *testing.T) {
 	if !verified.Valid {
 		t.Fatalf("series failed independent verification: %v", verified.Issues)
 	}
+	verifyLegacyOperationSeriesV1Compatibility(t, root, series)
 
 	archive := filepath.Join(root, "generated", "operation.tar.gz")
 	bundle, err := CreateBundle(root, series.ArtifactDir, archive, time.Unix(0, 0).UTC())
@@ -320,9 +524,38 @@ func TestRunVerifyBundleRelocateAndDetectTampering(t *testing.T) {
 	}
 
 	tamperCases := []struct {
-		name   string
-		mutate func(t *testing.T, bundleRoot, seriesDir string)
+		name      string
+		mutate    func(t *testing.T, bundleRoot, seriesDir string)
+		wantIssue string
 	}{
+		{name: "series root null", wantIssue: "result.json parse failed", mutate: func(t *testing.T, _ string, seriesDir string) {
+			writeTestFile(t, filepath.Join(seriesDir, "result.json"), "null\n")
+		}},
+		{name: "series reasons null", wantIssue: "result.json parse failed", mutate: func(t *testing.T, _ string, seriesDir string) {
+			path := filepath.Join(seriesDir, "result.json")
+			var document map[string]any
+			if err := json.Unmarshal(readTestFile(t, path), &document); err != nil {
+				t.Fatal(err)
+			}
+			document["reasons"] = nil
+			writeTestJSON(t, path, document)
+		}},
+		{name: "trial operation result null", wantIssue: "result.json parse failed", mutate: func(t *testing.T, _ string, seriesDir string) {
+			path := filepath.Join(seriesDir, "result.json")
+			var document map[string]any
+			if err := json.Unmarshal(readTestFile(t, path), &document); err != nil {
+				t.Fatal(err)
+			}
+			trials := document["trials"].([]any)
+			trials[0].(map[string]any)["operation_result"] = nil
+			writeTestJSON(t, path, document)
+		}},
+		{name: "runtime port snapshot and digest", wantIssue: "linked v2 runtime ports digest does not match series", mutate: func(t *testing.T, _ string, seriesDir string) {
+			value := loadTestSeries(t, seriesDir)
+			value.RuntimePorts.PgBouncer = 46442
+			value.RuntimePortsDigest = digestRuntimePorts(*value.RuntimePorts)
+			writeTestJSON(t, filepath.Join(seriesDir, "result.json"), value)
+		}},
 		{name: "source result bytes", mutate: func(t *testing.T, bundleRoot, _ string) {
 			path := linkedResultPath(bundleRoot, series.Trials[0].RunID)
 			content, err := os.ReadFile(path)
@@ -445,7 +678,65 @@ func TestRunVerifyBundleRelocateAndDetectTampering(t *testing.T) {
 			if tampered.Valid || len(tampered.Issues) == 0 {
 				t.Fatalf("tampering was not detected")
 			}
+			if test.wantIssue != "" && !issuesContain(tampered.Issues, test.wantIssue) {
+				t.Fatalf("tampering omitted %q: %v", test.wantIssue, tampered.Issues)
+			}
 		})
+	}
+}
+
+func verifyLegacyOperationSeriesV1Compatibility(t *testing.T, sourceRoot string, current Series) {
+	t.Helper()
+	legacyRoot := filepath.Join(t.TempDir(), "legacy-root")
+	if err := copyTree(sourceRoot, legacyRoot); err != nil {
+		t.Fatal(err)
+	}
+	seriesDir := filepath.Join(legacyRoot, "runs", "operation-benchmarks", current.RunID)
+	series := loadTestSeries(t, seriesDir)
+	series.SchemaVersion = SeriesSchemaVersion
+	series.RuntimePorts = nil
+	series.RuntimePortsDigest = ""
+	series.RuntimePortsPresent = false
+	series.RuntimePortsDigestPresent = false
+	for index := range series.Trials {
+		trial := &series.Trials[index]
+		started, err := time.Parse(time.RFC3339Nano, trial.StartedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		finished, err := time.Parse(time.RFC3339Nano, trial.FinishedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if trial.PrimaryValue == nil {
+			t.Fatal("legacy compatibility fixture trial has no primary value")
+		}
+		runDir := filepath.Join(legacyRoot, filepath.FromSlash(trial.RunRef))
+		writeVerifiedRun(t, runDir, trial.RunID, series.ExperimentSpec, series.ExperimentDigest, "", started, finished, *trial.PrimaryValue)
+		manifest, err := envfile.Parse(filepath.Join(runDir, "manifest.env"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if manifest["schema_version"] != runstate.ManifestSchemaVersion {
+			t.Fatalf("legacy compatibility fixture manifest schema = %q", manifest["schema_version"])
+		}
+		trial.ExecutionParametersDigest = manifest["execution_parameters_digest"]
+		trial.ExperimentIdentityDigest = manifest["experiment_identity_digest"]
+		trial.RunDigest, err = digestTree(runDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeTestJSON(t, filepath.Join(seriesDir, "trials", fmt.Sprintf("%03d.json", index+1)), *trial)
+	}
+	series.ExecutionParametersDigest = series.Trials[0].ExecutionParametersDigest
+	writeTestJSON(t, filepath.Join(seriesDir, "result.json"), series)
+	writeTestFile(t, filepath.Join(seriesDir, "summary.md"), string(SummaryBytes(series)))
+	verified, err := Verify(legacyRoot, seriesDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verified.Valid {
+		t.Fatalf("legacy operation-series-v1/run-manifest-v1 pair was rejected: %v", verified.Issues)
 	}
 }
 
@@ -520,7 +811,7 @@ func contains(values []string, want string) bool {
 	return false
 }
 
-func writeVerifiedRun(t *testing.T, runDir, runID, experiment string, experimentDigest string, started, finished time.Time, value float64) {
+func writeVerifiedRun(t *testing.T, runDir, runID, experiment string, experimentDigest string, runtimePortsDigest string, started, finished time.Time, value float64) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(runDir, "artifacts"), 0o755); err != nil {
 		t.Fatal(err)
@@ -529,6 +820,7 @@ func writeVerifiedRun(t *testing.T, runDir, runID, experiment string, experiment
 		RunID: runID, StartedAt: started.Format(time.RFC3339), ExperimentSpec: "experiments/" + experiment + ".env", ExperimentSpecID: experiment,
 		ExperimentSpecRef: "experiments/" + experiment + ".env", ExperimentSpecDigest: experimentDigest, Runtime: "native",
 		EngineVersion: "0.2.0", EngineCommit: strings.Repeat("a", 40), RuntimeFingerprintStatus: runstate.RuntimeFingerprintObserved,
+		RuntimePortsDigest:       runtimePortsDigest,
 		RuntimeFingerprintTarget: "primary", RuntimeOS: "linux", RuntimeArch: "amd64", PostgresServerVersionNum: "190000", PostgresServerMajor: "19",
 		RuntimeFingerprintAt: started.Format(time.RFC3339), ExperimentName: "bulk", ExperimentTopology: "single", ExperimentPGConfig: "default",
 		ProfileSize: "small", MetricsEnabled: "0", PackID: "fixture", PackVersion: "0.2.0", PackDigest: fixturePackDigest, RunDir: runDir,
@@ -553,6 +845,15 @@ func writeTestFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func readTestFile(t *testing.T, path string) []byte {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return content
 }
 
 func extractArchive(t *testing.T, archivePath, destination string) string {

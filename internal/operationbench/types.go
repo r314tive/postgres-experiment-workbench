@@ -3,17 +3,18 @@ package operationbench
 import "github.com/r314tive/postgres-experiment-workbench/internal/pgbenchresult"
 
 const (
-	SpecSchemaVersion   = "pgworkbench.operation-benchmark-spec/v1"
-	ResultSchemaVersion = "pgworkbench.operation-result/v1"
-	ResultArtifactType  = "pgworkbench.operation-result"
-	SeriesSchemaVersion = "pgworkbench.operation-benchmark-series/v1"
-	SeriesArtifactType  = "pgworkbench.operation-benchmark-series"
-	Classification      = "descriptive-engineering"
-	BundleSchemaVersion = "pgworkbench.operation-benchmark-bundle/v1"
-	BundleArtifactType  = "pgworkbench.operation-benchmark-bundle"
-	BundleInventoryName = "operation-benchmark-bundle.json"
-	EngineBinaryRef     = "protocol/engine/pgworkbench"
-	NativeManifestRef   = "protocol/native-toolchain/manifest.json"
+	SpecSchemaVersion     = "pgworkbench.operation-benchmark-spec/v1"
+	ResultSchemaVersion   = "pgworkbench.operation-result/v1"
+	ResultArtifactType    = "pgworkbench.operation-result"
+	SeriesSchemaVersion   = "pgworkbench.operation-benchmark-series/v1"
+	SeriesSchemaVersionV2 = "pgworkbench.operation-benchmark-series/v2"
+	SeriesArtifactType    = "pgworkbench.operation-benchmark-series"
+	Classification        = "descriptive-engineering"
+	BundleSchemaVersion   = "pgworkbench.operation-benchmark-bundle/v1"
+	BundleArtifactType    = "pgworkbench.operation-benchmark-bundle"
+	BundleInventoryName   = "operation-benchmark-bundle.json"
+	EngineBinaryRef       = "protocol/engine/pgworkbench"
+	NativeManifestRef     = "protocol/native-toolchain/manifest.json"
 )
 
 type Spec struct {
@@ -69,6 +70,19 @@ type InputFile struct {
 	Digest string `json:"digest"`
 }
 
+// RuntimePorts is the runner-owned host-port snapshot projected into every
+// exact operation trial. The JSON names intentionally match the environment
+// contract so an independent verifier can compare the retained claim without
+// an implicit name translation.
+type RuntimePorts struct {
+	Postgres          int `json:"POSTGRES_PORT"`
+	Replica           int `json:"POSTGRES_REPLICA_PORT"`
+	LogicalSubscriber int `json:"POSTGRES_LOGICAL_SUBSCRIBER_PORT"`
+	PgBouncer         int `json:"PGBOUNCER_PORT"`
+	UpgradeOld        int `json:"POSTGRES_UPGRADE_OLD_PORT"`
+	UpgradeNew        int `json:"POSTGRES_UPGRADE_NEW_PORT"`
+}
+
 type Trial struct {
 	Trial                     int              `json:"trial"`
 	RunID                     string           `json:"run_id"`
@@ -117,6 +131,10 @@ type Series struct {
 	InputsDigest               string                    `json:"inputs_digest"`
 	Inputs                     []InputFile               `json:"inputs"`
 	Runtime                    string                    `json:"runtime"`
+	RuntimePorts               *RuntimePorts             `json:"runtime_ports,omitempty"`
+	RuntimePortsDigest         string                    `json:"runtime_ports_digest,omitempty"`
+	RuntimePortsPresent        bool                      `json:"-"`
+	RuntimePortsDigestPresent  bool                      `json:"-"`
 	Topology                   string                    `json:"topology"`
 	Measurement                Measurement               `json:"measurement"`
 	TrialsPlanned              int                       `json:"trials_planned"`

@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/release-evidence-bundle-inventory.schema.json",
+  "title": "pgworkbench release evidence bundle inventory",
+  "description": "Closed, deterministic inventory for one relocated release-evidence index revision chain. The inventory proves internal byte, mode, lineage, candidate, and derived-outcome consistency only; it does not authenticate the producer or durable evidence references.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "candidate",
+    "head_index",
+    "head_revision",
+    "head_digest",
+    "file_count",
+    "total_size_bytes",
+    "tree_digest",
+    "outcome",
+    "files"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.release-evidence-bundle/v1"},
+    "artifact_type": {"const": "pgworkbench.release-evidence-bundle"},
+    "candidate": {"$ref": "#/$defs/candidate"},
+    "head_index": {"$ref": "#/$defs/index_path"},
+    "head_revision": {"$ref": "#/$defs/safe_integer"},
+    "head_digest": {"$ref": "#/$defs/digest"},
+    "file_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 256
+    },
+    "total_size_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 67108864
+    },
+    "tree_digest": {"$ref": "#/$defs/digest"},
+    "outcome": {"$ref": "#/$defs/outcome"},
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/file"}
+    }
+  },
+  "$defs": {
+    "safe_integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^(?!(?:0{40}|0{64})$)(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "index_path": {
+      "type": "string",
+      "minLength": 13,
+      "maxLength": 28,
+      "pattern": "^index-r(?:0|[1-9][0-9]*)\\.json$"
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "tag", "git_commit", "asset_fingerprint", "scenario_pack"],
+      "properties": {
+        "version": {"$ref": "#/$defs/semver"},
+        "tag": {
+          "type": "string",
+          "pattern": "^v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+        },
+        "git_commit": {"$ref": "#/$defs/commit"},
+        "asset_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "scenario_pack": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "version", "digest"],
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^(?=.*[a-z0-9])[a-z0-9._-]+$"
+            },
+            "version": {"$ref": "#/$defs/semver"},
+            "digest": {"$ref": "#/$defs/digest"}
+          }
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "decision",
+        "readiness_status",
+        "readiness_decision",
+        "assurance_status",
+        "authorization_eligible"
+      ],
+      "properties": {
+        "status": {"enum": ["open", "failed", "passed"]},
+        "decision": {"enum": ["no-go", "go"]},
+        "readiness_status": {"enum": ["open", "failed", "passed"]},
+        "readiness_decision": {"enum": ["no-go", "go"]},
+        "assurance_status": {
+          "enum": [
+            "not-applicable",
+            "legacy-unspecified-unverified",
+            "operator-attested-not-verified",
+            "authorization-eligible"
+          ]
+        },
+        "authorization_eligible": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "passed"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "decision": {"const": "go"},
+              "readiness_status": {"const": "passed"},
+              "readiness_decision": {"const": "go"},
+              "assurance_status": {"const": "authorization-eligible"},
+              "authorization_eligible": {"const": true}
+            }
+          },
+          "else": {
+            "properties": {"decision": {"const": "no-go"}}
+          }
+        },
+        {
+          "if": {
+            "properties": {"readiness_status": {"const": "passed"}},
+            "required": ["readiness_status"]
+          },
+          "then": {
+            "properties": {"readiness_decision": {"const": "go"}}
+          },
+          "else": {
+            "properties": {"readiness_decision": {"const": "no-go"}}
+          }
+        },
+        {
+          "if": {
+            "properties": {"authorization_eligible": {"const": true}},
+            "required": ["authorization_eligible"]
+          },
+          "then": {
+            "properties": {
+              "status": {"const": "passed"},
+              "decision": {"const": "go"},
+              "readiness_status": {"const": "passed"},
+              "readiness_decision": {"const": "go"},
+              "assurance_status": {"const": "authorization-eligible"}
+            }
+          }
+        }
+      ]
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "revision", "size", "digest", "mode"],
+      "properties": {
+        "path": {"$ref": "#/$defs/index_path"},
+        "revision": {"$ref": "#/$defs/safe_integer"},
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2097152
+        },
+        "digest": {"$ref": "#/$defs/digest"},
+        "mode": {"const": 420}
+      }
+    }
+  }
+}

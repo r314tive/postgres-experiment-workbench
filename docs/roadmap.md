@@ -1,9 +1,10 @@
 # Roadmap
 
-The immutable `v0.2.0` candidate and its v1 completion contract remain the
-current release track. The ordered post-v0.2 implementation plan is maintained
-in [post-v0.2-roadmap.md](post-v0.2-roadmap.md). Post-v0.2 changes must not be
-mixed into the frozen candidate.
+The exact `v0.2.7` candidate and its v1 completion contract are the current
+release track. The ordered post-v0.2 implementation plan is maintained in
+[post-v0.2-roadmap.md](post-v0.2-roadmap.md). Release evidence is bound to one
+full commit; any later source or documentation byte creates a new candidate
+and requires the exact-candidate gates again.
 
 The project direction is a portable PostgreSQL experiment engine: a scenario is
 planned, executed against an isolated disposable runtime, and produces a

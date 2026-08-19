@@ -36,6 +36,7 @@ require_text() {
   fi
 }
 
+prepare="$(job_block prepare)"
 build_snapshot="$(job_block build-snapshot)"
 verify_candidate_artifact="$(job_block verify-candidate-artifact)"
 attest_and_create_draft="$(job_block attest-and-create-draft)"
@@ -44,6 +45,7 @@ draft_verify="$(job_block draft-verify)"
 draft_compatibility="$(job_block draft-compatibility)"
 draft_external_drivers="$(job_block draft-external-drivers)"
 verify_publication_evidence="$(job_block verify-publication-evidence)"
+seal_preventive_controls="$(job_block seal-preventive-controls)"
 publish_release="$(job_block publish-release)"
 public_verify="$(job_block public-verify)"
 published_compatibility="$(job_block published-compatibility)"
@@ -270,6 +272,14 @@ require_text "$draft_verify" 'test "$(jq -r --arg name "$manifest_name"' \
   'draft asset record must bind the manifest bytes to the provider inventory'
 require_text "$draft_verify" '> draft-verification/asset-verification.json' \
   'draft typed fact record must remain in the existing verification artifact'
+require_line "$draft_verify" '      verification_artifact_digest: ${{ steps.upload_verification.outputs.artifact-digest }}' \
+  'draft verifier must export the exact provider artifact digest'
+require_line "$draft_verify" '      verification_artifact_id: ${{ steps.upload_verification.outputs.artifact-id }}' \
+  'draft verifier must export the immutable provider artifact id'
+require_line "$draft_verify" '      verification_artifact_name: ${{ steps.draft_assets.outputs.artifact_name }}' \
+  'draft verifier must export its producer-attempt artifact name'
+require_line "$draft_verify" '          name: draft-verification-${{ github.ref_name }}-${{ github.sha }}-${{ github.run_attempt }}' \
+  'draft verification upload name must be exact and rerun-safe'
 for bounded_fact in \
   'actions_artifact_durable: false' \
   'candidate_identity_reverified: true' \
@@ -704,6 +714,143 @@ if [[ -z "$registry_check_line" || -z "$cleanup_step_line" || -z "$summary_step_
   exit 1
 fi
 
+require_line "$seal_preventive_controls" "    if: github.ref_type == 'tag'" \
+  'preventive-control sealing must be tag-only'
+for prerequisite in '      - attest-and-create-draft' '      - draft-verify' \
+  '      - verify-publication-evidence'; do
+  require_line "$seal_preventive_controls" "$prerequisite" \
+    "preventive-control sealing lacks prerequisite: $prerequisite"
+done
+require_line "$seal_preventive_controls" '    environment: release-publication' \
+  'preventive-control sealing must use the protected publication environment'
+require_line "$seal_preventive_controls" '      actions: read' \
+  'preventive-control sealing needs read-only artifact metadata access'
+require_line "$seal_preventive_controls" '      contents: read' \
+  'preventive-control sealing must keep repository contents read-only'
+for forbidden_permission in 'contents: write' 'id-token: write' 'attestations: write' \
+  'artifact-metadata: write'; do
+  if grep -Fq -- "$forbidden_permission" <<<"$seal_preventive_controls"; then
+    echo "FAIL: preventive-control sealing carries mutation permission: $forbidden_permission" >&2
+    exit 1
+  fi
+done
+for protected_input in \
+  'IMMUTABLE_RELEASES_ADMIN_TOKEN: ${{ secrets.PGWORKBENCH_ADMIN_READ_TOKEN }}' \
+  'TAG_RULESET_ADMIN_REVIEW_REF: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEW_REF }}' \
+  'TAG_RULESET_ADMIN_REVIEW_DIGEST: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEW_DIGEST }}' \
+  'TAG_RULESET_ADMIN_REVIEWER: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWER }}' \
+  'TAG_RULESET_ADMIN_REVIEWED_AT: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_AT }}' \
+  'TAG_RULESET_ADMIN_REVIEWED_ID: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_ID }}' \
+  'TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT: ${{ vars.PGWORKBENCH_TAG_RULESET_ADMIN_REVIEWED_UPDATED_AT }}'; do
+  require_text "$seal_preventive_controls" "$protected_input" \
+    "preventive-control sealing lacks protected input: $protected_input"
+done
+for exact_input in \
+  'SOURCE_CONTROLS_ARTIFACT_DIGEST: ${{ needs['"'"'attest-and-create-draft'"'"'].outputs.controls_artifact_digest }}' \
+  'SOURCE_CONTROLS_ARTIFACT_ID: ${{ needs['"'"'attest-and-create-draft'"'"'].outputs.controls_artifact_id }}' \
+  'SOURCE_CONTROLS_ARTIFACT_NAME: ${{ needs['"'"'attest-and-create-draft'"'"'].outputs.controls_artifact_name }}' \
+  'DRAFT_VERIFICATION_ARTIFACT_DIGEST: ${{ needs['"'"'draft-verify'"'"'].outputs.verification_artifact_digest }}' \
+  'DRAFT_VERIFICATION_ARTIFACT_ID: ${{ needs['"'"'draft-verify'"'"'].outputs.verification_artifact_id }}' \
+  'DRAFT_VERIFICATION_ARTIFACT_NAME: ${{ needs['"'"'draft-verify'"'"'].outputs.verification_artifact_name }}'; do
+  require_text "$seal_preventive_controls" "$exact_input" \
+    "preventive-control sealing lacks exact producer identity: $exact_input"
+done
+require_text "$seal_preventive_controls" '.digest == $digest and .workflow_run.id == $run_id' \
+  'preventive-control sealing must authenticate provider digest and run identity'
+require_text "$seal_preventive_controls" '.workflow_run.head_sha == $head_sha' \
+  'preventive-control sealing must authenticate both provider artifacts to the candidate commit'
+require_text "$seal_preventive_controls" 'actions/artifacts/$SOURCE_CONTROLS_ARTIFACT_ID/zip' \
+  'preventive-control sealing must download exact raw-control ZIP bytes by id'
+require_text "$seal_preventive_controls" 'actions/artifacts/$DRAFT_VERIFICATION_ARTIFACT_ID/zip' \
+  'preventive-control sealing must download exact draft-verification ZIP bytes by id'
+require_text "$seal_preventive_controls" 'test "sha256:$(sha256sum "$controls_zip"' \
+  'preventive-control sealing must hash raw-control ZIP bytes against provider digest'
+require_text "$seal_preventive_controls" 'test "sha256:$(sha256sum "$draft_zip"' \
+  'preventive-control sealing must hash draft-verification ZIP bytes against provider digest'
+require_text "$seal_preventive_controls" 'test "$(unzip -Z1 "$controls_zip" | LC_ALL=C sort)" = "$expected_source_files"' \
+  'raw-control ZIP must have an exact root-only entry allowlist before extraction'
+require_text "$seal_preventive_controls" 'test "$(unzip -Z1 "$draft_zip" | LC_ALL=C sort)" = "$expected_draft_files"' \
+  'draft-verification ZIP must have an exact root-only entry allowlist before extraction'
+require_text "$seal_preventive_controls" 'test "$(jq -r .source.asset_inventory_digest "$draft_record")"' \
+  'sealer must bind the embedded draft record to exact inventory bytes'
+require_text "$seal_preventive_controls" '.inventory == $inventory[0]' \
+  'sealer must require exact embedded and downloaded draft inventories'
+require_text "$seal_preventive_controls" 'seal_remote_sha="$(gh api' \
+  'sealer must refresh the tag target immediately before record capture'
+require_text "$seal_preventive_controls" 'test "$seal_remote_sha" = "$GITHUB_SHA"' \
+  'sealer must reject a concurrently moved tag'
+require_text "$seal_preventive_controls" 'test "$(jq -r .isDraft <<<"$seal_release_json")" = true' \
+  'sealer must require the candidate release to remain draft'
+require_text "$seal_preventive_controls" 'test "$seal_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"' \
+  'sealer must freshly reverify the complete draft asset identity'
+require_text "$seal_preventive_controls" 'valid_durable_ref "$TAG_RULESET_ADMIN_REVIEW_REF"' \
+  'sealer must enforce the same durable review-reference semantics as the Go validator'
+for durable_guard in \
+  'test "${#value}" -le 2048' \
+  '"$authority" != *"@"*' \
+  '"$path" != "/"' \
+  '"$escaped" =~ ^[0-9A-Fa-f]{2}' \
+  '"$host" == "github.com"' \
+  '"$host" == "api.github.com"' \
+  'pipelines.actions.githubusercontent.com' \
+  'objects.githubusercontent.com'; do
+  require_text "$seal_preventive_controls" "$durable_guard" \
+    "sealer durable-ref validation lacks guard: $durable_guard"
+done
+require_text "$seal_preventive_controls" '^[A-Za-z0-9][A-Za-z0-9._@+:-]{0,127}$' \
+  'sealer reviewer validation must exactly match the typed model'
+require_text "$seal_preventive_controls" 'pgworkbench.release-preventive-controls-verification/v1' \
+  'sealer must emit the versioned preventive-control contract'
+require_text "$seal_preventive_controls" 'pgworkbench.release-preventive-controls-verification' \
+  'sealer must emit the exact preventive-control artifact type'
+require_text "$seal_preventive_controls" 'job:"seal-preventive-controls"' \
+  'sealed workflow identity must name its fixed producer job'
+for typed_source in \
+  'controls_artifact:{id:$controls_artifact_id,name:$controls_artifact_name,digest:$controls_artifact_digest}' \
+  'repository_controls_digest:$repository_controls_digest' \
+  'tag_ruleset_api_digest:$tag_ruleset_api_digest' \
+  'immutable_releases_api_digest:$immutable_releases_api_digest'; do
+  require_text "$seal_preventive_controls" "$typed_source" \
+    "sealed preventive-control record lacks typed source field: $typed_source"
+done
+for bounded_fact in \
+  'purpose:"prepublication-preventive-controls-observation"' \
+  'verification_scope:"workflow-local-github-api-and-source-binding"' \
+  'actions_artifact_durable:false' \
+  'candidate_identity_reverified:true' \
+  'bypass_review_remote_object_fetched:false' \
+  'bypass_review_signature_verified:false' \
+  'performance_claim:false' \
+  'benchmark_comparability_claim:false' \
+  'recovery_claim:false' \
+  'production_decision_eligible:false'; do
+  require_text "$seal_preventive_controls" "$bounded_fact" \
+    "sealed preventive-control record lacks bounded fact: $bounded_fact"
+done
+require_text "$seal_preventive_controls" '(.captured_at | fromdateiso8601) >= (.tag_ruleset.updated_at | fromdateiso8601)' \
+  'sealed observation time must not precede the observed ruleset revision'
+require_text "$seal_preventive_controls" '(.captured_at | fromdateiso8601) >= (.bypass_review.reviewed_at | fromdateiso8601)' \
+  'sealed observation time must not precede the bound bypass review'
+require_line "$seal_preventive_controls" '      artifact_digest: ${{ steps.upload_verification.outputs.artifact-digest }}' \
+  'sealer must export the sealed artifact digest'
+require_line "$seal_preventive_controls" '      artifact_id: ${{ steps.upload_verification.outputs.artifact-id }}' \
+  'sealer must export the immutable sealed artifact id'
+require_line "$seal_preventive_controls" '      artifact_name: ${{ steps.seal.outputs.artifact_name }}' \
+  'sealer must export the exact sealed artifact name'
+require_line "$seal_preventive_controls" '      record_digest: ${{ steps.seal.outputs.record_digest }}' \
+  'sealer must export the exact typed record digest'
+require_line "$seal_preventive_controls" '          name: preventive-controls-verification-${{ github.ref_name }}-${{ github.sha }}-${{ github.run_attempt }}' \
+  'sealed artifact upload name must be exact and rerun-safe'
+require_line "$seal_preventive_controls" '          path: preventive-controls-verification/verification.json' \
+  'sealed artifact must contain only the typed verification record'
+for forbidden in 'actions/download-artifact@' 'actions/checkout@' 'make ' 'go run' 'go test' \
+  './scripts/' '"$verifier"' ' benchmark drivers' 'gh release edit' 'gh release create'; do
+  if grep -Fq -- "$forbidden" <<<"$seal_preventive_controls"; then
+    echo "FAIL: protected sealer executes candidate code or mutates the release: $forbidden" >&2
+    exit 1
+  fi
+done
+
 require_line "$publish_release" "    if: github.ref_type == 'tag'" 'publication must be tag-only'
 require_line "$publish_release" '      - attest-and-create-draft' \
   'publication must depend on protected draft creation'
@@ -712,8 +859,18 @@ require_line "$publish_release" '      - draft-compatibility' 'publication must 
 require_line "$publish_release" '      - draft-external-drivers' 'publication must depend on real external-driver evidence'
 require_line "$publish_release" '      - verify-publication-evidence' \
   'publication must wait for read-only semantic evidence verification'
+require_line "$publish_release" '      - seal-preventive-controls' \
+  'publication must wait for the typed preventive-control seal'
 require_line "$publish_release" '    environment: release-publication' \
   'every repository mutation must use the protected publication environment'
+for sealed_output in \
+  'VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_DIGEST: ${{ needs['"'"'seal-preventive-controls'"'"'].outputs.artifact_digest }}' \
+  'VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_ID: ${{ needs['"'"'seal-preventive-controls'"'"'].outputs.artifact_id }}' \
+  'VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_NAME: ${{ needs['"'"'seal-preventive-controls'"'"'].outputs.artifact_name }}' \
+  'VERIFIED_PREVENTIVE_CONTROLS_RECORD_DIGEST: ${{ needs['"'"'seal-preventive-controls'"'"'].outputs.record_digest }}'; do
+  require_text "$publish_release" "$sealed_output" \
+    "publication lacks exact sealed preventive-control output: $sealed_output"
+done
 require_text "$publish_release" 'test "$prepublish_fingerprint" = "$VERIFIED_ASSET_FINGERPRINT"' \
   'publication must compare the current draft with the verified asset inventory'
 require_text "$publish_release" 'test "$static_gate_digest" = "$VERIFIED_EXTERNAL_DRIVER_GATE_DIGEST"' \
@@ -732,6 +889,42 @@ require_text "$publish_release" '.digest == $digest and .workflow_run.id == $run
   'publication must bind REST artifact digest and workflow run before mutation'
 require_text "$publish_release" '.workflow_run.head_sha == $head_sha' \
   'publication must bind both artifacts to the candidate commit before mutation'
+require_text "$publish_release" 'actions/artifacts/$VERIFIED_PREVENTIVE_CONTROLS_ARTIFACT_ID/zip' \
+  'publication must download exact sealed ZIP bytes through the authenticated API'
+require_text "$publish_release" 'test "sha256:$(sha256sum "$preventive_zip"' \
+  'publication must bind exact sealed ZIP bytes to the provider digest'
+require_text "$publish_release" 'test "$(unzip -Z1 "$preventive_zip")" = "verification.json"' \
+  'publication must require the exact one-file sealed artifact before extraction'
+require_text "$publish_release" 'test "$(stat -c %s "$preventive_record")" -le 65536' \
+  'publication must bound the typed preventive-control record'
+require_text "$publish_release" 'test "sha256:$(sha256sum "$preventive_record"' \
+  'publication must bind verification.json bytes to the exported record digest'
+require_text "$publish_release" '.schema_version == "pgworkbench.release-preventive-controls-verification/v1"' \
+  'publication must require the exact preventive-control schema'
+require_text "$publish_release" '.artifact_type == "pgworkbench.release-preventive-controls-verification"' \
+  'publication must require the exact preventive-control artifact type'
+require_text "$publish_release" 'job:"seal-preventive-controls"' \
+  'publication must bind the typed record to the sealer job identity'
+require_text "$publish_release" '.source.controls_artifact == {id:$controls_id,name:$controls_name,digest:$controls_digest}' \
+  'publication must bind the typed source to the exact raw-control artifact'
+require_text "$publish_release" '.source.repository_controls_digest == $repository_controls_digest' \
+  'publication must bind the typed source to exact repository-control bytes'
+require_text "$publish_release" '.draft_asset_verification.workflow_run == {id:$run_id,attempt:$run_attempt' \
+  'publication must bind the embedded draft record to the same run and attempt'
+require_text "$publish_release" '.draft_asset_verification.provider_observation == {tag:$tag,tag_target_sha:$sha,release_state:"draft"' \
+  'publication must verify the embedded draft provider observation'
+require_text "$publish_release" '[.draft_asset_verification.inventory.assets[].name] == expected_names($version)' \
+  'publication must verify the fixed closed 16-asset inventory'
+require_text "$publish_release" '.draft_asset_verification.checks == {tag_target:"verified"' \
+  'publication must verify the complete fixed draft check matrix'
+require_text "$publish_release" '.draft_asset_verification.assurance == {purpose:"release-asset-authenticity-and-integrity"' \
+  'publication must verify the complete bounded draft assurance'
+require_text "$publish_release" '.assurance == {purpose:"prepublication-preventive-controls-observation"' \
+  'publication must verify the complete bounded preventive-control assurance'
+require_text "$publish_release" '.bypass_review == {reviewer:$reviewer,reviewed_at:$reviewed_at' \
+  'publication must bind the exact admin review and ruleset revision'
+require_text "$publish_release" '(.captured_at | fromdateiso8601) >= (.bypass_review.reviewed_at | fromdateiso8601)' \
+  'publication must reject a control record captured before its review'
 require_text "$publish_release" 'gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false' \
   'only the publication job may publish the verified draft'
 require_text "$publish_release" 'prepublish_remote_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq .sha)"' \
@@ -750,10 +943,18 @@ require_text "$publish_release" '([.rules[].type] | index("creation")) != null' 
   'publication must recheck restricted tag creation'
 require_text "$publish_release" '"repos/$GITHUB_REPOSITORY/immutable-releases"' \
   'publication must re-query immutable-release state immediately before transition'
-require_text "$publish_release" 'test "$live_ruleset_digest" = "$(jq -r .tag_ruleset.api_evidence_digest' \
-  'publication must bind the live ruleset bytes to the reviewed preventive-control record'
-require_text "$publish_release" 'test "$live_immutable_digest" = "$(jq -r .immutable_releases.api_evidence_digest' \
-  'publication must bind live immutable-release state to the preventive-control record'
+require_text "$publish_release" 'test "$live_ruleset_digest" = "$source_ruleset_digest"' \
+  'publication must bind canonical live ruleset bytes to the sealed typed record'
+require_text "$publish_release" 'test "$live_immutable_digest" = "$source_immutable_digest"' \
+  'publication must bind canonical live immutable-release bytes to the sealed typed record'
+require_text "$publish_release" 'test "$live_ruleset_normalized" = "$(jq -c .tag_ruleset "$preventive_record")"' \
+  'publication must require exact normalized live ruleset facts from the sealed record'
+require_text "$publish_release" '"$(jq -c .immutable_releases "$preventive_record")"' \
+  'publication must require exact normalized live immutable-release facts from the sealed record'
+require_text "$publish_release" 'printf '\''%s'\'' "$live_ruleset"' \
+  'publication canonical ruleset digest must not include a synthetic trailing newline'
+require_text "$publish_release" 'printf '\''%s'\'' "$live_immutable"' \
+  'publication canonical immutable-release digest must not include a synthetic trailing newline'
 for forbidden in 'actions/checkout@' 'make ' 'go run' 'go test' './scripts/' \
   'tar -xzf' 'tar -xOf' 'tar -xvf' '"$verifier"' ' benchmark drivers' \
   'driver-run-verify' 'pgworkbench version'; do
@@ -767,6 +968,19 @@ if [[ "$(grep -v '^[[:space:]]*$' <<<"$publish_release" | tail -n 1)" != \
   echo 'FAIL: draft-to-public transition must be the publication job final command' >&2
   exit 1
 fi
+
+for unprivileged_job in prepare source-compatibility aggregate-attempt-1 \
+  aggregate-attempt-2 build-snapshot verify-candidate-artifact draft-verify \
+  draft-compatibility seal-source-draft-and-aggregate-evidence \
+  draft-external-drivers verify-publication-evidence public-verify \
+  published-compatibility seal-published-compatibility; do
+  unprivileged_block="$(job_block "$unprivileged_job")"
+  if grep -Eq 'PGWORKBENCH_ADMIN_READ_TOKEN|IMMUTABLE_RELEASES_ADMIN_TOKEN|PGWORKBENCH_TAG_RULESET_ADMIN_REVIEW|TAG_RULESET_ADMIN_REVIEW' \
+    <<<"$unprivileged_block"; then
+    echo "FAIL: unprivileged/candidate job receives release-control credential: $unprivileged_job" >&2
+    exit 1
+  fi
+done
 
 require_line "$public_verify" "    if: github.ref_type == 'tag'" 'public verification must be tag-only'
 require_line "$public_verify" '      - publish-release' 'public verification must run only after publication'
@@ -846,7 +1060,6 @@ if grep -Fq -- 'actions/checkout@' <<<"$public_verify"; then
   exit 1
 fi
 for forbidden_record in \
-  'pgworkbench.release-asset-verification/v1' \
   'pgworkbench.release-publication-verification/v1' \
   'publication-verification.json'; do
   if grep -Fq -- "$forbidden_record" <<<"$publish_release"; then

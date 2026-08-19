@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/r314tive/postgres-experiment-workbench/schemas/release-preventive-controls-verification.schema.json",
+  "title": "pgworkbench release preventive-controls verification v1",
+  "description": "Fact-only, candidate-bound pre-publication observation of repository release controls. It binds a same-run draft asset verification and workflow-local source identities, but does not verify the remote bypass-review object or authorize publication.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_type",
+    "candidate",
+    "captured_at",
+    "workflow_run",
+    "draft_asset_verification",
+    "source",
+    "tag_ruleset",
+    "bypass_review",
+    "immutable_releases",
+    "assurance"
+  ],
+  "properties": {
+    "schema_version": {"const": "pgworkbench.release-preventive-controls-verification/v1"},
+    "artifact_type": {"const": "pgworkbench.release-preventive-controls-verification"},
+    "candidate": {"$ref": "release-evidence-index.schema.json#/$defs/candidate"},
+    "captured_at": {"$ref": "#/$defs/canonical_timestamp"},
+    "workflow_run": {"$ref": "#/$defs/workflow_run"},
+    "draft_asset_verification": {
+      "allOf": [
+        {"$ref": "release-asset-verification.schema.json"},
+        {
+          "properties": {"qualification_mode": {"const": "draft"}},
+          "required": ["qualification_mode"]
+        }
+      ]
+    },
+    "source": {"$ref": "#/$defs/source"},
+    "tag_ruleset": {"$ref": "#/$defs/tag_ruleset"},
+    "bypass_review": {"$ref": "#/$defs/bypass_review"},
+    "immutable_releases": {"$ref": "#/$defs/immutable_releases"},
+    "assurance": {"$ref": "#/$defs/assurance"}
+  },
+  "$defs": {
+    "canonical_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-5][0-9]Z$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "workflow_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "attempt", "head_sha", "repository", "workflow", "job", "ref"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[1-9][0-9]{0,31}$"},
+        "attempt": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "head_sha": {"type": "string", "pattern": "^(?!(?:0{40}|0{64})$)(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "repository": {"const": "r314tive/postgres-experiment-workbench"},
+        "workflow": {"const": "release-snapshot"},
+        "job": {"const": "seal-preventive-controls"},
+        "ref": {
+          "type": "string",
+          "pattern": "^refs/tags/v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*))(\\.((0|[1-9][0-9]*)|([0-9]*[A-Za-z-][0-9A-Za-z-]*)))*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$"
+        }
+      }
+    },
+    "qualification_artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "digest"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[1-9][0-9]{0,31}$"},
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^release-controls-v[0-9A-Za-z.+-]+-(?:[0-9a-f]{40}|[0-9a-f]{64})-[1-9][0-9]{0,15}$"
+        },
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "controls_artifact",
+        "repository_controls_digest",
+        "tag_ruleset_api_digest",
+        "immutable_releases_api_digest"
+      ],
+      "properties": {
+        "controls_artifact": {"$ref": "#/$defs/qualification_artifact"},
+        "repository_controls_digest": {"$ref": "#/$defs/digest"},
+        "tag_ruleset_api_digest": {"$ref": "#/$defs/digest"},
+        "immutable_releases_api_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "tag_ruleset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "updated_at",
+        "target",
+        "enforcement",
+        "include_pattern",
+        "excludes",
+        "creation_restricted",
+        "update_prohibited",
+        "deletion_prohibited"
+      ],
+      "properties": {
+        "id": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "updated_at": {"$ref": "#/$defs/canonical_timestamp"},
+        "target": {"const": "tag"},
+        "enforcement": {"const": "active"},
+        "include_pattern": {"const": "refs/tags/v*"},
+        "excludes": {"type": "array", "maxItems": 0},
+        "creation_restricted": {"const": true},
+        "update_prohibited": {"const": true},
+        "deletion_prohibited": {"const": true}
+      }
+    },
+    "bypass_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewer",
+        "reviewed_at",
+        "ruleset_id",
+        "ruleset_updated_at",
+        "evidence_ref",
+        "evidence_digest"
+      ],
+      "properties": {
+        "reviewer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][-A-Za-z0-9._@+:]{0,127}$"
+        },
+        "reviewed_at": {"$ref": "#/$defs/canonical_timestamp"},
+        "ruleset_id": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "ruleset_updated_at": {"$ref": "#/$defs/canonical_timestamp"},
+        "evidence_ref": {
+          "type": "string",
+          "format": "uri",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "^(?:https://|s3://|gs://|urn:)[^\\s]+$"
+        },
+        "evidence_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "immutable_releases": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "enforced_by_owner"],
+      "properties": {
+        "enabled": {"const": true},
+        "enforced_by_owner": {"type": "boolean"}
+      }
+    },
+    "assurance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose",
+        "verification_scope",
+        "actions_artifact_durable",
+        "candidate_identity_reverified",
+        "bypass_review_remote_object_fetched",
+        "bypass_review_signature_verified",
+        "performance_claim",
+        "benchmark_comparability_claim",
+        "recovery_claim",
+        "production_decision_eligible"
+      ],
+      "properties": {
+        "purpose": {"const": "prepublication-preventive-controls-observation"},
+        "verification_scope": {"const": "workflow-local-github-api-and-source-binding"},
+        "actions_artifact_durable": {"const": false},
+        "candidate_identity_reverified": {"const": true},
+        "bypass_review_remote_object_fetched": {"const": false},
+        "bypass_review_signature_verified": {"const": false},
+        "performance_claim": {"const": false},
+        "benchmark_comparability_claim": {"const": false},
+        "recovery_claim": {"const": false},
+        "production_decision_eligible": {"const": false}
+      }
+    }
+  }
+}
