@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-08-19
+
+### Added
+
+- Added deterministic, relocatable release-evidence bundles that preserve an
+  exact contiguous index revision chain and independently reject inventory,
+  lineage, transition, path, mode, identity, and byte tampering.
+- Added a candidate-bound preventive-controls verification record and atomic
+  three-control attachment. The protected release workflow seals exact source
+  artifacts, rechecks the draft candidate, and compares final live controls
+  immediately before publication while retaining a non-authorizing,
+  operator-attested assurance boundary.
+
 ## [0.2.6] - 2026-08-18
 
 ### Fixed
