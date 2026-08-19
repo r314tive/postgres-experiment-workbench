@@ -259,15 +259,13 @@ PostgreSQL bindir, and a fixed list of conventional host tool locations; the
 temporary root is fixed to the physical path behind `/tmp`. Docker uses an
 explicit local socket and a candidate-private context/config containing only
 the selected Compose plugin, so the user's current context, credential store,
-and other CLI plugins are not inputs. The controlled SHA-plus-path-derived
-lowercase-hex nonce checkout basename becomes the Compose project name and
-scopes the candidate's generated container, volume, and network identities
-without relying on inherited state, including during concurrent gates for the
-same commit.
-One validated set of dynamically allocated loopback ports is held constant across
-the matrix and release gates, so another checkout can keep using the example
-ports. Preflight and final cleanup inspect only the candidate project labels;
-the cleanup never addresses another checkout by a fixed container name.
+and other CLI plugins are not inputs. The checkout name combines the candidate
+SHA with a hash of its temporary path. Compose uses that name as the project
+name, so concurrent gates for the same commit get separate containers, volumes,
+and networks. The matrix and release gates share one set of dynamically
+allocated loopback ports, leaving the example ports available to another
+checkout. Preflight and cleanup select resources only by the candidate project
+label; neither addresses a fixed container name.
 Persistent Go environment/workspace state, ambient build flags, and
 system/global Git configuration, checkout-time hooks, and automatic CRLF
 conversion are disabled explicitly. All workbench, PostgreSQL, profile,

@@ -42,14 +42,14 @@ byte drift at those boundaries; it is not source/build provenance, dependency
 closure, code signing, or host attestation. The native snapshot is not promised
 to run after relocation.
 
-A passed versioned run also records an observed producer OS/architecture, a named
-fingerprint target, and that target's live PostgreSQL
+Any passed run using a versioned manifest also records the producer
+OS/architecture, a named fingerprint target, and that target's live PostgreSQL
 `server_version_num`/derived major. `multi-version-upgrade` names only its
 `upgrade-new` destination here; the field does not claim to identify the old
-and new version pair. These values identify the bounded observation; they are
-not host attestation, server authentication, performance evidence, or a
-declaration that the tuple is supported. An early failed run may record the
-fingerprint as unavailable when PostgreSQL never became queryable.
+and new version pair. These values describe only that observation. They do not
+attest the host, authenticate the server, provide performance evidence, or
+declare the tuple supported. An early failed run may record the fingerprint as
+unavailable when PostgreSQL never became queryable.
 
 It does not prove:
 

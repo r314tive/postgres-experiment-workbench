@@ -1,22 +1,20 @@
 # Post-v0.2 execution roadmap
 
-This roadmap now tracks the exact `v0.2.7` source candidate. It is an
-execution order, not a feature wishlist. A milestone closes only when its
-artifact, verifier, failure paths, portability checks, and bounded claim all
-exist for one exact candidate.
+This roadmap tracks the `v0.2.7` candidate through the v1 product gate. A
+milestone closes only when its artifact, verifier, failure paths, portability
+checks, and supported claim all exist for one candidate.
 
 The product remains a reproducible PostgreSQL experiment and performance
 regression laboratory:
 
 ```text
-question -> immutable protocol -> owned disposable runtime -> execution
-         -> raw evidence -> independent verification -> bounded conclusion
+question -> immutable protocol -> disposable test runtime -> execution
+         -> raw evidence -> independent verification -> conclusion for the recorded conditions
 ```
 
-It is not a production database operator, a universal tuning advisor, a TPC
-implementation, a public leaderboard, or a recovery-assurance engine.
-`pgdrill` remains the separate consumer responsible for provider-backed restore
-and recovery evidence.
+The project is not a production database operator, universal tuning advisor,
+TPC implementation, public leaderboard, or recovery-assurance engine.
+Provider-backed restore and recovery evidence belongs to `pgdrill`.
 
 ## Work streams and dependency order
 
@@ -36,16 +34,16 @@ M4 collectors -> M5 source-build subjects -> M6 workloads/topologies
 ```
 
 M0 and later development may proceed in parallel, but release evidence always
-names one exact full commit. Any commit added or cherry-picked into
-`release/v0.2.7` creates a new candidate and requires every exact-candidate
-gate again; a branch name is never a substitute for that SHA binding.
+names one full commit. Changing the release branch creates a new candidate and
+requires its candidate gates to run again; a branch name is not a commit
+binding.
 
 ## Milestone map
 
 | Milestone | Product outcome | Exit criterion |
 | --- | --- | --- |
-| M0 | Published and independently verified `v0.2.7` | Exact candidate passes every draft/public release gate; adoption gates remain explicitly open |
-| M1 | Evidence control plane | One CLI derives `GO`/`NO-GO` from verified candidate-bound records and produces a relocated closed bundle |
+| M0 | Published and independently verified `v0.2.7` | Candidate passes every draft/public release gate; adoption gates remain open |
+| M1 | Evidence control plane | One CLI derives `GO`/`NO-GO` from verified records tied to one candidate and produces a relocatable bundle |
 | M2 | Statistically qualified benchmark method | A/A calibration and immutable study design precede any A/B decision |
 | M3 | Measurement-grade metric and noise contract | Warm-up, dataset identity, continuous noise, outcome budgets, and tail metrics verify independently |
 | M4 | Version-aware collector platform | Every collector has an availability, reset, coverage, privacy, and measured-overhead contract |
@@ -55,51 +53,34 @@ gate again; a branch name is never a substitute for that SHA binding.
 | M8 | Portable trusted execution | Signed job/result capsules run on a single-use worker before any scheduler or Kubernetes control plane |
 | M9 | v1 product gate | Published immutable candidate plus independent adoption and zero open critical integrity findings |
 
-Current implementation state:
+Current state:
 
-- M1.1 is implemented and committed: strict semantic status/verification works
-  outside a checkout and derives `GO`/`NO-GO` independently.
-- Candidate initialization is implemented and committed: exact 16-asset
-  snapshot, manifest/inventory cross-binding, revision zero, copy-on-write
-  publication, and typed ambiguous-commit handling.
-- The typed attachment framework covers all declared workflow gate mappings.
-  External-driver, draft/public asset, publication, compatibility, and aggregate
-  records close only their adapter-owned gates; the caller cannot supply an
-  outcome. Persisted adapter discriminators prevent cross-path transplantation.
-- M1.2 control-plane code now includes the remaining preventive-controls
-  vertical slice: a post-draft typed producer, strict standalone schema, atomic
-  three-control attachment, independent verification, and the one exact bundle
-  transition. This completes the adapter surface, not live release readiness:
-  no durable authenticated control record has been attached, and current
-  operator-attested assurance remains `NO-GO`.
-- M1.3 readers are implemented for signed critical-finding reviews and
-  completed external pilot records. They preserve participant identity across
-  pilot attachments, reject duplicate pilots, and require independently
-  verified no-maintainer-shell authoring evidence before that gate can close.
-  No real external pilot or proof-backed remote record is checked into this
-  repository, so adoption remains open and the effective decision remains
-  `NO-GO`.
-- M1.4 now has a strict closed-inventory schema, implemented create/verify
-  commands, and a passing relocation/tamper/fault/race matrix: one exact
-  `index-r0.json` through `index-r<N>.json` chain, normalized modes, bounded
-  sorted entries, full candidate/head/outcome binding, and unchanged durable
-  references. This completes the bounded M1.4 packaging gate; it does not mark
-  M1 or adoption complete and does not authenticate the external evidence refs.
+- M1.1 semantic verification and status derivation are implemented.
+- M1.2 candidate initialization, typed gate adapters, preventive-control
+  attachment, and independent verification are implemented.
+- M1.3 readers for critical reviews and adoption pilots are implemented. No
+  external pilot or independently verified remote record has been attached, so
+  adoption remains open.
+- M1.4 deterministic bundle creation and relocation verification are
+  implemented; the tamper/fault/race matrix passes on supported native and
+  cross-build paths. The bundle verifies the local revision chain, not the
+  referenced external objects.
 
-## M0 — publish the exact v0.2.7 candidate
+## M0 — publish v0.2.7
 
-Once qualification starts for the selected full SHA, any feature,
-documentation, or generated release-input byte change creates a new candidate
-and restarts every exact-candidate gate.
+Once qualification starts for a full SHA, any change to source,
+documentation, or generated release input creates a new candidate and restarts
+its gates.
 
 Deliverables:
 
-1. Push the exact release branch and open a PR.
+1. Push the release branch and open a PR.
 2. Pass `check` and source `compatibility` on the synthetic merge commit.
-3. Merge, then pass both workflows again with `headSha` equal to exact `main`.
+3. Merge, then pass both workflows again with `headSha` equal to the merged
+   `main` commit.
 4. Run two consecutive aggregate candidate gates for that identity.
-5. Optionally run the untagged exact-SHA release snapshot.
-6. Create `v0.2.7` only after the exact-main gates pass.
+5. Optionally run the untagged release snapshot for the candidate SHA.
+6. Create `v0.2.7` only after the `main` gates pass.
 7. Build the protected non-public draft, signatures, attestations, checksums,
    SPDX SBOMs, and release manifest.
 8. Independently download and authenticate all draft assets, run all seven
@@ -158,37 +139,24 @@ pgworkbench evidence controls attach --index index-rN.json \
   --evidence-file ... --evidence-ref ... --output index-rN+1.json
 ```
 
-Candidate identity is derived from verified release artifacts. Version, commit,
-pack identity, and asset fingerprint are never accepted as unrelated free-text
-values. The asset fingerprint is recomputed from the typed 16-asset provider
-inventory with the same canonical algorithm as the release workflow. Offline
-initialization proves local byte/content binding, not GitHub or Sigstore
-authenticity; those remain separate gates. Gate attachment rehashes a supplied
-downloaded object and records its durable URI separately from the local
-verification path. Every mutation creates a new index revision bound to the
-exact previous index digest; an existing index is never rewritten in place.
-The predecessor and successor names are canonical `index-r<N>.json` and
-`index-r<N+1>.json` in one directory, giving concurrent local writers one
-exclusive destination. The directory and predecessor inode stay pinned while
-the successor is staged, linked, confirmed, cleaned, and fsynced with
-descriptor-relative operations; pathname replacement cannot redirect the
-write. A copied chain can still fork in another directory; lineage makes that
-fork detectable but does not claim a distributed global compare-and-swap head.
+Candidate identity comes from the verified release manifest and typed 16-asset
+inventory; version, commit, pack identity, and fingerprint are not caller
+supplied. Offline initialization proves local byte binding, while GitHub and
+Sigstore authenticity remain separate gates. Each attachment rehashes the
+downloaded record, stores its durable URI, and writes the next canonical
+`index-r<N+1>.json` revision without replacing its predecessor. The local
+writer prevents pathname redirection and same-directory collisions. Lineage
+detects a copied fork but is not a distributed global-head protocol.
 
 The first adapter accepts only
 `pgworkbench.release-external-driver-verification/v1`, emitted after the
-read-only workflow has reverified the draft candidate, authenticated release
-archive and manifest, metadata-only provider artifact, exact three-driver set,
-and bounded non-performance assurance facts. An Actions artifact is transport,
-not a durable reference. The CLI rejects Actions transport URLs and reports
-durability and remote authenticity separately as operator-asserted and
-unverified because it does not fetch the URI. The successor upgrades the chain
-to v3 and stores both the typed record identity and that exact trust class. It
-appears in `unqualified_evidence`; a positive typed record closes its
-record-level check but cannot produce release `GO`. V3 exposes no self-declared
-verified value. A future proof-backed assurance class lands only with an
-adapter that independently verifies durable remote presence, exact digest,
-producer identity, and the remote object binding.
+read-only workflow verifies the draft, release archive and manifest,
+metadata-only provider artifact, and three-driver set. Actions artifacts are
+transport, not durable references. Because the CLI does not fetch the URI, the
+v3 index records the operator's durability claim, leaves remote authenticity
+unverified, and lists a passed record in `unqualified_evidence`; it cannot
+produce `GO`. A stronger assurance class requires independent verification of
+the remote object, digest, and producer.
 
 ### M1.3 Pilot and critical-review readers
 
@@ -204,18 +172,14 @@ pgworkbench evidence bundle create <index.json> <bundle.tar.gz>
 pgworkbench evidence bundle verify <extracted-root>
 ```
 
-The deterministic bundle contains only project-authored evidence records and a
+The deterministic bundle contains the contiguous `index-r0.json` through
+`index-r<N>.json` chain and a
 [`release-evidence-bundle.json`](../schemas/release-evidence-bundle-inventory.schema.json)
-closed inventory. The flat archive preserves the exact contiguous
-`index-r0.json` through `index-r<N>.json` bytes and never rewrites durable
-references into local paths or imports the externally referenced evidence
-objects. `N` selects an explicit immutable prefix rather than claiming a
-globally current head. The verifier rejects missing, extra, transplanted,
-duplicate, symlinked, mode-drifted, or digest-changed records after relocation.
-The schema and implementation are present, and the exit matrix below passes on
-the supported native and cross-build paths. M1.4 is complete for this bounded
-internal-closure claim; M1 remains open until its other evidence and adoption
-gates close.
+inventory. It preserves index bytes and durable references but does not import
+the referenced objects or claim that `N` is a global head. Verification rejects
+missing, extra, transplanted, duplicate, symlinked, mode-drifted, and
+digest-changed records after relocation. The detailed contract is in
+[`release-evidence.md`](release-evidence.md#closed-evidence-bundle-contract).
 
 Exit gate:
 
@@ -453,7 +417,7 @@ requires one immutable candidate with:
 
 - all local, publication, draft/public artifact, compatibility, signature,
   provenance, and durable-evidence gates complete;
-- two bounded external users;
+- two external pilot users;
 - one non-maintainer-authored or modified scenario created without maintainer
   shell access and independently verified from its bundle;
 - a signed critical review with no open or accepted critical security,
@@ -476,43 +440,20 @@ them as supported.
 - no UI, SaaS control plane, or Kubernetes scheduler before evidence and pilot
   demand justifies them.
 
-## Immediate implementation slice
+## Next implementation slice
 
-The current M1.2b tranche establishes the attachment substrate:
+The M1 readers, adapters, and bundle format are implemented. The remaining M1
+work is:
 
-1. completed: a closed adapter registry instead of a generic user-authored
-   `passed` flag;
-2. completed: one pinned parse/hash snapshot for the predecessor and evidence
-   record, strict v3 lineage with v2-to-v3 migration, canonical adjacent
-   revision names, inode-pinned descriptor-relative publication, and exclusive
-   copy-on-write semantics;
-3. completed: the first candidate-bound pass-only adapter for the draft
-   external-driver qualification, including its typed workflow producer;
-4. completed: independently separated recorded, readiness, and effective
-   authorization decisions; legacy v1/v2 `GO` remains readable but is not
-   grandfathered when its evidence lacks persisted trust metadata, and one
-   passed current record leaves the release `NO-GO`;
-5. completed: candidate-bound draft/public asset-authenticity summaries and
-   adapters plus a self-contained publication record emitted only by the fresh
-   read-only public verifier; all three outcomes remain operator-attested and
-   non-authorizing;
-6. completed: typed source/draft/published compatibility and aggregate-attempt
-   records are sealed post-draft over exact provider artifact identities; the
-   second aggregate record hash-binds the first. All remain operator-attested
-   and non-authorizing;
-7. completed: preventive controls have a separate candidate-bound record and
-   atomic three-control adapter over a fresh post-draft live observation. The
-   final publisher consumes the exact sealed artifact and rechecks live state;
-   raw directories, workflow success, and pre-draft snapshots alone remain
-   insufficient;
-8. completed: the verifier and closed bundle accept only the exact registered
-   atomic transition, with standalone, tamper, no-clobber, and publication-fault
-   coverage. M1.2 is code-complete while real durable evidence and a
-   proof-backed authorization class remain later live gates.
+1. attach real release records from durable locations;
+2. complete two external pilots, including one scenario authored or modified
+   without maintainer shell access and independently reproduced;
+3. add an adapter that independently verifies remote retention, producer
+   identity, and digest binding;
+4. close M1 with a relocated bundle and independently derived decision.
 
-M1.3 typed pilot/critical-review readers and M1.4 relocated closed bundles then
-complete the control plane. M2.1 A/A calibration starts only after the M1 exit
-gate can retain and independently reverify its own release/adoption state.
+M2.1 A/A calibration starts after the M1 release and adoption state can be
+retained and independently reverified.
 
 ## Method references
 

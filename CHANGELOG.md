@@ -6,30 +6,25 @@
 
 ### Added
 
-- Added deterministic, relocatable release-evidence bundles that preserve an
-  exact contiguous index revision chain and independently reject inventory,
-  lineage, transition, path, mode, identity, and byte tampering.
-- Added a candidate-bound preventive-controls verification record and atomic
-  three-control attachment. The protected release workflow seals exact source
-  artifacts, rechecks the draft candidate, and compares final live controls
-  immediately before publication while retaining a non-authorizing,
-  operator-attested assurance boundary.
+- Added relocatable release-evidence bundles with deterministic archives.
+  Verification checks the revision chain, inventory, identity, paths, modes,
+  and file contents.
+- Added one record covering tag rules, bypass review, and immutable releases.
+  Attaching it updates all three states together. Before publishing, the
+  workflow binds the record to the source artifacts and draft candidate, then
+  checks the live controls again. This records what the workflow observed; it
+  does not authorize publication.
 
 ### Fixed
 
-- Removed globally fixed Docker container names so independent checkouts use
-  Compose project-scoped container identities. Concurrent checkouts can run
-  together when they resolve to distinct Compose project identities and use
-  distinct published ports through the existing `POSTGRES_*_PORT` and
-  `PGBOUNCER_PORT` overrides; the release runbook now allocates and validates
-  that isolated environment. Exact benchmark and operation runners now carry
-  their runner-owned port overrides across the scrubbed environment boundary;
-  operation evidence retains one typed six-port snapshot bound to every linked
-  run, and PgBouncer benchmarks reject colliding active endpoints before
-  reserving evidence. v0.2.7 readers retain exact v1 manifest/series support;
-  direct-PostgreSQL benchmark producers stay on v1, while PgBouncer benchmark
-  and operation producers emit v2 evidence that older strict verifiers reject
-  by design.
+- Removed fixed Docker container names. Concurrent checkouts now use separate
+  Compose projects and published ports. The release runbook assigns the ports
+  and validates the resulting project.
+- Benchmark and operation runners now preserve their assigned ports when they
+  start child runs. Operation evidence binds one six-port snapshot to every
+  linked run, and PgBouncer benchmarks reject an endpoint already in use.
+  v0.2.7 still reads v1 run manifests and benchmark series; direct PostgreSQL
+  benchmarks emit v1, while PgBouncer and operation benchmarks emit v2.
 
 ## [0.2.6] - 2026-08-18
 
