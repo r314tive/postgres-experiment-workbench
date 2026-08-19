@@ -118,6 +118,11 @@ type bundleSnapshot struct {
 	sourceInfo   os.FileInfo
 }
 
+type bundleFilePin struct {
+	description string
+	file        *os.File
+}
+
 type bundleCreateHooks struct {
 	beforeStageVerify   func(string) error
 	afterStageVerify    func(string) error
@@ -158,7 +163,7 @@ func CreateBundle(headIndex, output string) (BundleCreateResult, error) {
 	return createBundle(headIndex, output, bundleCreateHooks{})
 }
 
-func createBundle(headIndex, output string, hooks bundleCreateHooks) (BundleCreateResult, error) {
+func createBundle(headIndex, output string, hooks bundleCreateHooks) (returned BundleCreateResult, returnErr error) {
 	if headIndex == "" || output == "" {
 		return BundleCreateResult{}, fmt.Errorf("head index and bundle output are required")
 	}
@@ -190,10 +195,27 @@ func createBundle(headIndex, output string, hooks bundleCreateHooks) (BundleCrea
 	if err := verifyBundleSourceNames(directory, wantNames); err != nil {
 		return BundleCreateResult{}, err
 	}
-	snapshots, err := readBundleChain(directory, headRevision)
+	snapshots, sourcePins, err := readBundleChain(directory, headRevision)
 	if err != nil {
 		return BundleCreateResult{}, err
 	}
+	defer func() {
+		closeErr := closeBundleFilePins(sourcePins)
+		if closeErr == nil {
+			return
+		}
+		closeErr = fmt.Errorf("close pinned release evidence source chain: %w", closeErr)
+		if returned.Digest == "" {
+			returnErr = errors.Join(returnErr, closeErr)
+			return
+		}
+		var committed *BundleCommittedError
+		if errors.As(returnErr, &committed) {
+			returnErr = &BundleCommittedError{Result: returned, Err: errors.Join(committed.Err, closeErr)}
+			return
+		}
+		returnErr = &BundleCommittedError{Result: returned, Err: errors.Join(returnErr, closeErr)}
+	}()
 
 	stage, err := os.MkdirTemp("", ".pgworkbench-release-evidence-bundle-*")
 	if err != nil {
@@ -384,8 +406,22 @@ func VerifyBundle(root string) (BundleVerification, error) {
 	return verifyBundle(root, bundleVerifyHooks{})
 }
 
-func verifyBundle(root string, hooks bundleVerifyHooks) (BundleVerification, error) {
-	result := BundleVerification{Issues: []string{}}
+func verifyBundle(root string, hooks bundleVerifyHooks) (result BundleVerification, returnErr error) {
+	result = BundleVerification{Issues: []string{}}
+	pins := make([]bundleFilePin, 0)
+	defer func() {
+		closeErr := closeBundleFilePins(pins)
+		if closeErr == nil {
+			return
+		}
+		closeErr = fmt.Errorf("close pinned release evidence bundle entries: %w", closeErr)
+		if returnErr != nil {
+			returnErr = errors.Join(returnErr, closeErr)
+			return
+		}
+		result.Issues = append(result.Issues, closeErr.Error())
+		result = finalizeBundleVerification(result)
+	}()
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return result, fmt.Errorf("resolve evidence bundle root: %w", err)
@@ -416,18 +452,17 @@ func verifyBundle(root string, hooks bundleVerifyHooks) (BundleVerification, err
 		result.Issues = append(result.Issues, err.Error())
 		return finalizeBundleVerification(result), nil
 	}
+	pins = append(pins, bundleFilePin{description: BundleInventoryName, file: inventoryFile})
 	inventoryInfo, inspectErr := inventoryFile.Stat()
 	if inspectErr != nil {
-		_ = inventoryFile.Close()
 		return result, fmt.Errorf("inspect evidence bundle inventory: %w", inspectErr)
 	}
 	if inventoryInfo.Mode() != os.FileMode(bundleFileMode) || !inventoryInfo.Mode().IsRegular() || bundleFileHasMultipleLinks(inventoryInfo) {
 		result.Issues = append(result.Issues, "release evidence bundle inventory must be one regular non-hardlinked file with mode 0644")
 	}
 	inventoryContent, readErr := strictjson.ReadOpenedFile(inventoryFile, maxBundleInventoryBytes)
-	closeErr := inventoryFile.Close()
-	if readErr != nil || closeErr != nil {
-		result.Issues = append(result.Issues, errors.Join(readErr, closeErr).Error())
+	if readErr != nil {
+		result.Issues = append(result.Issues, readErr.Error())
 		return finalizeBundleVerification(result), nil
 	}
 	var inventory BundleInventory
@@ -482,9 +517,9 @@ func verifyBundle(root string, hooks bundleVerifyHooks) (BundleVerification, err
 			result.Issues = append(result.Issues, want.Path+": "+err.Error())
 			continue
 		}
+		pins = append(pins, bundleFilePin{description: want.Path, file: file})
 		info, inspectErr := file.Stat()
 		if inspectErr != nil {
-			_ = file.Close()
 			result.Issues = append(result.Issues, want.Path+": "+inspectErr.Error())
 			continue
 		}
@@ -492,9 +527,8 @@ func verifyBundle(root string, hooks bundleVerifyHooks) (BundleVerification, err
 			result.Issues = append(result.Issues, want.Path+": mode, type, or hardlink count does not match the closed inventory")
 		}
 		content, readErr := strictjson.ReadOpenedFile(file, maxIndexBytes)
-		closeErr := file.Close()
-		if readErr != nil || closeErr != nil {
-			result.Issues = append(result.Issues, want.Path+": "+errors.Join(readErr, closeErr).Error())
+		if readErr != nil {
+			result.Issues = append(result.Issues, want.Path+": "+readErr.Error())
 			continue
 		}
 		digest := digestExactBytes(content)
@@ -652,47 +686,57 @@ func openPinnedBundleDirectory(path string) (*os.File, error) {
 	return directory, nil
 }
 
-func readBundleChain(directory *os.File, headRevision int64) ([]bundleSnapshot, error) {
-	snapshots := make([]bundleSnapshot, 0, headRevision+1)
+func readBundleChain(directory *os.File, headRevision int64) (snapshots []bundleSnapshot, pins []bundleFilePin, returnErr error) {
+	snapshots = make([]bundleSnapshot, 0, headRevision+1)
+	pins = make([]bundleFilePin, 0, headRevision+1)
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		closeErr := closeBundleFilePins(pins)
+		snapshots = nil
+		pins = nil
+		if closeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close release evidence source pins after failure: %w", closeErr))
+		}
+	}()
 	var total int64
 	for revision := int64(0); revision <= headRevision; revision++ {
 		name := bundleIndexName(revision)
 		file, err := openReadOnlyEntryAt(directory, name, "release evidence index")
 		if err != nil {
-			return nil, err
+			return snapshots, pins, err
 		}
+		pins = append(pins, bundleFilePin{description: name, file: file})
 		info, inspectErr := file.Stat()
 		if inspectErr != nil {
-			_ = file.Close()
-			return nil, fmt.Errorf("inspect %s: %w", name, inspectErr)
+			return snapshots, pins, fmt.Errorf("inspect %s: %w", name, inspectErr)
 		}
 		if !info.Mode().IsRegular() || info.Mode() != os.FileMode(bundleFileMode) || bundleFileHasMultipleLinks(info) {
-			_ = file.Close()
-			return nil, fmt.Errorf("%s must be one regular non-hardlinked file with mode 0644", name)
+			return snapshots, pins, fmt.Errorf("%s must be one regular non-hardlinked file with mode 0644", name)
 		}
 		content, readErr := strictjson.ReadOpenedFile(file, maxIndexBytes)
-		closeErr := file.Close()
-		if readErr != nil || closeErr != nil {
-			return nil, fmt.Errorf("read %s: %w", name, errors.Join(readErr, closeErr))
+		if readErr != nil {
+			return snapshots, pins, fmt.Errorf("read %s: %w", name, readErr)
 		}
 		total += int64(len(content))
 		if total > maxBundleEvidenceBytes {
-			return nil, fmt.Errorf("release evidence chain exceeds %d bytes", maxBundleEvidenceBytes)
+			return snapshots, pins, fmt.Errorf("release evidence chain exceeds %d bytes", maxBundleEvidenceBytes)
 		}
 		index, err := Parse(content)
 		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", name, err)
+			return snapshots, pins, fmt.Errorf("parse %s: %w", name, err)
 		}
 		canonical, err := encodeIndex(index)
 		if err != nil {
-			return nil, err
+			return snapshots, pins, err
 		}
 		if !bytes.Equal(canonical, content) {
-			return nil, fmt.Errorf("%s is not in canonical project encoding", name)
+			return snapshots, pins, fmt.Errorf("%s is not in canonical project encoding", name)
 		}
 		verification := Verify(index)
 		if !verification.Valid {
-			return nil, fmt.Errorf("%s is invalid: %s", name, joinIssues(verification.Issues))
+			return snapshots, pins, fmt.Errorf("%s is invalid: %s", name, joinIssues(verification.Issues))
 		}
 		snapshots = append(snapshots, bundleSnapshot{
 			file: BundleFile{
@@ -709,9 +753,23 @@ func readBundleChain(directory *os.File, headRevision int64) ([]bundleSnapshot, 
 		})
 	}
 	if issues := verifyBundleChain(snapshots); len(issues) != 0 {
-		return nil, fmt.Errorf("release evidence chain is invalid: %s", joinIssues(issues))
+		return snapshots, pins, fmt.Errorf("release evidence chain is invalid: %s", joinIssues(issues))
 	}
-	return snapshots, nil
+	return snapshots, pins, nil
+}
+
+func closeBundleFilePins(pins []bundleFilePin) error {
+	var closeErr error
+	for index := range pins {
+		if pins[index].file == nil {
+			continue
+		}
+		if err := pins[index].file.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close pinned %s: %w", pins[index].description, err))
+		}
+		pins[index].file = nil
+	}
+	return closeErr
 }
 
 func verifyBundleChain(snapshots []bundleSnapshot) []string {

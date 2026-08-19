@@ -130,7 +130,7 @@ func TestPublishBundleArchiveAtDetectsReplacementDuringStagingCleanup(t *testing
 		if err := os.Remove(output); err != nil {
 			return err
 		}
-		return os.WriteFile(output, []byte("replacement during cleanup\n"), 0o644)
+		return os.WriteFile(output, content, 0o644)
 	}
 	published, err := publishBundleArchiveAtWithOperations(directory, filepath.Base(output), output, content, result, nil, operations)
 	var committed *BundleCommittedError

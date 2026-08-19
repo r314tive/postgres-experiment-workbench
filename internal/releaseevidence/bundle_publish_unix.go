@@ -79,7 +79,6 @@ func publishBundleArchiveAtWithOperations(
 		return BundleCreateResult{}, errors.Join(err, wrapCloseError(closeErr), cleanupErr)
 	}
 
-	closeErr := wrapCloseError(stagedFile.Close())
 	cleanupErr := cleanupStaging()
 	syncErr := operations.syncDirectory(directory)
 	if syncErr != nil {
@@ -91,10 +90,12 @@ func publishBundleArchiveAtWithOperations(
 			hookErr = fmt.Errorf("prepare evidence bundle post-publication confirmation: %w", err)
 		}
 	}
-	// Reopen only after the staging name is removed and the directory has been
-	// synced. A replacement during cleanup or persistence must not inherit a
-	// previously successful confirmation.
+	// Keep the staged descriptor open while removing its temporary name and
+	// reopening the destination. Besides retaining the verified bytes, this pins
+	// the original inode so an unlink/recreate cycle cannot exploit Linux inode
+	// number reuse and satisfy os.SameFile with a different file.
 	confirmationErr := verifyPublishedBundleArchiveAt(directoryFD, outputName, stagedInfo, content, operations)
+	closeErr := wrapCloseError(stagedFile.Close())
 	if committedErr := errors.Join(confirmationErr, closeErr, cleanupErr, syncErr, hookErr); committedErr != nil {
 		return result, &BundleCommittedError{Result: result, Err: committedErr}
 	}
